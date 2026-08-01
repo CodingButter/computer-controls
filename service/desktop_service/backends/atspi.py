@@ -244,6 +244,17 @@ def list_windows(application_id_filter: str | None = None) -> list[dict[str, Any
     return windows
 
 
+def application_pids() -> dict[str, int]:
+    """Which process each application on this desktop is.
+
+    Applications, not windows: the walk stops one level up from `list_windows`, so asking
+    who owns a window costs an application enumeration rather than a full window walk.
+    """
+    return {
+        application_id(app): _safe(app.get_process_id, 0) or 0 for app in _iter_desktop_apps()
+    }
+
+
 def find_application(app_id: str) -> Atspi.Accessible | None:
     for app in _iter_desktop_apps():
         if application_id(app) == app_id:

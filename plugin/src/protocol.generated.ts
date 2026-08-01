@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 7f24dc637f2a4cae
+// Protocol version: 1.0   schema sha256: 34c4b103b736cea6
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "7f24dc637f2a4cae" as const;
+export const SCHEMA_DIGEST = "34c4b103b736cea6" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -302,6 +302,17 @@ export interface InvokeElementParams {
 }
 export type InvokeElementResult = ActionResult;
 
+/** Start an installed application by its entry id. Takes an id from listInstallableApplications and nothing else — no command, no arguments, no path — for the same reason captureWindow takes a window id instead of coordinates: a method that accepts a string to execute is a shell, not a desktop. (operation class: activate) */
+export interface LaunchApplicationParams {
+  /** An id from listInstallableApplications. An id absent from that list is refused rather than attempted. */
+  applicationEntryId: string;
+  clientId?: string;
+  confirm?: boolean;
+  /** Quiet period the service waits for before reporting effects. A cold-starting application usually outlasts it; wait on window-opened rather than raising this. */
+  settleMs?: number;
+}
+export type LaunchApplicationResult = ActionResult;
+
 /** Applications currently running on the desktop. (operation class: observe) */
 export interface ListApplicationsParams {
   clientId?: string;
@@ -320,6 +331,23 @@ export interface ListApplicationsResult {
       version: string;
     };
     windowCount?: number;
+  }[];
+  backend: string;
+  revision?: number;
+}
+
+/** The applications this desktop can start, as the desktop itself describes them. The only source of ids launchApplication will accept. (operation class: observe) */
+export interface ListInstallableApplicationsParams {
+  clientId?: string;
+  /** Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. */
+  confirm?: boolean;
+}
+export interface ListInstallableApplicationsResult {
+  applications: {
+    description?: string;
+    /** The desktop entry id. An opaque handle to the caller: it names an application, it does not describe how to run one. */
+    id: string;
+    name: string;
   }[];
   backend: string;
   revision?: number;
@@ -444,7 +472,7 @@ export interface WaitForResult {
   waitedMs: number;
 }
 
-export type MethodName = "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "listApplications" | "listWindows" | "performActions" | "queryElements" | "setElementValue" | "setObservationMode" | "waitFor";
+export type MethodName = "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "setElementValue" | "setObservationMode" | "waitFor";
 
 export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   focusWindow: "activate",
@@ -457,7 +485,9 @@ export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   inspectElement: "observe",
   inspectWindow: "observe",
   invokeElement: "submit",
+  launchApplication: "activate",
   listApplications: "observe",
+  listInstallableApplications: "observe",
   listWindows: "observe",
   performActions: "submit",
   queryElements: "observe",
@@ -477,7 +507,9 @@ export interface MethodMap {
   inspectElement: { params: InspectElementParams; result: InspectElementResult };
   inspectWindow: { params: InspectWindowParams; result: InspectWindowResult };
   invokeElement: { params: InvokeElementParams; result: InvokeElementResult };
+  launchApplication: { params: LaunchApplicationParams; result: LaunchApplicationResult };
   listApplications: { params: ListApplicationsParams; result: ListApplicationsResult };
+  listInstallableApplications: { params: ListInstallableApplicationsParams; result: ListInstallableApplicationsResult };
   listWindows: { params: ListWindowsParams; result: ListWindowsResult };
   performActions: { params: PerformActionsParams; result: PerformActionsResult };
   queryElements: { params: QueryElementsParams; result: QueryElementsResult };

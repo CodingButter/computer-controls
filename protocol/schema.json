@@ -766,6 +766,66 @@
         "required": ["windows", "activeWindowId", "revision"],
         "additionalProperties": false
       }
+    },
+
+    "listInstallableApplications": {
+      "operationClass": "observe",
+      "summary": "The applications this desktop can start, as the desktop itself describes them. The only source of ids launchApplication will accept.",
+      "params": {
+        "type": "object",
+        "properties": { "clientId": { "type": "string" } },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "applications": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "The desktop entry id. An opaque handle to the caller: it names an application, it does not describe how to run one."
+                },
+                "name": { "type": "string" },
+                "description": { "type": "string" }
+              },
+              "required": ["id", "name"],
+              "additionalProperties": false
+            }
+          },
+          "backend": { "type": "string" },
+          "revision": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["applications", "backend"],
+        "additionalProperties": false
+      }
+    },
+
+    "launchApplication": {
+      "operationClass": "activate",
+      "summary": "Start an installed application by its entry id. Takes an id from listInstallableApplications and nothing else — no command, no arguments, no path — for the same reason captureWindow takes a window id instead of coordinates: a method that accepts a string to execute is a shell, not a desktop.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "applicationEntryId": {
+            "type": "string",
+            "description": "An id from listInstallableApplications. An id absent from that list is refused rather than attempted."
+          },
+          "settleMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "Quiet period the service waits for before reporting effects. A cold-starting application usually outlasts it; wait on window-opened rather than raising this."
+          },
+          "confirm": { "type": "boolean" },
+          "clientId": { "type": "string" }
+        },
+        "required": ["applicationEntryId"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/actionResult" }
     }
   }
 }

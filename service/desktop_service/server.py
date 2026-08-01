@@ -18,7 +18,7 @@ import time
 from typing import Any
 
 from . import actions, capabilities, deltas, inspect as inspection, state, waitfor, watch
-from .backends import atspi, loop, x11
+from .backends import atspi, launcher, loop, x11
 from .errors import DesktopError, ErrorCode, InvalidParams
 from .registry import ElementRegistry
 from .session import Session
@@ -601,6 +601,130 @@ def _method_get_desktop_state(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _method_list_installable_applications(_params: dict[str, Any]) -> dict[str, Any]:
+    applications = loop.call_on_loop(launcher.list_installable)
+    return {
+        "applications": applications,
+        "backend": launcher.BACKEND_NAME,
+        "revision": _registry.revision,
+    }
+
+
+def _method_launch_application(params: dict[str, Any]) -> dict[str, Any]:
+    """Start an application, and report the window it produced as this action's doing.
+
+    The id is checked against the enumeration before anything is attempted. Refusing an
+    unknown id is not defensive tidiness: the enumeration is what makes this method a
+    launcher rather than an executor, and a launch that fell back to trying the string
+    some other way would quietly give that guarantee up.
+    """
+    entry_id = _str_param(params, "applicationEntryId", required=True)
+
+    if not loop.call_on_loop(lambda: launcher.exists(entry_id)):
+        raise DesktopError(
+            ErrorCode.APPLICATION_NOT_FOUND,
+            f"No installed application has the entry id {entry_id!r}",
+            {
+                "applicationEntryId": entry_id,
+                "hint": "ids come from listInstallableApplications",
+            },
+        )
+
+    watch = _LaunchWatch()
+
+    def start() -> bool:
+        watch.pid = loop.call_on_loop(lambda: launcher.launch(entry_id))
+        return watch.pid > 0
+
+    bounds = _settle_bounds(params)
+    bounds.setdefault("ceiling_ms", LAUNCH_CEILING_MS)
+    result = actions.perform(
+        "launchApplication",
+        entry_id,
+        [actions.Attempt(launcher.BACKEND_NAME, start)],
+        _snapshot,
+        _action_log,
+        client_id=_client_id(params),
+        # Empty on purpose: a launch has no target window to be scoped to yet. The
+        # scope is adopted below, from the window the launch was seen to open — the
+        # one case where an action's causal scope is only knowable after the fact.
+        scope=("", ""),
+        until=watch.window_arrived,
+        **bounds,
+    )
+    _adopt_launched_scope(result, watch)
+    return result
+
+
+#: A cold start is slower than any interaction, and slower than the settling ceiling that
+#: fits one. Still under the client's request timeout, so a launch that never opens a
+#: window comes back as an honest empty result rather than a dead socket.
+LAUNCH_CEILING_MS = 10000
+
+
+class _LaunchWatch:
+    """Recognises the window a launch opened, by process rather than by timing.
+
+    The temptation is to claim the first window that appears after a launch. That is the
+    exact mistake attribution exists to prevent: a window the user opened while an
+    application was starting would be claimed by the agent, and the agent would go on to
+    act inside it believing it was its own. So the test is descent from the process we
+    started — identity, with the ceiling only bounding how long we are willing to wait
+    for it.
+
+    A launch that yields no process id claims nothing. That happens for D-Bus activated
+    applications, where the bus starts the program and does not report whose it is; the
+    honest consequence is that the window arrives as `external` and the agent has to look
+    for it, which is worse than claiming it and far better than claiming the wrong one.
+    """
+
+    def __init__(self) -> None:
+        self.pid = 0
+        self.window_id = ""
+        self.application_id = ""
+        self._before: state.Snapshot | None = None
+
+    def window_arrived(self, snapshot: state.Snapshot) -> bool:
+        if self._before is None:
+            self._before = snapshot
+            return False
+        if self.window_id:
+            return True
+        if self.pid <= 0:
+            # Nothing to recognise. Waiting would only delay an answer we cannot improve.
+            return True
+        fresh = [
+            facts for window_id, facts in snapshot.windows.items()
+            if window_id not in self._before.windows
+        ]
+        if not fresh:
+            return False
+        owners = loop.call_on_loop(atspi.application_pids)
+        for facts in fresh:
+            if launcher.descends_from(owners.get(facts.application_id, 0), self.pid):
+                self.window_id = facts.window_id
+                self.application_id = facts.application_id
+                return True
+        return False
+
+
+def _adopt_launched_scope(result: dict[str, Any], watch: _LaunchWatch) -> None:
+    """Claim the window a launch opened, so later changes in it read as this agent's.
+
+    Without this the application the agent just started would announce itself to that
+    same agent as somebody else's news. A launch that opened no window this service can
+    claim claims nothing: the scope stays empty, and the window is attributed to whoever
+    it actually belongs to rather than to whoever happened to be acting.
+    """
+    if not watch.window_id:
+        return
+    record = _action_log.latest()
+    if record is None or record.action_id != result.get("actionId"):
+        return
+    record.scope_window_id = watch.window_id
+    record.scope_application_id = watch.application_id
+
+
 def _method_set_observation_mode(params: dict[str, Any]) -> dict[str, Any]:
     return {**_session.set_observation_mode(params), "revision": _registry.revision}
 
@@ -672,6 +796,8 @@ def build_server(socket_path: str) -> JsonRpcServer:
     server.register("waitFor", _method_wait_for)
     server.register("getDeltaSince", _method_get_delta_since)
     server.register("getDesktopState", _method_get_desktop_state)
+    server.register("listInstallableApplications", _method_list_installable_applications)
+    server.register("launchApplication", _method_launch_application)
     return base
 
 

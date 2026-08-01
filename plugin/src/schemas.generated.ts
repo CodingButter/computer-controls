@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 7f24dc637f2a4cae
+// Protocol version: 1.0   schema sha256: 34c4b103b736cea6
 
 import { z } from "mastracode/plugin";
 
@@ -204,6 +204,14 @@ export const invokeElementParams = z.object({
 });
 export const invokeElementResult = z.record(z.string(), z.unknown());
 
+export const launchApplicationParams = z.object({
+  applicationEntryId: z.string().describe("An id from listInstallableApplications. An id absent from that list is refused rather than attempted."),
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  settleMs: z.number().int().min(0).max(10000).describe("Quiet period the service waits for before reporting effects. A cold-starting application usually outlasts it; wait on window-opened rather than raising this.").optional(),
+});
+export const launchApplicationResult = z.record(z.string(), z.unknown());
+
 export const listApplicationsParams = z.object({
   clientId: z.string().optional(),
   confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
@@ -222,6 +230,20 @@ export const listApplicationsResult = z.object({
   })),
   backend: z.string(),
   revision: z.number().int().optional(),
+});
+
+export const listInstallableApplicationsParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+});
+export const listInstallableApplicationsResult = z.object({
+  applications: z.array(z.object({
+    description: z.string().optional(),
+    id: z.string().describe("The desktop entry id. An opaque handle to the caller: it names an application, it does not describe how to run one."),
+    name: z.string(),
+  })),
+  backend: z.string(),
+  revision: z.number().int().min(0).optional(),
 });
 
 export const listWindowsParams = z.object({

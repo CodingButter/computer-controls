@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: 7f24dc637f2a4cae
+# Protocol version: 1.0   schema sha256: 34c4b103b736cea6
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "7f24dc637f2a4cae"
+SCHEMA_DIGEST: Final = "34c4b103b736cea6"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -44,7 +44,9 @@ OPERATION_CLASS: Final[dict[str, str]] = {
     "inspectElement": "observe",
     "inspectWindow": "observe",
     "invokeElement": "submit",
+    "launchApplication": "activate",
     "listApplications": "observe",
+    "listInstallableApplications": "observe",
     "listWindows": "observe",
     "performActions": "submit",
     "queryElements": "observe",
@@ -295,7 +297,45 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "launchApplication": {
+        "additionalProperties": False,
+        "properties": {
+            "applicationEntryId": {
+                "description": "An id from listInstallableApplications. An id absent from that list is refused rather than attempted.",
+                "type": "string",
+            },
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "settleMs": {
+                "description": "Quiet period the service waits for before reporting effects. A cold-starting application usually outlasts it; wait on window-opened rather than raising this.",
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "applicationEntryId",
+        ],
+        "type": "object",
+    },
     "listApplications": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+        },
+        "type": "object",
+    },
+    "listInstallableApplications": {
         "additionalProperties": False,
         "properties": {
             "clientId": {
@@ -837,6 +877,9 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
     "invokeElement": {
         "$ref": "#/$defs/actionResult",
     },
+    "launchApplication": {
+        "$ref": "#/$defs/actionResult",
+    },
     "listApplications": {
         "additionalProperties": False,
         "properties": {
@@ -891,6 +934,46 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 "type": "string",
             },
             "revision": {
+                "type": "integer",
+            },
+        },
+        "required": [
+            "applications",
+            "backend",
+        ],
+        "type": "object",
+    },
+    "listInstallableApplications": {
+        "additionalProperties": False,
+        "properties": {
+            "applications": {
+                "items": {
+                    "additionalProperties": False,
+                    "properties": {
+                        "description": {
+                            "type": "string",
+                        },
+                        "id": {
+                            "description": "The desktop entry id. An opaque handle to the caller: it names an application, it does not describe how to run one.",
+                            "type": "string",
+                        },
+                        "name": {
+                            "type": "string",
+                        },
+                    },
+                    "required": [
+                        "id",
+                        "name",
+                    ],
+                    "type": "object",
+                },
+                "type": "array",
+            },
+            "backend": {
+                "type": "string",
+            },
+            "revision": {
+                "minimum": 0,
                 "type": "integer",
             },
         },

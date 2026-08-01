@@ -141,6 +141,7 @@ def perform(
     ceiling_ms: int = settle.DEFAULT_CEILING_MS,
     client_id: str = "",
     scope: tuple[str, str] = ("", ""),
+    until: Callable[[state.Snapshot], bool] | None = None,
 ) -> dict[str, Any]:
     """Run an action through the highest tier that works, then report its effects.
 
@@ -149,6 +150,12 @@ def perform(
     result where X11 answered because the accessibility tier declined is being told
     something real about the application it is driving, and hiding it behind a plain
     success would make a degraded path look blessed.
+
+    `until` is for the actions whose effect is slower than the desktop's stillness —
+    starting an application, most of all. Quiet is the wrong stopping rule there: a
+    desktop that has not launched anything yet is perfectly quiet, and an action that
+    returned at that moment would report no effects and then be told, seconds later,
+    that a window it caused belonged to somebody else.
     """
     action_id = f"act-{next(_action_ids):06d}"
     started = time.monotonic()
@@ -165,7 +172,7 @@ def perform(
             fallbacks.append(attempt.backend)
 
         settlement = settle.wait_for_quiet(
-            take_snapshot, before, quiet_ms=quiet_ms, ceiling_ms=ceiling_ms
+            take_snapshot, before, quiet_ms=quiet_ms, ceiling_ms=ceiling_ms, until=until
         )
 
     log.record(

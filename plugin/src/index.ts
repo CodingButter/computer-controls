@@ -244,6 +244,34 @@ export default defineMastraCodePlugin({
       }),
     },
 
+    desktop_list_installable_applications: {
+      tool: createTool({
+        id: "desktop_list_installable_applications",
+        description:
+          "The applications this desktop can start. The ids here are the only thing " +
+          "desktop_launch_application accepts — there is no way to ask this service to run a " +
+          "command, and that is deliberate.",
+        inputSchema: schemas.listInstallableApplicationsParams,
+        outputSchema: schemas.listInstallableApplicationsResult,
+        execute: async (input) => await request("listInstallableApplications", { ...input }),
+      }),
+    },
+
+    desktop_launch_application: {
+      tool: createTool({
+        id: "desktop_launch_application",
+        description:
+          "Start an installed application by its entry id, from the list above. The result " +
+          "reports the window it opened as your own doing, so the application you just " +
+          "started is never announced back to you as somebody else's news. A cold start often " +
+          "outlasts the settling wait — wait on window-opened rather than assuming nothing " +
+          "happened.",
+        inputSchema: schemas.launchApplicationParams,
+        outputSchema: schemas.launchApplicationResult,
+        execute: async (input) => await request("launchApplication", { ...input }),
+      }),
+    },
+
     desktop_state: {
       tool: createTool({
         id: "desktop_state",

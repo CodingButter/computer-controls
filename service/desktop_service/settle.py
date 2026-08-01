@@ -57,6 +57,7 @@ def wait_for_quiet(
     ceiling_ms: int = DEFAULT_CEILING_MS,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], float] = time.monotonic,
+    until: Callable[[state.Snapshot], bool] | None = None,
 ) -> Settlement:
     """Sample until the desktop holds still, then report what changed.
 
@@ -67,6 +68,12 @@ def wait_for_quiet(
 
     Quiet is measured from the last change, not from the start. An action whose effects
     arrive in three bursts is one action that took a while, not three settled desktops.
+
+    `until` names an effect the action is not finished without. Quiet alone is the wrong
+    stopping rule for starting an application: a desktop that has not reacted yet is
+    indistinguishable from one that never will, and both look perfectly still. An action
+    given a condition waits for it, and the ceiling — not the quiet period — is what
+    stops the wait when the effect never arrives.
     """
     started = now()
     deadline = started + ceiling_ms / 1000
@@ -75,6 +82,7 @@ def wait_for_quiet(
     latest = before
     last_change_at = started
     partial = True
+    awaited = until is None or until(before)
 
     while True:
         sleep(SAMPLE_INTERVAL_MS / 1000)
@@ -85,7 +93,10 @@ def wait_for_quiet(
             last_change_at = moment
         latest = current
 
-        if moment - last_change_at >= quiet_seconds:
+        if not awaited and until is not None:
+            awaited = until(current)
+
+        if awaited and moment - last_change_at >= quiet_seconds:
             partial = False
             break
         if moment >= deadline:
