@@ -105,5 +105,88 @@ export default defineMastraCodePlugin({
         execute: async (input) => await request("queryElements", { ...input }),
       }),
     },
+
+    desktop_inspect_element: {
+      tool: createTool({
+        id: "desktop_inspect_element",
+        description:
+          "Drill into an element you have already located: the depth budget is measured from " +
+          "that element rather than from the window. Use this when a window inspection bottoms " +
+          "out before reaching what you want — a document's text, a deeply nested list — " +
+          "because window inspection spends its depth walking down through layout containers " +
+          "and real applications put their content below what any single window walk can " +
+          "reach. Anchor on the deepest relevant thing you found, then drill.",
+        inputSchema: schemas.inspectElementParams,
+        outputSchema: schemas.inspectElementResult,
+        execute: async (input) => await request("inspectElement", { ...input }),
+      }),
+    },
+
+    desktop_focus_window: {
+      tool: createTool({
+        id: "desktop_focus_window",
+        description:
+          "Raise and focus a window by id. The result reports which tier did it and what " +
+          "changed as a result, so you do not need to list windows again to confirm.",
+        inputSchema: schemas.focusWindowParams,
+        outputSchema: schemas.focusWindowResult,
+        execute: async (input) => await request("focusWindow", { ...input }),
+      }),
+    },
+
+    desktop_invoke_element: {
+      tool: createTool({
+        id: "desktop_invoke_element",
+        description:
+          "Invoke a named action on an element — or on a window's own frame, which on GTK4 " +
+          "applications is where the entire command set lives. Actions are named, never " +
+          "indexed. If the action does not exist the error lists the ones that do. The result " +
+          "carries the effects that were observed while the action was in flight: new windows, " +
+          "focus moves, value changes. Read those instead of re-inspecting.",
+        inputSchema: schemas.invokeElementParams,
+        outputSchema: schemas.invokeElementResult,
+        execute: async (input) => await request("invokeElement", { ...input }),
+      }),
+    },
+
+    desktop_set_element_value: {
+      tool: createTool({
+        id: "desktop_set_element_value",
+        description:
+          "Set an element's text or numeric value through the toolkit directly — never by " +
+          "typing at the screen, so it does not matter where focus happens to be. The result " +
+          "reports the effects that followed, the same way invoking does.",
+        inputSchema: schemas.setElementValueParams,
+        outputSchema: schemas.setElementValueResult,
+        execute: async (input) => await request("setElementValue", { ...input }),
+      }),
+    },
+
+    desktop_perform_actions: {
+      tool: createTool({
+        id: "desktop_perform_actions",
+        description:
+          "Run several actions in one call — filling a dialog and confirming it costs one " +
+          "exchange instead of one per field. Stops at the first failure by default and tells " +
+          "you which steps ran, which failed and which were never attempted.",
+        inputSchema: schemas.performActionsParams,
+        outputSchema: schemas.performActionsResult,
+        execute: async (input) => await request("performActions", { ...input }),
+      }),
+    },
+
+    desktop_wait_for: {
+      tool: createTool({
+        id: "desktop_wait_for",
+        description:
+          "Wait for something to become true — a window opening or closing, an element " +
+          "appearing, the session advancing past a revision. Use this instead of guessing a " +
+          "duration: the waiting happens in the service and returns the moment the condition " +
+          "holds, and a timeout tells you which condition was still false.",
+        inputSchema: schemas.waitForParams,
+        outputSchema: schemas.waitForResult,
+        execute: async (input) => await request("waitFor", { ...input }),
+      }),
+    },
   },
 });

@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: f649b92ee4ded5d1
+# Protocol version: 1.0   schema sha256: ca625de3a33d563a
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "f649b92ee4ded5d1"
+SCHEMA_DIGEST: Final = "ca625de3a33d563a"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -20,24 +20,63 @@ CAPABILITY_TIERS: Final[tuple[str, ...]] = ("app-native", "accessibility", "comp
 #: How hard the service watches the desktop. Set by the client; the service reports which mode it is in. See A2 in the amendments: the runtime owns cadence because most events that justify going fast are invisible to the desktop service.
 OBSERVATION_MODES: Final[tuple[str, ...]] = ("active", "idle")
 
+#: The complete vocabulary of semantic changes. One engine produces these for both an action's observedEffects and a pushed delta, so a reader learns one vocabulary rather than two.
+CHANGE_KINDS: Final[tuple[str, ...]] = ("window-opened", "window-closed", "focus-changed", "element-appeared", "element-disappeared", "element-state-changed", "element-value-changed", "element-stale")
+
+#: Who caused a change. Three values, not two: the honest third answer exists because a revision range is a time window, and a change landing inside an action's window is not proof that the action caused it.
+ATTRIBUTIONS: Final[tuple[str, ...]] = ("self", "external", "unattributed")
+
+#: What a caller can wait for, expressed semantically. This exists so that waiting happens in the service rather than as a sleep in the model's context.
+WAIT_CONDITIONS: Final[tuple[str, ...]] = ("window-opened", "window-closed", "element-appeared", "element-state-changed", "revision-advanced")
+
 #: The complete domain error vocabulary. Carried in the JSON-RPC error object under data.code.
 ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR")
 
 #: Every method mapped to the operation class it belongs to.
 OPERATION_CLASS: Final[dict[str, str]] = {
+    "focusWindow": "activate",
     "getDesktopCapabilities": "observe",
     "getElement": "observe",
     "getRevision": "observe",
     "hello": "observe",
+    "inspectElement": "observe",
     "inspectWindow": "observe",
+    "invokeElement": "submit",
     "listApplications": "observe",
     "listWindows": "observe",
+    "performActions": "submit",
     "queryElements": "observe",
+    "setElementValue": "edit",
     "setObservationMode": "observe",
+    "waitFor": "observe",
 }
 
 #: Request schema per method, used to reject malformed calls at the boundary.
 PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
+    "focusWindow": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "settleMs": {
+                "description": "Quiet period the service waits for before reporting effects. The ceiling is protocol-visible rather than a magic number in the code.",
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer",
+            },
+            "windowId": {
+                "type": "string",
+            },
+        },
+        "required": [
+            "windowId",
+        ],
+        "type": "object",
+    },
     "getDesktopCapabilities": {
         "additionalProperties": False,
         "properties": {
@@ -107,6 +146,49 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "inspectElement": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+            "depth": {
+                "description": "How far below the anchor to walk. The same bound window inspection uses — drilling changes where a walk starts, never how far it may go.",
+                "maximum": 12,
+                "minimum": 1,
+                "type": "integer",
+            },
+            "elementId": {
+                "description": "Where the walk starts. Must come from an earlier inspection or query: there is no way to drill into something the caller has not already seen and chosen.",
+                "type": "string",
+            },
+            "excludeRoles": {
+                "items": {
+                    "type": "string",
+                },
+                "type": "array",
+            },
+            "includeRoles": {
+                "items": {
+                    "type": "string",
+                },
+                "type": "array",
+            },
+            "maxNodes": {
+                "maximum": 1000,
+                "minimum": 1,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "elementId",
+        ],
+        "type": "object",
+    },
     "inspectWindow": {
         "additionalProperties": False,
         "properties": {
@@ -148,6 +230,34 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "invokeElement": {
+        "additionalProperties": False,
+        "properties": {
+            "action": {
+                "description": "The action's own name, as reported in the element's actions list. Not an index: indices move.",
+                "type": "string",
+            },
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+            "settleMs": {
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "elementId",
+            "action",
+        ],
+        "type": "object",
+    },
     "listApplications": {
         "additionalProperties": False,
         "properties": {
@@ -175,6 +285,52 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 "type": "boolean",
             },
         },
+        "type": "object",
+    },
+    "performActions": {
+        "additionalProperties": False,
+        "properties": {
+            "actions": {
+                "items": {
+                    "additionalProperties": False,
+                    "properties": {
+                        "method": {
+                            "enum": [
+                                "focusWindow",
+                                "invokeElement",
+                                "setElementValue",
+                            ],
+                            "type": "string",
+                        },
+                        "params": {
+                            "additionalProperties": True,
+                            "type": "object",
+                        },
+                    },
+                    "required": [
+                        "method",
+                        "params",
+                    ],
+                    "type": "object",
+                },
+                "maxItems": 25,
+                "minItems": 1,
+                "type": "array",
+            },
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "stopOnFailure": {
+                "description": "When true the batch halts at the first failure and reports which actions ran. Defaults to true: continuing a sequence past a step that did not happen is rarely what anyone wants.",
+                "type": "boolean",
+            },
+        },
+        "required": [
+            "actions",
+        ],
         "type": "object",
     },
     "queryElements": {
@@ -230,6 +386,37 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "setElementValue": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+            "settleMs": {
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer",
+            },
+            "value": {
+                "description": "Text for an editable-text element, a number for a value element. The element decides which applies; a mismatch is an error rather than a coercion.",
+                "type": [
+                    "string",
+                    "number",
+                ],
+            },
+        },
+        "required": [
+            "elementId",
+            "value",
+        ],
+        "type": "object",
+    },
     "setObservationMode": {
         "additionalProperties": False,
         "properties": {
@@ -268,9 +455,64 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "waitFor": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "condition": {
+                "enum": [
+                    "window-opened",
+                    "window-closed",
+                    "element-appeared",
+                    "element-state-changed",
+                    "revision-advanced",
+                ],
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+            "name": {
+                "description": "Matched case-insensitively as a substring, the same rule queryElements uses.",
+                "type": "string",
+            },
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "role": {
+                "type": "string",
+            },
+            "state": {
+                "type": "string",
+            },
+            "timeoutMs": {
+                "maximum": 120000,
+                "minimum": 1,
+                "type": "integer",
+            },
+            "windowId": {
+                "type": "string",
+            },
+        },
+        "required": [
+            "condition",
+            "timeoutMs",
+        ],
+        "type": "object",
+    },
 }
 
 RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
+    "focusWindow": {
+        "$ref": "#/$defs/actionResult",
+    },
     "getDesktopCapabilities": {
         "additionalProperties": False,
         "properties": {
@@ -407,6 +649,36 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "inspectElement": {
+        "additionalProperties": False,
+        "properties": {
+            "backend": {
+                "type": "string",
+            },
+            "element": {
+                "$ref": "#/$defs/semanticElement",
+            },
+            "nodeCount": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "truncated": {
+                "type": "boolean",
+            },
+        },
+        "required": [
+            "element",
+            "nodeCount",
+            "truncated",
+            "revision",
+            "backend",
+        ],
+        "type": "object",
+    },
     "inspectWindow": {
         "additionalProperties": False,
         "properties": {
@@ -434,6 +706,9 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             "backend",
         ],
         "type": "object",
+    },
+    "invokeElement": {
+        "$ref": "#/$defs/actionResult",
     },
     "listApplications": {
         "additionalProperties": False,
@@ -559,6 +834,32 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "performActions": {
+        "additionalProperties": False,
+        "properties": {
+            "completed": {
+                "description": "How many of the requested actions ran. Less than the number requested means the batch stopped early.",
+                "minimum": 0,
+                "type": "integer",
+            },
+            "results": {
+                "items": {
+                    "$ref": "#/$defs/actionResult",
+                },
+                "type": "array",
+            },
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "results",
+            "completed",
+            "revision",
+        ],
+        "type": "object",
+    },
     "queryElements": {
         "additionalProperties": False,
         "properties": {
@@ -595,6 +896,9 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "setElementValue": {
+        "$ref": "#/$defs/actionResult",
+    },
     "setObservationMode": {
         "additionalProperties": False,
         "properties": {
@@ -627,9 +931,79 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "waitFor": {
+        "additionalProperties": False,
+        "properties": {
+            "change": {
+                "$ref": "#/$defs/change",
+                "description": "The change that satisfied the wait, in the same vocabulary the diff engine and the delta stream use. Absent when the condition was satisfied by the revision alone, and absent on timeout: a wait that timed out has no change to report and must not invent one.",
+            },
+            "reason": {
+                "description": "Present when the wait was not satisfied: which condition was still false. A timeout is a normal answer, and this is the part of it a caller can act on.",
+                "type": "string",
+            },
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "satisfied": {
+                "type": "boolean",
+            },
+            "waitedMs": {
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "satisfied",
+            "waitedMs",
+            "revision",
+        ],
+        "type": "object",
+    },
 }
 
 DEFS: Final[dict[str, dict[str, Any]]] = {
+    "actionResult": {
+        "additionalProperties": False,
+        "description": "The result of one action, including the effects it was seen to have. A caller that reads this does not need to re-inspect.",
+        "properties": {
+            "actionId": {
+                "description": "Identifies this action's revision range, which the delta engine reads to attribute later changes.",
+                "type": "string",
+            },
+            "backend": {
+                "type": "string",
+            },
+            "durationMs": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "error": {
+                "$ref": "#/$defs/errorData",
+            },
+            "fallbacksUsed": {
+                "items": {
+                    "type": "string",
+                },
+                "type": "array",
+            },
+            "observedEffects": {
+                "$ref": "#/$defs/observedEffects",
+            },
+            "ok": {
+                "type": "boolean",
+            },
+        },
+        "required": [
+            "actionId",
+            "ok",
+            "backend",
+            "fallbacksUsed",
+            "durationMs",
+        ],
+        "type": "object",
+    },
     "bounds": {
         "additionalProperties": False,
         "description": "Screen rectangle in pixels. Reported for orientation and for the user's benefit; it is not an addressing mechanism and no method in this protocol accepts coordinates.",
@@ -694,6 +1068,62 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "change": {
+        "additionalProperties": False,
+        "description": "One semantic change, produced by the single diff engine. Says what changed and where, never where on screen.",
+        "properties": {
+            "applicationId": {
+                "type": "string",
+            },
+            "attribution": {
+                "enum": [
+                    "self",
+                    "external",
+                    "unattributed",
+                ],
+                "type": "string",
+            },
+            "detail": {
+                "additionalProperties": True,
+                "description": "Kind-specific facts, such as the old and new value of a changed state.",
+                "type": "object",
+            },
+            "elementId": {
+                "type": "string",
+            },
+            "kind": {
+                "enum": [
+                    "window-opened",
+                    "window-closed",
+                    "focus-changed",
+                    "element-appeared",
+                    "element-disappeared",
+                    "element-state-changed",
+                    "element-value-changed",
+                    "element-stale",
+                ],
+                "type": "string",
+            },
+            "revision": {
+                "description": "The revision at which this change was observed.",
+                "minimum": 0,
+                "type": "integer",
+            },
+            "summary": {
+                "description": "One human-readable sentence. Passed through the value-egress point, because it can quote an element's name.",
+                "type": "string",
+            },
+            "windowId": {
+                "type": "string",
+            },
+        },
+        "required": [
+            "kind",
+            "revision",
+            "summary",
+        ],
+        "type": "object",
+    },
     "errorData": {
         "additionalProperties": False,
         "description": "The data member of a JSON-RPC error. The domain code lives here; the top-level code stays a reserved JSON-RPC number.",
@@ -719,9 +1149,48 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
                 "additionalProperties": True,
                 "type": "object",
             },
+            "message": {
+                "description": "Present when this error travels inside a result rather than as a JSON-RPC error. A failed step inside a batch has no top-level error member to carry its explanation, and a report that says a step failed without saying why is not worth returning.",
+                "type": "string",
+            },
         },
         "required": [
             "code",
+        ],
+        "type": "object",
+    },
+    "observedEffects": {
+        "additionalProperties": False,
+        "description": "What happened while an action was in flight. Range-only by design: it answers 'what moved while I did that', which is a different question from 'what did I cause'. A change here may still be classed unattributed in a delta. The divergence is intended and documented.",
+        "properties": {
+            "changes": {
+                "items": {
+                    "$ref": "#/$defs/change",
+                },
+                "type": "array",
+            },
+            "fromRevision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "partial": {
+                "description": "True when the settling ceiling fired before the desktop went quiet, so more effects may follow. Never omitted silently when true.",
+                "type": "boolean",
+            },
+            "settledMs": {
+                "description": "How long the service waited for the desktop to go quiet.",
+                "minimum": 0,
+                "type": "integer",
+            },
+            "toRevision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "fromRevision",
+            "toRevision",
+            "changes",
         ],
         "type": "object",
     },

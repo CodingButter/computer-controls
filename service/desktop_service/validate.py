@@ -28,7 +28,9 @@ _SUPPORTED_KEYWORDS = frozenset(
         "description",
         "enum",
         "items",
+        "maxItems",
         "maximum",
+        "minItems",
         "minimum",
         "pattern",
         "properties",
@@ -174,6 +176,14 @@ def _check_object(value: dict, node: dict[str, Any], path: str, problems: list[s
 
 
 def _check_array(value: list, node: dict[str, Any], path: str, problems: list[str]) -> None:
+    minimum = node.get("minItems")
+    maximum = node.get("maxItems")
+    if minimum is not None and len(value) < minimum:
+        problems.append(f"{path} needs at least {minimum} item(s), got {len(value)}")
+    if maximum is not None and len(value) > maximum:
+        # The bound on a batch is the difference between one round trip and an
+        # unbounded amount of acting behind a single approved call.
+        problems.append(f"{path} allows at most {maximum} item(s), got {len(value)}")
     items = node.get("items")
     if items is None:
         return

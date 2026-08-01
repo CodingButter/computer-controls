@@ -130,7 +130,13 @@ function generateTypeScript() {
     const base = name.charAt(0).toUpperCase() + name.slice(1);
     out.push(`/** ${method.summary} (operation class: ${method.operationClass}) */`);
     out.push(`export interface ${base}Params ${tsObject(composeParams(method), "")}`);
-    out.push(`export interface ${base}Result ${tsObject(method.result, "")}`, "");
+    // A result that is a bare $ref names a shared shape rather than describing its own.
+    // It has to become an alias: `interface X SomeType` is not syntax.
+    if (method.result.$ref) {
+      out.push(`export type ${base}Result = ${tsType(method.result)};`, "");
+    } else {
+      out.push(`export interface ${base}Result ${tsObject(method.result, "")}`, "");
+    }
   }
 
   const names = sorted(schema.methods);
@@ -225,9 +231,39 @@ function generateZod() {
   const isRecursive = (name) =>
     JSON.stringify(schema.$defs[name]).includes(`#/$defs/${name}`);
   // requestCommon and responseCommon are composed into methods, not emitted.
-  const emitted = sorted(schema.$defs).filter(
+  const candidates = sorted(schema.$defs).filter(
     (name) => name !== "requestCommon" && name !== "responseCommon",
   );
+
+  // Declaration order is a dependency order, not an alphabetical one. Sorting by name
+  // happened to work while no definition referenced another; the moment one did, the
+  // generated file referenced a const before its initialiser. Sort by what each
+  // definition actually needs, and refuse to guess if the needs form a cycle that
+  // is not the legal self-reference.
+  const dependencies = (name) => {
+    const found = new Set();
+    const text = JSON.stringify(schema.$defs[name]);
+    for (const match of text.matchAll(/#\/\$defs\/([A-Za-z0-9_]+)/g)) {
+      if (match[1] !== name) found.add(match[1]);
+    }
+    return [...found].filter((dep) => candidates.includes(dep));
+  };
+  const emitted = [];
+  const placing = new Set();
+  const place = (name) => {
+    if (emitted.includes(name)) return;
+    if (placing.has(name)) {
+      throw new Error(
+        `Cyclic $defs reference involving ${name}: only self-reference is supported, ` +
+          "because only self-reference can be deferred with z.lazy.",
+      );
+    }
+    placing.add(name);
+    for (const dep of dependencies(name)) place(dep);
+    placing.delete(name);
+    emitted.push(name);
+  };
+  for (const name of candidates) place(name);
 
   for (const name of emitted) {
     if (isRecursive(name)) continue;

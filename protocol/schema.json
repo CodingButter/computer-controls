@@ -33,6 +33,37 @@
         "idle": "Backed-off reconciliation. Events are still subscribed to and still delivered; only the reconciliation sweep slows down."
       }
     },
+    "changeKind": {
+      "description": "The complete vocabulary of semantic changes. One engine produces these for both an action's observedEffects and a pushed delta, so a reader learns one vocabulary rather than two.",
+      "values": {
+        "window-opened": "A window that did not exist at the earlier revision exists now.",
+        "window-closed": "A window that existed at the earlier revision is gone.",
+        "focus-changed": "The active window changed.",
+        "element-appeared": "A tracked element's subtree gained a child that matters.",
+        "element-disappeared": "A tracked element is no longer reachable.",
+        "element-state-changed": "A tracked element's states changed, such as becoming checked or insensitive.",
+        "element-value-changed": "A tracked element's text or value changed.",
+        "element-stale": "A held reference stopped describing the same element. The agent is told without having to discover it by using the reference."
+      }
+    },
+    "attribution": {
+      "description": "Who caused a change. Three values, not two: the honest third answer exists because a revision range is a time window, and a change landing inside an action's window is not proof that the action caused it.",
+      "values": {
+        "self": "Inside the action's revision range and inside its causal scope. The agent did this.",
+        "external": "Something outside the agent's causal scope did this. This is news.",
+        "unattributed": "Inside the range but outside the scope, or otherwise undecidable. Deliberately not guessed."
+      }
+    },
+    "waitCondition": {
+      "description": "What a caller can wait for, expressed semantically. This exists so that waiting happens in the service rather than as a sleep in the model's context.",
+      "values": {
+        "window-opened": "A window whose title matches appears.",
+        "window-closed": "A known window disappears.",
+        "element-appeared": "An element matching a role and name appears in a window.",
+        "element-state-changed": "A held element gains or loses a named state.",
+        "revision-advanced": "The session revision passes a given number."
+      }
+    },
     "errorCode": {
       "description": "The complete domain error vocabulary. Carried in the JSON-RPC error object under data.code.",
       "values": {
@@ -121,6 +152,10 @@
             "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR"
           ]
         },
+        "message": {
+          "type": "string",
+          "description": "Present when this error travels inside a result rather than as a JSON-RPC error. A failed step inside a batch has no top-level error member to carry its explanation, and a report that says a step failed without saying why is not worth returning."
+        },
         "detail": { "type": "object", "additionalProperties": true }
       },
       "required": ["code"],
@@ -155,6 +190,57 @@
         },
         "observationMode": { "type": "string", "enum": ["active", "idle"] }
       }
+    },
+
+    "change": {
+      "type": "object",
+      "description": "One semantic change, produced by the single diff engine. Says what changed and where, never where on screen.",
+      "properties": {
+        "kind": { "type": "string", "enum": ["window-opened", "window-closed", "focus-changed", "element-appeared", "element-disappeared", "element-state-changed", "element-value-changed", "element-stale"] },
+        "revision": { "type": "integer", "minimum": 0, "description": "The revision at which this change was observed." },
+        "attribution": { "type": "string", "enum": ["self", "external", "unattributed"] },
+        "applicationId": { "type": "string" },
+        "windowId": { "type": "string" },
+        "elementId": { "type": "string" },
+        "summary": { "type": "string", "description": "One human-readable sentence. Passed through the value-egress point, because it can quote an element's name." },
+        "detail": {
+          "type": "object",
+          "description": "Kind-specific facts, such as the old and new value of a changed state.",
+          "additionalProperties": true
+        }
+      },
+      "required": ["kind", "revision", "summary"],
+      "additionalProperties": false
+    },
+
+    "observedEffects": {
+      "type": "object",
+      "description": "What happened while an action was in flight. Range-only by design: it answers 'what moved while I did that', which is a different question from 'what did I cause'. A change here may still be classed unattributed in a delta. The divergence is intended and documented.",
+      "properties": {
+        "fromRevision": { "type": "integer", "minimum": 0 },
+        "toRevision": { "type": "integer", "minimum": 0 },
+        "changes": { "type": "array", "items": { "$ref": "#/$defs/change" } },
+        "partial": { "type": "boolean", "description": "True when the settling ceiling fired before the desktop went quiet, so more effects may follow. Never omitted silently when true." },
+        "settledMs": { "type": "integer", "minimum": 0, "description": "How long the service waited for the desktop to go quiet." }
+      },
+      "required": ["fromRevision", "toRevision", "changes"],
+      "additionalProperties": false
+    },
+
+    "actionResult": {
+      "type": "object",
+      "description": "The result of one action, including the effects it was seen to have. A caller that reads this does not need to re-inspect.",
+      "properties": {
+        "actionId": { "type": "string", "description": "Identifies this action's revision range, which the delta engine reads to attribute later changes." },
+        "ok": { "type": "boolean" },
+        "backend": { "type": "string" },
+        "fallbacksUsed": { "type": "array", "items": { "type": "string" } },
+        "durationMs": { "type": "integer", "minimum": 0 },
+        "observedEffects": { "$ref": "#/$defs/observedEffects" },
+        "error": { "$ref": "#/$defs/errorData" }
+      },
+      "required": ["actionId", "ok", "backend", "fallbacksUsed", "durationMs"],
+      "additionalProperties": false
     }
   },
   "methods": {
@@ -432,6 +518,174 @@
           "observationMode": { "type": "string", "enum": ["active", "idle"] }
         },
         "required": ["revision"],
+        "additionalProperties": false
+      }
+    },
+
+    "focusWindow": {
+      "operationClass": "activate",
+      "summary": "Raise and focus a window by id. Addressed semantically; no coordinates on either path.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "windowId": { "type": "string" },
+          "settleMs": { "type": "integer", "minimum": 0, "maximum": 10000, "description": "Quiet period the service waits for before reporting effects. The ceiling is protocol-visible rather than a magic number in the code." },
+          "confirm": { "type": "boolean" },
+          "clientId": { "type": "string" }
+        },
+        "required": ["windowId"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/actionResult" }
+    },
+
+    "invokeElement": {
+      "operationClass": "submit",
+      "summary": "Invoke a named action an element or window frame exposes. Frame actions are first class: a GTK4 window can expose dozens of them while its element tree is nearly empty.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "elementId": { "type": "string" },
+          "action": { "type": "string", "description": "The action's own name, as reported in the element's actions list. Not an index: indices move." },
+          "settleMs": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "confirm": { "type": "boolean" },
+          "clientId": { "type": "string" }
+        },
+        "required": ["elementId", "action"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/actionResult" }
+    },
+
+    "setElementValue": {
+      "operationClass": "edit",
+      "summary": "Set an element's text through the accessibility editable-text interface, or its numeric value through the value interface. Never by synthesizing keystrokes.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "elementId": { "type": "string" },
+          "value": { "type": ["string", "number"], "description": "Text for an editable-text element, a number for a value element. The element decides which applies; a mismatch is an error rather than a coercion." },
+          "settleMs": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "confirm": { "type": "boolean" },
+          "clientId": { "type": "string" }
+        },
+        "required": ["elementId", "value"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/actionResult" }
+    },
+
+    "performActions": {
+      "operationClass": "submit",
+      "summary": "Run a sequence of actions in one round trip. The token-efficiency lever: a sequence costs one exchange rather than one per step.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "actions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 25,
+            "items": {
+              "type": "object",
+              "properties": {
+                "method": { "type": "string", "enum": ["focusWindow", "invokeElement", "setElementValue"] },
+                "params": { "type": "object", "additionalProperties": true }
+              },
+              "required": ["method", "params"],
+              "additionalProperties": false
+            }
+          },
+          "stopOnFailure": { "type": "boolean", "description": "When true the batch halts at the first failure and reports which actions ran. Defaults to true: continuing a sequence past a step that did not happen is rarely what anyone wants." },
+          "confirm": { "type": "boolean" },
+          "clientId": { "type": "string" }
+        },
+        "required": ["actions"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "results": { "type": "array", "items": { "$ref": "#/$defs/actionResult" } },
+          "completed": { "type": "integer", "minimum": 0, "description": "How many of the requested actions ran. Less than the number requested means the batch stopped early." },
+          "revision": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["results", "completed", "revision"],
+        "additionalProperties": false
+      }
+    },
+
+    "waitFor": {
+      "operationClass": "observe",
+      "summary": "Wait for a semantic condition. Replaces sleeping in the model's context: the waiting happens in the service and returns the moment the condition holds.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "condition": { "type": "string", "enum": ["window-opened", "window-closed", "element-appeared", "element-state-changed", "revision-advanced"] },
+          "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 120000 },
+          "windowId": { "type": "string" },
+          "elementId": { "type": "string" },
+          "role": { "type": "string" },
+          "name": { "type": "string", "description": "Matched case-insensitively as a substring, the same rule queryElements uses." },
+          "state": { "type": "string" },
+          "revision": { "type": "integer", "minimum": 0 },
+          "clientId": { "type": "string" }
+        },
+        "required": ["condition", "timeoutMs"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "satisfied": { "type": "boolean" },
+          "waitedMs": { "type": "integer", "minimum": 0 },
+          "revision": { "type": "integer", "minimum": 0 },
+          "change": {
+            "$ref": "#/$defs/change",
+            "description": "The change that satisfied the wait, in the same vocabulary the diff engine and the delta stream use. Absent when the condition was satisfied by the revision alone, and absent on timeout: a wait that timed out has no change to report and must not invent one."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Present when the wait was not satisfied: which condition was still false. A timeout is a normal answer, and this is the part of it a caller can act on."
+          }
+        },
+        "required": ["satisfied", "waitedMs", "revision"],
+        "additionalProperties": false
+      }
+    },
+    "inspectElement": {
+      "operationClass": "observe",
+      "summary": "Inspect the subtree below an element the caller has already located. The depth budget is measured from that element, not from the window, which is the only way to reach content that sits deeper than the maximum legal depth from a window root.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "elementId": {
+            "type": "string",
+            "description": "Where the walk starts. Must come from an earlier inspection or query: there is no way to drill into something the caller has not already seen and chosen."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "description": "How far below the anchor to walk. The same bound window inspection uses — drilling changes where a walk starts, never how far it may go."
+          },
+          "maxNodes": { "type": "integer", "minimum": 1, "maximum": 1000 },
+          "includeRoles": { "type": "array", "items": { "type": "string" } },
+          "excludeRoles": { "type": "array", "items": { "type": "string" } },
+          "clientId": { "type": "string" }
+        },
+        "required": ["elementId"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "element": { "$ref": "#/$defs/semanticElement" },
+          "nodeCount": { "type": "integer", "minimum": 0 },
+          "truncated": { "type": "boolean" },
+          "revision": { "type": "integer", "minimum": 0 },
+          "backend": { "type": "string" }
+        },
+        "required": ["element", "nodeCount", "truncated", "revision", "backend"],
         "additionalProperties": false
       }
     }

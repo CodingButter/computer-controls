@@ -25,6 +25,7 @@ gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi  # noqa: E402  (must follow require_version)
 
 from .. import model, registry  # noqa: E402
+from . import x11  # noqa: E402
 
 BACKEND_NAME = "atspi"
 
@@ -160,8 +161,43 @@ def _windows_of(app: Atspi.Accessible) -> list[Atspi.Accessible]:
     return windows
 
 
+def xid_for(pid: int, raw_title: str) -> int | None:
+    """The display server's id for the window the accessibility layer is describing.
+
+    The two layers share no identifier, so the match is made on the two facts both of
+    them report: the process and the title. An exact match on both is preferred. When
+    the titles disagree — Chrome, for one, tells the accessibility layer a longer title
+    than it tells the window manager — a process that owns exactly one window is still
+    an unambiguous answer. A process with several windows and no title match is not, and
+    gets None rather than a guess.
+
+    The title used here is the raw one, deliberately taken before the value-egress point:
+    a redaction policy that rewrites titles must not quietly break window matching.
+    """
+    candidates = [w for w in x11.toplevels() if w.pid == pid]
+    for window in candidates:
+        if window.title == raw_title:
+            return window.xid
+    if len(candidates) == 1:
+        return candidates[0].xid
+    return None
+
+
+def xid_of(window: Atspi.Accessible) -> int | None:
+    """The display server's id for a window object the caller already holds.
+
+    The raw title is read here rather than the emitted one, for the reason `xid_for`
+    gives: matching the two layers must not depend on what a redaction policy allows out.
+    """
+    app = _safe(window.get_application)
+    pid = _safe(lambda: app.get_process_id(), 0) if app is not None else 0
+    raw_title = _safe(window.get_name, "") or ""
+    return xid_for(pid or 0, raw_title)
+
+
 def list_windows(application_id_filter: str | None = None) -> list[dict[str, Any]]:
     windows: list[dict[str, Any]] = []
+    active_xid = x11.active_xid()
     for app in _iter_desktop_apps():
         app_name = _safe(app.get_name, "") or ""
         if app_name in FRAME_PROVIDER_APPS:
@@ -169,8 +205,14 @@ def list_windows(application_id_filter: str | None = None) -> list[dict[str, Any
         app_id = application_id(app)
         if application_id_filter and app_id != application_id_filter:
             continue
+        app_pid = _safe(app.get_process_id, 0) or 0
         for window in _windows_of(app):
             states = _window_states(window)
+            raw_title = _safe(window.get_name, "") or ""
+            # Not a single window in this session reports the accessibility layer's
+            # `active` state, so believing it would mean reporting that nothing is ever
+            # focused. The display server is asked instead, and says so honestly.
+            xid = xid_for(app_pid, raw_title) if active_xid else None
             windows.append(
                 {
                     "id": window_id(window),
@@ -186,7 +228,7 @@ def list_windows(application_id_filter: str | None = None) -> list[dict[str, Any
                         element_id=window_id(window),
                     ),
                     "role": _safe(window.get_role_name, "") or "",
-                    "active": "active" in states,
+                    "active": ("active" in states) or (xid is not None and xid == active_xid),
                     "states": states,
                     "backend": BACKEND_NAME,
                 }
@@ -485,3 +527,79 @@ def rediscover(
     # The caller is about to be handed this id; it has to resolve.
     _remember(obj, new_id)
     return new_id, new_reference, fingerprint
+
+
+# --- Acting -------------------------------------------------------------------
+#
+# Three primitives, and nothing else. Every action the protocol offers is one of
+# these or a batch of them. Notably absent: anything that synthesizes a keystroke or
+# moves a pointer. Setting a text field means handing the text to the toolkit, not
+# typing it at the window and hoping focus was where we thought it was.
+
+
+def grab_focus(obj: Atspi.Accessible) -> bool:
+    """Ask the toolkit to focus an element. False if it cannot or will not."""
+    if not _safe(lambda: obj.get_component_iface()):
+        return False
+    return bool(_safe(obj.grab_focus, False))
+
+
+def actions_of(obj: Atspi.Accessible) -> list[str]:
+    """Public read of the exposed action names, for error messages that help."""
+    return _actions_of(obj)
+
+
+def do_action(obj: Atspi.Accessible, action_name: str) -> bool:
+    """Invoke a named action. Returns False when the toolkit declines it.
+
+    Actions are addressed by NAME, never by the index AT-SPI actually wants. An index
+    is only meaningful relative to a list that the application is free to reorder
+    between one call and the next; a name that has moved is a name that no longer
+    matches, which is a clean failure instead of a wrong button.
+    """
+    names = _actions_of(obj)
+    if action_name not in names:
+        return False
+    index = names.index(action_name)
+    return bool(_safe(lambda: obj.do_action(index), False))
+
+
+def set_text_value(obj: Atspi.Accessible, text: str) -> bool:
+    """Replace an element's text through the EditableText interface."""
+    if not _safe(lambda: obj.get_editable_text_iface()):
+        return False
+    return bool(_safe(lambda: obj.set_text_contents(text), False))
+
+
+def set_numeric_value(obj: Atspi.Accessible, amount: float) -> bool:
+    """Set a slider or spinner through the Value interface, refusing out-of-range.
+
+    The toolkit would clamp silently. A caller who asked for 200 on a scale that stops
+    at 100 has a wrong belief about the world, and returning success would preserve it.
+    """
+    if not _safe(lambda: obj.get_value_iface()):
+        return False
+    minimum = _safe(obj.get_minimum_value)
+    maximum = _safe(obj.get_maximum_value)
+    if minimum is not None and amount < minimum:
+        return False
+    if maximum is not None and amount > maximum:
+        return False
+    return bool(_safe(lambda: obj.set_current_value(amount), False))
+
+
+def read_back(obj: Atspi.Accessible, element_id: str = "") -> str:
+    """Whatever the element now says its value is, through the egress point.
+
+    A set-value result quotes the field back so the caller can see what actually landed
+    — and a password field's contents are exactly as sensitive on the way out of a write
+    as on the way out of a read. Same door.
+    """
+    role = _safe(obj.get_role_name, "") or ""
+    return model.egress_value(
+        _text_value(obj, role),
+        field=model.VALUE,
+        role=role,
+        states=tuple(_states_of(obj)),
+        element_id=element_id,
+    )
