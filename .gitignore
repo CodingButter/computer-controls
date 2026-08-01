@@ -7,3 +7,7 @@ __pycache__/
 # Session artifacts — plans, progress, proofs, and the machine-local plugin registry
 .mastracode/plans/
 .mastracode/plugins/
+
+# Plan copies generated for reading — never committed
+/PLAN-*.md
+.mastracode/*.md
