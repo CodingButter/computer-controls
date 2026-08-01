@@ -6,9 +6,18 @@ import { fileURLToPath } from "node:url";
 import { DesktopClient, DesktopServiceError } from "./client.ts";
 
 /**
- * Starts the Python desktop service on demand and keeps one instance per plugin
- * session. The service is a child process, not a daemon: when the plugin stops,
- * the desktop service stops with it.
+ * Gets this plugin a desktop service to talk to, by one of two routes.
+ *
+ * If a shared daemon is already listening on its well-known socket, this
+ * attaches to it and starts nothing. Otherwise it spawns a private service as
+ * a child process, which stops when the plugin stops.
+ *
+ * The order matters more than it looks. Two services on one desktop would each
+ * hold their own element registry and their own revision counter, so an
+ * element id minted by one would be meaningless to the other and neither could
+ * tell the other's actions from a human's. Attaching first makes "one desktop,
+ * several clients" the default and the private child the fallback, rather than
+ * the other way round.
  */
 
 const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -19,11 +28,20 @@ export const SERVICE_PYTHON = join(SERVICE_ROOT, ".venv", "bin", "python");
 
 const START_TIMEOUT_MS = 20_000;
 
+/** Where a shared desktop service listens. Mirrors the service's own default. */
+export function daemonSocketPath(): string {
+  const explicit = process.env.MASTRACODE_DESKTOP_SOCKET;
+  if (explicit) return explicit;
+  const runtimeDir = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 1000}`;
+  return join(runtimeDir, "mastracode-desktop", "daemon.sock");
+}
+
 export class DesktopSupervisor {
   #process: ChildProcess | undefined;
   #client: DesktopClient | undefined;
   #starting: Promise<DesktopClient> | undefined;
   #exitCleanupArmed = false;
+  #attached = false;
   readonly #sessionName: string;
 
   constructor(sessionName = `mc-${process.pid}`) {
@@ -31,7 +49,13 @@ export class DesktopSupervisor {
   }
 
   get running(): boolean {
+    if (this.#attached) return this.#client?.connected === true;
     return this.#process !== undefined && this.#process.exitCode === null;
+  }
+
+  /** Whether this client attached to a service it does not own. */
+  get attached(): boolean {
+    return this.#attached;
   }
 
   async client(): Promise<DesktopClient> {
@@ -65,7 +89,44 @@ export class DesktopSupervisor {
     }
   }
 
+  /**
+   * Attach to a shared daemon if one is listening.
+   *
+   * A stale socket file left by a service that died is common enough that its
+   * mere presence proves nothing; the connection attempt is the test. Failure
+   * here is not an error — it is the ordinary case where no daemon is running.
+   */
+  async #attach(): Promise<DesktopClient | undefined> {
+    const socketPath = daemonSocketPath();
+    if (!existsSync(socketPath)) return undefined;
+    const client = new DesktopClient({ socketPath });
+    try {
+      await client.connect();
+    } catch {
+      client.close();
+      return undefined;
+    }
+    this.#attached = true;
+    this.#client = client;
+    return client;
+  }
+
+  /**
+   * Connect to a shared daemon if one is listening, and start nothing if not.
+   *
+   * The push lane calls this. It runs on every turn of every session, including
+   * the ones that never touch the desktop, so it may attach to a service that
+   * exists but must never bring one into being.
+   */
+  async attachIfListening(): Promise<boolean> {
+    if (this.#client?.connected) return true;
+    return (await this.#attach()) !== undefined;
+  }
+
   async #start(): Promise<DesktopClient> {
+    const attached = await this.#attach();
+    if (attached) return attached;
+
     if (!existsSync(SERVICE_PYTHON)) {
       throw new DesktopServiceError(
         "BACKEND_UNAVAILABLE",
@@ -138,9 +199,16 @@ export class DesktopSupervisor {
     return await client.request<T>(method, params);
   }
 
+  /**
+   * Let go of the service.
+   *
+   * A private child is killed. A shared daemon is only disconnected from: other
+   * clients are still using it, and it was running before this process started.
+   */
   stop(): void {
     this.#client?.close();
     this.#client = undefined;
+    this.#attached = false;
     const child = this.#process;
     this.#process = undefined;
     child?.kill("SIGTERM");

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import os
 from dataclasses import dataclass
 
 BACKEND = "x11"
@@ -126,6 +127,49 @@ class _Xlib:
 
 _xlib: _Xlib | None = None
 _unavailable_reason = ""
+_attached_display = ""
+
+
+def _discover_display() -> list[tuple[str, str]]:
+    """Candidate displays for a process that inherited no `DISPLAY`.
+
+    This is not a convenience. The service is meant to outlive the client that started
+    it and to be reachable from a client that is somewhere else entirely — an SSH session,
+    another machine, eventually no terminal at all. Such a client hands down no display,
+    and a desktop service that can only see the desktop when it is launched from inside
+    one is not the thing this project is building.
+
+    The accessibility tier already works that way: it finds the session over D-Bus rather
+    than through the environment. This brings the compositor tier to the same standing.
+
+    Discovery, never invention: the candidates are the display sockets the X server
+    actually created, paired with the authority files that exist. An explicit `DISPLAY`
+    is always honoured and never second-guessed.
+    """
+    candidates: list[tuple[str, str]] = []
+    try:
+        sockets = sorted(os.listdir("/tmp/.X11-unix"))
+    except OSError:
+        return candidates
+
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    authorities = [
+        path
+        for path in (
+            os.environ.get("XAUTHORITY", ""),
+            f"{runtime}/gdm/Xauthority",
+            os.path.expanduser("~/.Xauthority"),
+        )
+        if path and os.path.exists(path)
+    ]
+
+    for socket_name in sockets:
+        if not socket_name.startswith("X"):
+            continue
+        display = f":{socket_name[1:]}"
+        for authority in authorities or [""]:
+            candidates.append((display, authority))
+    return candidates
 
 
 def available() -> bool:
@@ -143,13 +187,49 @@ def unavailable_reason() -> str:
 
 
 def _connect() -> _Xlib | None:
-    global _xlib, _unavailable_reason
-    if _xlib is None and not _unavailable_reason:
+    global _xlib, _unavailable_reason, _attached_display
+    if _xlib is not None or _unavailable_reason:
+        return _xlib
+
+    attempts: list[tuple[str, str]] = []
+    if os.environ.get("DISPLAY"):
+        attempts.append((os.environ["DISPLAY"], os.environ.get("XAUTHORITY", "")))
+    else:
+        attempts.extend(_discover_display())
+
+    failures: list[str] = []
+    for display, authority in attempts:
+        previous = (os.environ.get("DISPLAY"), os.environ.get("XAUTHORITY"))
+        os.environ["DISPLAY"] = display
+        if authority:
+            os.environ["XAUTHORITY"] = authority
         try:
             _xlib = _Xlib()
-        except Exception as exc:  # no X display, or no libX11: both are simply "no"
-            _unavailable_reason = str(exc)
-    return _xlib
+            _attached_display = display
+            return _xlib
+        except Exception as exc:  # this display refused us; try the next one
+            failures.append(f"{display}: {exc}")
+            for key, value in zip(("DISPLAY", "XAUTHORITY"), previous):
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    _unavailable_reason = (
+        "; ".join(failures) if failures else "no X display socket found for this session"
+    )
+    return None
+
+
+def attached_display() -> str:
+    """Which display this backend is driving. Empty when it never attached.
+
+    Reported rather than assumed: a service that found the desktop by discovery should
+    say which one it found, or the first surprising answer costs an hour of looking in
+    the wrong session.
+    """
+    _connect()
+    return _attached_display
 
 
 def _decode(value: list[int] | bytes | None) -> str:

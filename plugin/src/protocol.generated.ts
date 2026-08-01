@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: ca625de3a33d563a
+// Protocol version: 1.0   schema sha256: 7f24dc637f2a4cae
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "ca625de3a33d563a" as const;
+export const SCHEMA_DIGEST = "7f24dc637f2a4cae" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -149,6 +149,24 @@ export interface FocusWindowParams {
 }
 export type FocusWindowResult = ActionResult;
 
+/** Everything that changed since a revision the caller already knows about, attributed for this caller. The same engine answers this and pushes unsolicited deltas, so a caller that polls and a caller that listens are never told different stories about one desktop. (operation class: observe) */
+export interface GetDeltaSinceParams {
+  /** Who is asking. Attribution is computed for this caller: the same change reads as 'self' to the client that caused it and 'external' to everyone else. */
+  clientId?: string;
+  /** Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. */
+  confirm?: boolean;
+  /** The last revision this caller has seen. Changes at or below it are not repeated. */
+  sinceRevision: number;
+}
+export interface GetDeltaSinceResult {
+  changes: Change[];
+  /** False when the caller fell so far behind that the oldest changes it missed are no longer held. An incomplete answer that looked complete would be a lie that reads like calm: a caller told false should re-read rather than assume the quiet was real. */
+  complete: boolean;
+  /** Present when complete is false: the earliest cursor that still yields everything the service holds. Pass it as sinceRevision to resume without a gap. It is a cursor, not the oldest surviving change — sinceRevision is exclusive, so returning the oldest surviving revision would make the caller skip it. */
+  resumeRevision?: number;
+  revision: number;
+}
+
 /** What this session can and cannot do, probed rather than assumed. (operation class: observe) */
 export interface GetDesktopCapabilitiesParams {
   /** Which client is asking. Multiple clients share one service instance and one element namespace; this is for audit and scope, not for addressing. */
@@ -169,6 +187,27 @@ export interface GetDesktopCapabilitiesResult {
     waylandDisplay?: string;
   };
   tiers: CapabilityTierReport[];
+}
+
+/** The current picture in one call: which windows exist and which one has focus. What a caller reads to re-acquire the desktop after being told its delta was incomplete. (operation class: observe) */
+export interface GetDesktopStateParams {
+  clientId?: string;
+  /** Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. */
+  confirm?: boolean;
+}
+export interface GetDesktopStateResult {
+  /** Empty when nothing on this desktop holds focus, which is a real state and not an error. */
+  activeWindowId: string;
+  observationMode?: "active" | "idle";
+  revision: number;
+  windows: {
+    active: boolean;
+    applicationId: string;
+    applicationName?: string;
+    role: string;
+    title: string;
+    windowId: string;
+  }[];
 }
 
 /** Re-describe one element by id. Raises ELEMENT_REFERENCE_STALE rather than substituting a similar element. (operation class: observe) */
@@ -405,11 +444,13 @@ export interface WaitForResult {
   waitedMs: number;
 }
 
-export type MethodName = "focusWindow" | "getDesktopCapabilities" | "getElement" | "getRevision" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "listApplications" | "listWindows" | "performActions" | "queryElements" | "setElementValue" | "setObservationMode" | "waitFor";
+export type MethodName = "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "listApplications" | "listWindows" | "performActions" | "queryElements" | "setElementValue" | "setObservationMode" | "waitFor";
 
 export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   focusWindow: "activate",
+  getDeltaSince: "observe",
   getDesktopCapabilities: "observe",
+  getDesktopState: "observe",
   getElement: "observe",
   getRevision: "observe",
   hello: "observe",
@@ -427,7 +468,9 @@ export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
 
 export interface MethodMap {
   focusWindow: { params: FocusWindowParams; result: FocusWindowResult };
+  getDeltaSince: { params: GetDeltaSinceParams; result: GetDeltaSinceResult };
   getDesktopCapabilities: { params: GetDesktopCapabilitiesParams; result: GetDesktopCapabilitiesResult };
+  getDesktopState: { params: GetDesktopStateParams; result: GetDesktopStateResult };
   getElement: { params: GetElementParams; result: GetElementResult };
   getRevision: { params: GetRevisionParams; result: GetRevisionResult };
   hello: { params: HelloParams; result: HelloResult };

@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: ca625de3a33d563a
+// Protocol version: 1.0   schema sha256: 7f24dc637f2a4cae
 
 import { z } from "mastracode/plugin";
 
@@ -78,6 +78,18 @@ export const focusWindowParams = z.object({
 });
 export const focusWindowResult = z.record(z.string(), z.unknown());
 
+export const getDeltaSinceParams = z.object({
+  clientId: z.string().describe("Who is asking. Attribution is computed for this caller: the same change reads as 'self' to the client that caused it and 'external' to everyone else.").optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+  sinceRevision: z.number().int().min(0).describe("The last revision this caller has seen. Changes at or below it are not repeated."),
+});
+export const getDeltaSinceResult = z.object({
+  changes: z.array(changeSchema),
+  complete: z.boolean().describe("False when the caller fell so far behind that the oldest changes it missed are no longer held. An incomplete answer that looked complete would be a lie that reads like calm: a caller told false should re-read rather than assume the quiet was real."),
+  resumeRevision: z.number().int().min(0).describe("Present when complete is false: the earliest cursor that still yields everything the service holds. Pass it as sinceRevision to resume without a gap. It is a cursor, not the oldest surviving change — sinceRevision is exclusive, so returning the oldest surviving revision would make the caller skip it.").optional(),
+  revision: z.number().int().min(0),
+});
+
 export const getDesktopCapabilitiesParams = z.object({
   clientId: z.string().describe("Which client is asking. Multiple clients share one service instance and one element namespace; this is for audit and scope, not for addressing.").optional(),
   confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
@@ -95,6 +107,24 @@ export const getDesktopCapabilitiesResult = z.object({
     waylandDisplay: z.string().optional(),
   }),
   tiers: z.array(capabilityTierReportSchema),
+});
+
+export const getDesktopStateParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+});
+export const getDesktopStateResult = z.object({
+  activeWindowId: z.string().describe("Empty when nothing on this desktop holds focus, which is a real state and not an error."),
+  observationMode: z.enum(["active", "idle"]).optional(),
+  revision: z.number().int().min(0),
+  windows: z.array(z.object({
+    active: z.boolean(),
+    applicationId: z.string(),
+    applicationName: z.string().optional(),
+    role: z.string(),
+    title: z.string(),
+    windowId: z.string(),
+  })),
 });
 
 export const getElementParams = z.object({

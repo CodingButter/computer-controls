@@ -32,12 +32,33 @@ Handler = Callable[[dict[str, Any]], Any]
 SOCKET_MODE = 0o600
 
 
-def default_socket_path(session: str | None = None) -> str:
+DAEMON_SESSION = "daemon"
+
+
+def socket_directory() -> str:
     runtime_dir = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
     directory = os.path.join(runtime_dir, "mastracode-desktop")
     os.makedirs(directory, mode=0o700, exist_ok=True)
+    return directory
+
+
+def default_socket_path(session: str | None = None) -> str:
     name = session or str(os.getpid())
-    return os.path.join(directory, f"{name}.sock")
+    return os.path.join(socket_directory(), f"{name}.sock")
+
+
+def daemon_socket_path() -> str:
+    """
+    Where a shared desktop service listens.
+
+    One name, known to every client without being told: a client that finds a
+    live service here attaches to it instead of starting a second one. That is
+    the difference between a desktop each client sees a private view of and one
+    desktop several clients agree about — two services on one desktop would
+    each hold their own element registry and their own revision counter, and an
+    element id from one would be meaningless to the other.
+    """
+    return default_socket_path(DAEMON_SESSION)
 
 
 class JsonRpcServer:

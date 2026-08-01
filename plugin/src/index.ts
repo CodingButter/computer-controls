@@ -2,6 +2,7 @@ import { createTool, defineMastraCodePlugin } from "mastracode/plugin";
 
 import { DesktopServiceError } from "./client.ts";
 import * as schemas from "./schemas.generated.ts";
+import { buildPushLane } from "./signals/index.ts";
 import { DesktopSupervisor } from "./supervisor.ts";
 
 /**
@@ -14,6 +15,15 @@ import { DesktopSupervisor } from "./supervisor.ts";
  */
 
 const supervisor = new DesktopSupervisor();
+
+/**
+ * The push lane: deltas reaching the model with nobody having called a tool.
+ *
+ * Built once at load. The provider is handed to Mastra Code, which owns its
+ * lifecycle, and the same instance backs the arming processor — see
+ * `signals/arming.ts` for why arming cannot depend on tool calls alone.
+ */
+const pushLane = buildPushLane(supervisor);
 
 /** Turn a service error into something the model can act on rather than a stack trace.
  *
@@ -65,6 +75,8 @@ export default defineMastraCodePlugin({
   version: "0.2.0",
   description:
     "Semantic control of Linux desktop applications through AT-SPI2 — applications, windows, elements, actions.",
+  signalProviders: [pushLane.provider],
+  processors: pushLane.processors,
   tools: {
     desktop_capabilities: {
       tool: createTool({
@@ -214,6 +226,34 @@ export default defineMastraCodePlugin({
         inputSchema: schemas.waitForParams,
         outputSchema: schemas.waitForResult,
         execute: async (input) => await request("waitFor", { ...input }),
+      }),
+    },
+
+    desktop_changes_since: {
+      tool: createTool({
+        id: "desktop_changes_since",
+        description:
+          "What changed on the desktop since a revision you already know about. Every change " +
+          "says whether you caused it, another client caused it, or nobody here did — so news " +
+          "from the outside world is never mistaken for your own effects. If the answer comes " +
+          "back with complete false, you fell behind what the service still holds: resume from " +
+          "resumeRevision, or read the whole state again.",
+        inputSchema: schemas.getDeltaSinceParams,
+        outputSchema: schemas.getDeltaSinceResult,
+        execute: async (input) => await request("getDeltaSince", { ...input }),
+      }),
+    },
+
+    desktop_state: {
+      tool: createTool({
+        id: "desktop_state",
+        description:
+          "The current picture in one call: which windows exist and which one has focus. Use " +
+          "this to re-acquire the desktop after being told a delta was incomplete, or as a " +
+          "cheap first look before deciding what to inspect in detail.",
+        inputSchema: schemas.getDesktopStateParams,
+        outputSchema: schemas.getDesktopStateResult,
+        execute: async (input) => await request("getDesktopState", { ...input }),
       }),
     },
   },

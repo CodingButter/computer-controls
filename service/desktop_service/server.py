@@ -9,19 +9,24 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import logging
 import os
 import signal
 import sys
 import threading
+import time
 from typing import Any
 
-from . import actions, capabilities, inspect as inspection, state, waitfor
+from . import actions, capabilities, deltas, inspect as inspection, state, waitfor, watch
 from .backends import atspi, loop, x11
 from .errors import DesktopError, ErrorCode, InvalidParams
 from .registry import ElementRegistry
 from .session import Session
+from . import transport
 from .transport import JsonRpcServer, default_socket_path
 from .validate import validate_params, validate_result
+
+log = logging.getLogger(__name__)
 
 # One registry per service process: element ids and the revision counter are
 # session-scoped, and the session is the process.
@@ -242,6 +247,21 @@ def _method_inspect_element(params: dict[str, Any]) -> dict[str, Any]:
 
 
 _action_log = actions.ActionLog()
+#: One engine per service process, shared by every observer of the desktop: the settling
+#: wait after an action, the reconciliation sweep, and — next — the accessibility event
+#: stream. Each of them calls `_snapshot`, so each of them folds into the same picture.
+_deltas = deltas.DeltaEngine(_action_log, advance=_registry.bump)
+
+
+def _observe() -> tuple[state.Snapshot, list[dict[str, Any]]]:
+    """Look at the desktop once, fold it in, and report what that changed.
+
+    Both return values come from the same read on purpose. A caller that took a snapshot
+    and then asked the engine what changed would be describing two different moments.
+    """
+    windows = loop.call_on_loop(atspi.list_windows, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
+    snapshot = state.snapshot_from_windows(_registry.revision, windows)
+    return snapshot, _deltas.observe(snapshot)
 
 
 def _snapshot() -> state.Snapshot:
@@ -252,8 +272,32 @@ def _snapshot() -> state.Snapshot:
     an action's effects — a dialog appearing, focus moving — are all visible at this
     granularity. Element-level conditions ask the backend directly instead.
     """
-    windows = loop.call_on_loop(atspi.list_windows, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
-    return state.snapshot_from_windows(_registry.revision, windows)
+    # Every sample the service takes, wherever it came from, folds into the one engine. A
+    # change seen only by the settling wait and never recorded would be an effect the
+    # acting client is told about and every other consumer never hears of.
+    return _observe()[0]
+
+
+def _watch_sample() -> tuple[int, list[dict[str, Any]]]:
+    snapshot, changes = _observe()
+    return snapshot.revision, changes
+
+
+_watcher = watch.Watcher(
+    sample=_watch_sample,
+    publish=lambda delta: log.info(
+        "delta rev=%s changes=%s partial=%s reason=%s",
+        delta.revision,
+        len(delta.changes),
+        delta.partial,
+        delta.reason,
+    ),
+    schedule=loop.after,
+    now_ms=lambda: int(time.monotonic() * 1000),
+    # Asked, not tracked here: the actions module is the only place that knows an action
+    # has been dispatched and has not finished settling.
+    busy=actions.in_flight,
+)
 
 
 def _resolve_element(element_id: str):
@@ -274,6 +318,44 @@ def _settle_bounds(params: dict[str, Any]) -> dict[str, int]:
     if quiet is None:
         return {}
     return {"quiet_ms": int(quiet)}
+
+
+def _client_id(params: dict[str, Any]) -> str:
+    """Who is asking. Optional in the protocol, load-bearing for attribution.
+
+    A client that does not name itself gets an empty id, which is a real identity here
+    rather than a missing one: two anonymous clients are indistinguishable and will see
+    each other's actions as their own. That is a consequence of not identifying yourself,
+    not a defect in the engine.
+    """
+    value = params.get("clientId")
+    return str(value) if isinstance(value, str) else ""
+
+
+def _element_scope(element_id: str) -> tuple[str, str]:
+    """Where an action on this element could reach, resolved before it is dispatched.
+
+    Best effort on purpose: a scope this fails to determine makes attribution more
+    cautious, never wrong. Failing the action because its blast radius could not be
+    measured would trade a working action for a bookkeeping detail.
+    """
+    try:
+        return loop.call_on_loop(
+            lambda: atspi.scope_of(_resolve_element(element_id)),
+            timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        return "", ""
+
+
+def _window_scope(window_id: str) -> tuple[str, str]:
+    try:
+        return loop.call_on_loop(
+            lambda: atspi.scope_of(_require_window(window_id)),
+            timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        return window_id, ""
 
 
 def _method_focus_window(params: dict[str, Any]) -> dict[str, Any]:
@@ -308,6 +390,8 @@ def _method_focus_window(params: dict[str, Any]) -> dict[str, Any]:
         ],
         _snapshot,
         _action_log,
+        client_id=_client_id(params),
+        scope=_window_scope(window_id),
         **_settle_bounds(params),
     )
 
@@ -345,6 +429,8 @@ def _method_invoke_element(params: dict[str, Any]) -> dict[str, Any]:
         [actions.Attempt("accessibility", run)],
         _snapshot,
         _action_log,
+        client_id=_client_id(params),
+        scope=_element_scope(element_id),
         **_settle_bounds(params),
     )
 
@@ -383,6 +469,8 @@ def _method_set_element_value(params: dict[str, Any]) -> dict[str, Any]:
         [actions.Attempt("accessibility", run)],
         _snapshot,
         _action_log,
+        client_id=_client_id(params),
+        scope=_element_scope(element_id),
         **_settle_bounds(params),
     )
 
@@ -477,6 +565,42 @@ def _method_get_revision(_params: dict[str, Any]) -> dict[str, Any]:
     return {"revision": _registry.revision, "observationMode": _session.mode}
 
 
+def _method_get_delta_since(params: dict[str, Any]) -> dict[str, Any]:
+    """What this caller missed, in this caller's terms.
+
+    The desktop is sampled first rather than answered from the last thing the watcher
+    happened to notice: a caller asking right now wants the truth as of now, not the truth
+    as of the debounce that has not fired yet. The sample folds into the same engine the
+    push lane reads, so polling and listening cannot diverge.
+    """
+    _snapshot()
+    delta = _deltas.since(int(params["sinceRevision"]), _client_id(params))
+    if not delta["complete"]:
+        delta["resumeRevision"] = _deltas.resume_revision
+    return delta
+
+
+def _method_get_desktop_state(params: dict[str, Any]) -> dict[str, Any]:
+    """The whole current picture — what a caller reads to re-acquire after a gap."""
+    snapshot = _snapshot()
+    return {
+        "windows": [
+            {
+                "windowId": window.window_id,
+                "applicationId": window.application_id,
+                "applicationName": window.application_name,
+                "title": window.title,
+                "role": window.role,
+                "active": window.active,
+            }
+            for window in snapshot.windows.values()
+        ],
+        "activeWindowId": snapshot.active_window,
+        "revision": snapshot.revision,
+        "observationMode": _session.mode,
+    }
+
+
 def _method_set_observation_mode(params: dict[str, Any]) -> dict[str, Any]:
     return {**_session.set_observation_mode(params), "revision": _registry.revision}
 
@@ -546,19 +670,51 @@ def build_server(socket_path: str) -> JsonRpcServer:
     server.register("setElementValue", _method_set_element_value)
     server.register("performActions", _method_perform_actions)
     server.register("waitFor", _method_wait_for)
+    server.register("getDeltaSince", _method_get_delta_since)
+    server.register("getDesktopState", _method_get_desktop_state)
     return base
+
+
+def _start_watching() -> None:
+    """Attach the watcher to the desktop's own event stream.
+
+    Registration happens on the loop thread because that is the thread AT-SPI was
+    initialised on and the thread its events are delivered to. A failure here is not
+    fatal: the sweep still runs, so the service degrades to a slower account of the
+    desktop rather than to no account of it — and it says which one is happening.
+    """
+    try:
+        loop.call_on_loop(atspi.watch_events, _watcher.hint)
+        log.info("watching %s desktop events", len(atspi.WATCHED_EVENTS))
+    except Exception:
+        log.exception("could not subscribe to desktop events; falling back to the sweep")
+    loop.call_on_loop(_watcher.start_sweep)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="desktop_service")
     parser.add_argument("--socket", default=None, help="Unix socket path to listen on")
     parser.add_argument("--session", default=None, help="Session name for the default socket path")
+    parser.add_argument(
+        "--daemon",
+        action="store_true",
+        help="Listen on the shared daemon socket and outlive the process that started it",
+    )
     args = parser.parse_args(argv)
 
-    socket_path = args.socket or default_socket_path(args.session)
+    if args.daemon:
+        socket_path = args.socket or transport.daemon_socket_path()
+    else:
+        socket_path = args.socket or default_socket_path(args.session)
 
-    _die_with_parent()
+    # A supervised service dies with its supervisor so a crashed client cannot
+    # leak a desktop service. A daemon is nobody's child: it was started to
+    # outlive whatever launched it, and inheriting that death would make it
+    # exactly as short-lived as the shell that ran it.
+    if not args.daemon:
+        _die_with_parent()
     loop.get_loop().start()
+    _start_watching()
     server = build_server(socket_path)
     server.start()
 

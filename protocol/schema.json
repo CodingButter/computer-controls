@@ -688,6 +688,84 @@
         "required": ["element", "nodeCount", "truncated", "revision", "backend"],
         "additionalProperties": false
       }
+    },
+
+    "getDeltaSince": {
+      "operationClass": "observe",
+      "summary": "Everything that changed since a revision the caller already knows about, attributed for this caller. The same engine answers this and pushes unsolicited deltas, so a caller that polls and a caller that listens are never told different stories about one desktop.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "sinceRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The last revision this caller has seen. Changes at or below it are not repeated."
+          },
+          "clientId": {
+            "type": "string",
+            "description": "Who is asking. Attribution is computed for this caller: the same change reads as 'self' to the client that caused it and 'external' to everyone else."
+          }
+        },
+        "required": ["sinceRevision"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "changes": { "type": "array", "items": { "$ref": "#/$defs/change" } },
+          "revision": { "type": "integer", "minimum": 0 },
+          "complete": {
+            "type": "boolean",
+            "description": "False when the caller fell so far behind that the oldest changes it missed are no longer held. An incomplete answer that looked complete would be a lie that reads like calm: a caller told false should re-read rather than assume the quiet was real."
+          },
+          "resumeRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Present when complete is false: the earliest cursor that still yields everything the service holds. Pass it as sinceRevision to resume without a gap. It is a cursor, not the oldest surviving change — sinceRevision is exclusive, so returning the oldest surviving revision would make the caller skip it."
+          }
+        },
+        "required": ["changes", "revision", "complete"],
+        "additionalProperties": false
+      }
+    },
+
+    "getDesktopState": {
+      "operationClass": "observe",
+      "summary": "The current picture in one call: which windows exist and which one has focus. What a caller reads to re-acquire the desktop after being told its delta was incomplete.",
+      "params": {
+        "type": "object",
+        "properties": { "clientId": { "type": "string" } },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "windows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "windowId": { "type": "string" },
+                "applicationId": { "type": "string" },
+                "applicationName": { "type": "string" },
+                "title": { "type": "string" },
+                "role": { "type": "string" },
+                "active": { "type": "boolean" }
+              },
+              "required": ["windowId", "applicationId", "title", "role", "active"],
+              "additionalProperties": false
+            }
+          },
+          "activeWindowId": {
+            "type": "string",
+            "description": "Empty when nothing on this desktop holds focus, which is a real state and not an error."
+          },
+          "revision": { "type": "integer", "minimum": 0 },
+          "observationMode": { "type": "string", "enum": ["active", "idle"] }
+        },
+        "required": ["windows", "activeWindowId", "revision"],
+        "additionalProperties": false
+      }
     }
   }
 }

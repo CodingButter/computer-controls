@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: ca625de3a33d563a
+# Protocol version: 1.0   schema sha256: 7f24dc637f2a4cae
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "ca625de3a33d563a"
+SCHEMA_DIGEST: Final = "7f24dc637f2a4cae"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -35,7 +35,9 @@ ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUN
 #: Every method mapped to the operation class it belongs to.
 OPERATION_CLASS: Final[dict[str, str]] = {
     "focusWindow": "activate",
+    "getDeltaSince": "observe",
     "getDesktopCapabilities": "observe",
+    "getDesktopState": "observe",
     "getElement": "observe",
     "getRevision": "observe",
     "hello": "observe",
@@ -77,11 +79,46 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "getDeltaSince": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "description": "Who is asking. Attribution is computed for this caller: the same change reads as 'self' to the client that caused it and 'external' to everyone else.",
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+            "sinceRevision": {
+                "description": "The last revision this caller has seen. Changes at or below it are not repeated.",
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "sinceRevision",
+        ],
+        "type": "object",
+    },
     "getDesktopCapabilities": {
         "additionalProperties": False,
         "properties": {
             "clientId": {
                 "description": "Which client is asking. Multiple clients share one service instance and one element namespace; this is for audit and scope, not for addressing.",
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+        },
+        "type": "object",
+    },
+    "getDesktopState": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
                 "type": "string",
             },
             "confirm": {
@@ -513,6 +550,36 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
     "focusWindow": {
         "$ref": "#/$defs/actionResult",
     },
+    "getDeltaSince": {
+        "additionalProperties": False,
+        "properties": {
+            "changes": {
+                "items": {
+                    "$ref": "#/$defs/change",
+                },
+                "type": "array",
+            },
+            "complete": {
+                "description": "False when the caller fell so far behind that the oldest changes it missed are no longer held. An incomplete answer that looked complete would be a lie that reads like calm: a caller told false should re-read rather than assume the quiet was real.",
+                "type": "boolean",
+            },
+            "resumeRevision": {
+                "description": "Present when complete is false: the earliest cursor that still yields everything the service holds. Pass it as sinceRevision to resume without a gap. It is a cursor, not the oldest surviving change — sinceRevision is exclusive, so returning the oldest surviving revision would make the caller skip it.",
+                "minimum": 0,
+                "type": "integer",
+            },
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "changes",
+            "revision",
+            "complete",
+        ],
+        "type": "object",
+    },
     "getDesktopCapabilities": {
         "additionalProperties": False,
         "properties": {
@@ -571,6 +638,66 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             "session",
             "tiers",
             "recommendedBackends",
+        ],
+        "type": "object",
+    },
+    "getDesktopState": {
+        "additionalProperties": False,
+        "properties": {
+            "activeWindowId": {
+                "description": "Empty when nothing on this desktop holds focus, which is a real state and not an error.",
+                "type": "string",
+            },
+            "observationMode": {
+                "enum": [
+                    "active",
+                    "idle",
+                ],
+                "type": "string",
+            },
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "windows": {
+                "items": {
+                    "additionalProperties": False,
+                    "properties": {
+                        "active": {
+                            "type": "boolean",
+                        },
+                        "applicationId": {
+                            "type": "string",
+                        },
+                        "applicationName": {
+                            "type": "string",
+                        },
+                        "role": {
+                            "type": "string",
+                        },
+                        "title": {
+                            "type": "string",
+                        },
+                        "windowId": {
+                            "type": "string",
+                        },
+                    },
+                    "required": [
+                        "windowId",
+                        "applicationId",
+                        "title",
+                        "role",
+                        "active",
+                    ],
+                    "type": "object",
+                },
+                "type": "array",
+            },
+        },
+        "required": [
+            "windows",
+            "activeWindowId",
+            "revision",
         ],
         "type": "object",
     },

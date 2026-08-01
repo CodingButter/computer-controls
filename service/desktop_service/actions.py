@@ -15,7 +15,9 @@ here, at the moment the knowledge exists, rather than reconstructed later from t
 from __future__ import annotations
 
 import itertools
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -41,9 +43,33 @@ class ActionRecord:
     last_revision: int
     partial: bool
     changes: list[dict[str, Any]] = field(default_factory=list)
+    #: Which client asked for this. Attribution is per-client from the first commit:
+    #: "self" means *you* did it, and with two agents driving one desktop the same
+    #: change is self to one of them and news to the other. Deciding that later would
+    #: mean rewriting every consumer of this record.
+    client_id: str = ""
+    #: The causal scope the action could plausibly affect — the target's window and its
+    #: application, captured while the target is still resolvable. A revision range alone
+    #: cannot tell an effect from a coincidence: a human opening a window during the
+    #: settling wait falls inside the range and was caused by nobody here.
+    scope_window_id: str = ""
+    scope_application_id: str = ""
 
     def covers(self, revision: int) -> bool:
         return self.first_revision <= revision <= self.last_revision
+
+    def in_scope(self, change: dict[str, Any]) -> bool:
+        """Whether a change could have been caused by this action.
+
+        An application that spawns a new window in response to an action is in scope
+        through its application id, which is why the application is recorded and not
+        only the window.
+        """
+        if self.scope_application_id and change.get("applicationId") == self.scope_application_id:
+            return True
+        if self.scope_window_id and change.get("windowId") == self.scope_window_id:
+            return True
+        return bool(self.target_id) and change.get("elementId") == self.target_id
 
 
 class ActionLog:
@@ -78,6 +104,33 @@ class Attempt:
     run: Callable[[], bool]
 
 
+_in_flight = 0
+_in_flight_lock = threading.Lock()
+
+
+def in_flight() -> bool:
+    """Whether an action is dispatched and still settling.
+
+    Asked by the delta watcher, which must not publish a view of the desktop taken while
+    an action is halfway through changing it. Counted rather than flagged because a batch
+    runs actions back to back and a flag would clear on the first one to finish.
+    """
+    with _in_flight_lock:
+        return _in_flight > 0
+
+
+@contextmanager
+def _dispatching():
+    global _in_flight
+    with _in_flight_lock:
+        _in_flight += 1
+    try:
+        yield
+    finally:
+        with _in_flight_lock:
+            _in_flight -= 1
+
+
 def perform(
     method: str,
     target_id: str,
@@ -86,6 +139,8 @@ def perform(
     log: ActionLog,
     quiet_ms: int = settle.DEFAULT_QUIET_MS,
     ceiling_ms: int = settle.DEFAULT_CEILING_MS,
+    client_id: str = "",
+    scope: tuple[str, str] = ("", ""),
 ) -> dict[str, Any]:
     """Run an action through the highest tier that works, then report its effects.
 
@@ -97,19 +152,21 @@ def perform(
     """
     action_id = f"act-{next(_action_ids):06d}"
     started = time.monotonic()
-    before = take_snapshot()
 
-    fallbacks: list[str] = []
-    succeeded: str | None = None
-    for attempt in attempts:
-        if attempt.run():
-            succeeded = attempt.backend
-            break
-        fallbacks.append(attempt.backend)
+    with _dispatching():
+        before = take_snapshot()
 
-    settlement = settle.wait_for_quiet(
-        take_snapshot, before, quiet_ms=quiet_ms, ceiling_ms=ceiling_ms
-    )
+        fallbacks: list[str] = []
+        succeeded: str | None = None
+        for attempt in attempts:
+            if attempt.run():
+                succeeded = attempt.backend
+                break
+            fallbacks.append(attempt.backend)
+
+        settlement = settle.wait_for_quiet(
+            take_snapshot, before, quiet_ms=quiet_ms, ceiling_ms=ceiling_ms
+        )
 
     log.record(
         ActionRecord(
@@ -120,6 +177,9 @@ def perform(
             last_revision=settlement.after.revision,
             partial=settlement.partial,
             changes=settlement.changes,
+            client_id=client_id,
+            scope_window_id=scope[0],
+            scope_application_id=scope[1],
         )
     )
 

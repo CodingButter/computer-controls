@@ -16,7 +16,8 @@ without a lookup table.
 from __future__ import annotations
 
 import hashlib
-from typing import Any
+import logging
+from typing import Any, Callable
 
 import gi
 
@@ -26,6 +27,8 @@ from gi.repository import Atspi  # noqa: E402  (must follow require_version)
 
 from .. import model, registry  # noqa: E402
 from . import x11  # noqa: E402
+
+log = logging.getLogger(__name__)
 
 BACKEND_NAME = "atspi"
 
@@ -42,6 +45,11 @@ MAX_VALUE_CHARS = 512
 # Roles that count as a top-level window. Anything else appearing as a direct
 # child of an application (Zoom parks stray labels there) is not a window.
 WINDOW_ROLES = frozenset({"frame", "dialog", "window", "alert"})
+
+# How far up an ancestor chain to look for the window an element sits in. Bounded
+# because a broken toolkit can hand back a parent chain that never terminates, and an
+# unbounded walk there hangs the loop thread every other call answers on.
+MAX_ANCESTOR_WALK = 32
 
 # On X11, mutter re-parents client windows for decoration and publishes those
 # frames as its own AT-SPI application. Its frames are duplicates of real client
@@ -440,6 +448,33 @@ def find_window(win_id: str) -> Atspi.Accessible | None:
     return None
 
 
+def scope_of(obj: Atspi.Accessible) -> tuple[str, str]:
+    """The window and application an object belongs to, as ids.
+
+    Recorded when an action is dispatched, while the object is still resolvable, because
+    this is what separates an effect from a coincidence later: a change inside an action's
+    revision range but in some other application was not caused by that action, and the
+    only way to know that is to have written down where the action could reach.
+
+    An object whose window has already gone answers with what it can. A partial scope
+    narrows attribution rather than breaking it.
+    """
+    window_ref = ""
+    node = obj
+    for _ in range(MAX_ANCESTOR_WALK):
+        if node is None:
+            break
+        role = _safe(node.get_role_name, "") or ""
+        if role in WINDOW_ROLES:
+            window_ref = window_id(node)
+            break
+        node = _safe(node.get_parent)
+
+    app = _safe(obj.get_application)
+    app_ref = application_id(app) if app is not None else ""
+    return window_ref, app_ref
+
+
 def fingerprint_of(reference: dict[str, Any]) -> registry.Fingerprint | None:
     """Current fingerprint of a previously described object, or None if it is gone.
 
@@ -603,3 +638,63 @@ def read_back(obj: Atspi.Accessible, element_id: str = "") -> str:
         states=tuple(_states_of(obj)),
         element_id=element_id,
     )
+
+
+# The events worth waking up for. Not an exhaustive list of what AT-SPI broadcasts —
+# deliberately. Every registered event costs a D-Bus round trip per occurrence, and the
+# ones omitted here (caret movement, every keystroke's text insertion) fire continuously
+# while a human types without ever meaning "the desktop is now different".
+WATCHED_EVENTS = (
+    "window:create",
+    "window:destroy",
+    "window:activate",
+    "window:deactivate",
+    "object:state-changed:focused",
+    "object:state-changed:showing",
+    "object:children-changed",
+    "object:property-change:accessible-value",
+)
+
+#: Registered listeners, each paired with the event name it was registered for. The pair
+#: is the point: a listener must be deregistered with the same name it registered with,
+#: and deregistering with anything else tears down the underlying match without unhooking
+#: this listener — after which the process receives no desktop events at all and every
+#: later subscription registers successfully into silence.
+_listeners: list[tuple[Atspi.EventListener, str]] = []
+
+
+def watch_events(on_hint: Callable[[], None]) -> Callable[[], None]:
+    """Subscribe to the events that mean 'look again'. Returns an unsubscribe.
+
+    The payload is deliberately dropped. An event carries a reference to the object that
+    changed, and building the delta out of that reference would make the event stream a
+    second source of truth about the desktop — one that is authoritative for whatever it
+    happened to mention and blind to everything it did not. The re-read stays the only
+    account of what is true; the event only decides when to take it.
+
+    Must be called on the loop thread: AT-SPI delivers events on the thread whose main
+    context it was initialised with.
+    """
+
+    def deliver(_event: object) -> None:
+        try:
+            on_hint()
+        except Exception:
+            # An event listener that raises inside GLib takes out the loop every other
+            # call in this process depends on.
+            log.exception("desktop event hint failed")
+
+    mine: list[tuple[Atspi.EventListener, str]] = []
+    for name in WATCHED_EVENTS:
+        listener = Atspi.EventListener.new(deliver)
+        if listener.register(name):
+            mine.append((listener, name))
+    _listeners.extend(mine)
+
+    def unsubscribe() -> None:
+        for listener, name in mine:
+            _safe(lambda l=listener, n=name: l.deregister(n))
+            if (listener, name) in _listeners:
+                _listeners.remove((listener, name))
+
+    return unsubscribe

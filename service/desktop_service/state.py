@@ -133,7 +133,11 @@ def diff(before: Snapshot, after: Snapshot) -> list[dict[str, Any]]:
                     element_id=after.active_window,
                     application=now.application_name if now else "",
                 ),
-                "detail": {"previousWindowId": before.active_window or None},
+                # Omitted rather than null when focus came from nowhere: a reader should
+                # not have to know that null and absent mean the same thing here.
+                "detail": (
+                    {"previousWindowId": before.active_window} if before.active_window else {}
+                ),
             }
         )
 
