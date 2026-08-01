@@ -255,14 +255,36 @@ _action_log = actions.ActionLog()
 _deltas = deltas.DeltaEngine(_action_log, advance=_registry.bump)
 
 
+#: How many held elements get their value re-read on each observation. Sampling is not
+#: free — a value is a live round trip to the toolkit — and observations happen every
+#: fifty milliseconds while an action settles. Sixteen costs about as much as the window
+#: enumeration already alongside it; a session that has inspected thousands of elements
+#: pays exactly the same. The registry supplies the most recently shown, which is the
+#: right cut: a reference nobody has touched in a hundred revisions is one nobody is
+#: waiting on.
+VALUE_WATCH_LIMIT = 16
+
+
 def _observe() -> tuple[state.Snapshot, list[dict[str, Any]]]:
     """Look at the desktop once, fold it in, and report what that changed.
 
     Both return values come from the same read on purpose. A caller that took a snapshot
     and then asked the engine what changed would be describing two different moments.
+
+    Windows and the values of elements someone is holding. Windows alone was the original
+    bargain and it was wrong in one specific way: writing to a text field changed nothing
+    that a windows-only snapshot could see, so `setElementValue` returned success with an
+    empty list of effects. Both halves of that sentence were true and together they read
+    as a lie — the field really had changed, and the only way to know it was to read the
+    value back by hand.
     """
-    windows = loop.call_on_loop(atspi.list_windows, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
-    snapshot = state.snapshot_from_windows(_registry.revision, windows)
+    watched = _registry.recent(VALUE_WATCH_LIMIT, roles=atspi.TEXT_VALUE_ROLES)
+
+    def look():
+        return atspi.list_windows(), atspi.sample_values(watched)
+
+    windows, values = loop.call_on_loop(look, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
+    snapshot = state.snapshot_from_windows(_registry.revision, windows, values)
     return snapshot, _deltas.observe(snapshot)
 
 

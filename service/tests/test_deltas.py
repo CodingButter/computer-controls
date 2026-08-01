@@ -196,3 +196,58 @@ def test_the_revision_never_walks_backwards() -> None:
     engine.observe(snapshot(0, [window("win-1")]))
 
     assert engine.current.revision == published
+
+
+# A written field is the one effect a windows-only observation could not see. The
+# method reported success and no effects at all, which is two true statements that
+# read together as a lie: the text had changed, and the only way to find out was to
+# read it back by hand. These are the tests that were missing when it shipped.
+
+
+def with_values(revision: int, values: dict[str, str]) -> state.Snapshot:
+    return state.snapshot_from_windows(revision, [window("win-1")], values)
+
+
+def test_a_written_field_is_a_change() -> None:
+    engine = deltas.DeltaEngine(actions.ActionLog(), advance=lambda: 1)
+    engine.observe(with_values(0, {"el-1": "before"}))
+
+    changes = engine.observe(with_values(0, {"el-1": "after"}))
+
+    assert [c["kind"] for c in changes] == ["element-value-changed"]
+    assert changes[0]["elementId"] == "el-1"
+
+
+def test_a_field_that_did_not_move_is_not_a_change() -> None:
+    engine = deltas.DeltaEngine(actions.ActionLog(), advance=lambda: 1)
+    engine.observe(with_values(0, {"el-1": "same"}))
+
+    assert engine.observe(with_values(0, {"el-1": "same"})) == []
+
+
+def test_an_element_entering_the_watch_set_is_not_a_change() -> None:
+    """Watching something for the first time says nothing about whether it moved.
+
+    The watch set is bounded and recency-ordered, so elements drift in and out of it
+    as a session inspects. Reporting an arrival as a value change would turn that
+    drift into a stream of invented edits nobody made.
+    """
+    engine = deltas.DeltaEngine(actions.ActionLog(), advance=lambda: 1)
+    engine.observe(with_values(0, {}))
+
+    assert engine.observe(with_values(0, {"el-1": "first look"})) == []
+
+
+def test_a_written_field_is_attributed_to_whoever_wrote_it() -> None:
+    log = actions.ActionLog()
+    log.record(record(action_id="act-7", client_id="typist", first=1, last=9))
+    engine = deltas.DeltaEngine(log, advance=lambda: 1)
+    engine.observe(with_values(0, {"el-1": "before"}))
+    engine.observe(with_values(0, {"el-1": "after"}))
+
+    mine = engine.since(0, asking_client="typist")["changes"][-1]
+    theirs = engine.since(0, asking_client="somebody-else")["changes"][-1]
+
+    assert mine["attribution"] == "self"
+    assert theirs["attribution"] == "external"
+    assert theirs["detail"]["causedByClientId"] == "typist"

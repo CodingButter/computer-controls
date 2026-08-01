@@ -46,8 +46,17 @@ class Snapshot:
         return ""
 
 
-def snapshot_from_windows(revision: int, windows: list[dict[str, Any]]) -> Snapshot:
-    """Build a snapshot from the window records the accessibility backend produces."""
+def snapshot_from_windows(
+    revision: int,
+    windows: list[dict[str, Any]],
+    values: dict[str, str] | None = None,
+) -> Snapshot:
+    """Build a snapshot from the window records the accessibility backend produces.
+
+    `values` covers only the elements the observer chose to watch. An element absent
+    from both snapshots is not reported as changed, which is what makes a bounded
+    watch set honest rather than a silent lie about the rest of the desktop.
+    """
     facts = {}
     for window in windows:
         facts[window["id"]] = WindowFacts(
@@ -58,7 +67,7 @@ def snapshot_from_windows(revision: int, windows: list[dict[str, Any]]) -> Snaps
             role=window.get("role", ""),
             active=bool(window.get("active")),
         )
-    return Snapshot(revision=revision, windows=facts)
+    return Snapshot(revision=revision, windows=facts, values=dict(values or {}))
 
 
 def _describe_window(window: WindowFacts) -> str:

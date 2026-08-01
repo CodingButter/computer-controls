@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 import gi
 
@@ -696,6 +696,29 @@ def set_numeric_value(obj: Atspi.Accessible, amount: float) -> bool:
     if maximum is not None and amount > maximum:
         return False
     return bool(_safe(lambda: obj.set_current_value(amount), False))
+
+
+def sample_values(element_ids: Sequence[str]) -> dict[str, str]:
+    """Current values for elements a caller already holds, skipping the unreachable.
+
+    Only elements someone has been shown are sampled. Reading every text field of
+    every window on every observation would cost more than everything it measured,
+    and nobody is holding a reference to most of them anyway.
+
+    An element that has gone is simply absent from the result rather than an error:
+    disappearance is the registry's subject and staleness its vocabulary, and a
+    value sample that raised would take the whole observation down with it.
+    """
+    sampled: dict[str, str] = {}
+    for element_id in element_ids:
+        obj = _objects.get(element_id)
+        if obj is None:
+            continue
+        role = _safe(obj.get_role_name, "") or ""
+        if role not in TEXT_VALUE_ROLES:
+            continue
+        sampled[element_id] = read_back(obj, element_id)
+    return sampled
 
 
 def read_back(obj: Atspi.Accessible, element_id: str = "") -> str:
