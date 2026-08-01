@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: 34c4b103b736cea6
+# Protocol version: 1.0   schema sha256: 61030c8f60707395
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "34c4b103b736cea6"
+SCHEMA_DIGEST: Final = "61030c8f60707395"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -34,6 +34,7 @@ ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUN
 
 #: Every method mapped to the operation class it belongs to.
 OPERATION_CLASS: Final[dict[str, str]] = {
+    "captureWindow": "observe",
     "focusWindow": "activate",
     "getDeltaSince": "observe",
     "getDesktopCapabilities": "observe",
@@ -57,6 +58,31 @@ OPERATION_CLASS: Final[dict[str, str]] = {
 
 #: Request schema per method, used to reject malformed calls at the boundary.
 PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
+    "captureWindow": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+            "maxWidth": {
+                "description": "Scale the image down to at most this width. Only ever downward: enlarging a capture invents detail that was never captured.",
+                "maximum": 4096,
+                "minimum": 64,
+                "type": "integer",
+            },
+            "windowId": {
+                "type": "string",
+            },
+        },
+        "required": [
+            "windowId",
+        ],
+        "type": "object",
+    },
     "focusWindow": {
         "additionalProperties": False,
         "properties": {
@@ -587,6 +613,59 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
 }
 
 RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
+    "captureWindow": {
+        "additionalProperties": False,
+        "properties": {
+            "backend": {
+                "type": "string",
+            },
+            "capturedHeight": {
+                "type": "integer",
+            },
+            "capturedWidth": {
+                "description": "Width before the invisible client-side-decoration margin was cropped away. Differs from width on GTK windows, which reserve room for their own drop shadow.",
+                "type": "integer",
+            },
+            "format": {
+                "enum": [
+                    "png",
+                ],
+                "type": "string",
+            },
+            "frameCropped": {
+                "type": "boolean",
+            },
+            "height": {
+                "type": "integer",
+            },
+            "image": {
+                "description": "The image itself, base64-encoded, so a capture travels over any transport this protocol is carried on rather than only over one with a shared filesystem.",
+                "type": "string",
+            },
+            "revision": {
+                "type": "integer",
+            },
+            "scaled": {
+                "type": "boolean",
+            },
+            "width": {
+                "type": "integer",
+            },
+            "windowId": {
+                "type": "string",
+            },
+        },
+        "required": [
+            "windowId",
+            "format",
+            "image",
+            "width",
+            "height",
+            "backend",
+            "revision",
+        ],
+        "type": "object",
+    },
     "focusWindow": {
         "$ref": "#/$defs/actionResult",
     },

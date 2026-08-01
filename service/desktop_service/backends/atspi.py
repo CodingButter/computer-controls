@@ -203,6 +203,19 @@ def xid_of(window: Atspi.Accessible) -> int | None:
     return xid_for(pid or 0, raw_title)
 
 
+def application_name_of(window: Atspi.Accessible) -> str:
+    """The raw name of the application owning a window.
+
+    Raw for the same reason `xid_of` reads the raw title: this name is matched against
+    a capture blocklist, and a policy decision that depended on what redaction let out
+    would fail open exactly where it matters most.
+    """
+    app = _safe(window.get_application)
+    if app is None:
+        return ""
+    return _safe(app.get_name, "") or ""
+
+
 def list_windows(application_id_filter: str | None = None) -> list[dict[str, Any]]:
     windows: list[dict[str, Any]] = []
     active_xid = x11.active_xid()

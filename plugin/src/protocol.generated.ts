@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 34c4b103b736cea6
+// Protocol version: 1.0   schema sha256: 61030c8f60707395
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "34c4b103b736cea6" as const;
+export const SCHEMA_DIGEST = "61030c8f60707395" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -139,6 +139,31 @@ export interface SemanticElement {
 }
 
 /** Every method, its operation class, and its request and response shapes. */
+/** The pixels of one window, for content the accessibility layer cannot express — what an image shows, what a canvas drew. Takes a window id and never a screen region, so only that window is ever in frame and the addressing model gains no second, weaker form. Look at the picture; still act through element references. (operation class: observe) */
+export interface CaptureWindowParams {
+  clientId?: string;
+  /** Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. */
+  confirm?: boolean;
+  /** Scale the image down to at most this width. Only ever downward: enlarging a capture invents detail that was never captured. */
+  maxWidth?: number;
+  windowId: string;
+}
+export interface CaptureWindowResult {
+  backend: string;
+  capturedHeight?: number;
+  /** Width before the invisible client-side-decoration margin was cropped away. Differs from width on GTK windows, which reserve room for their own drop shadow. */
+  capturedWidth?: number;
+  format: "png";
+  frameCropped?: boolean;
+  height: number;
+  /** The image itself, base64-encoded, so a capture travels over any transport this protocol is carried on rather than only over one with a shared filesystem. */
+  image: string;
+  revision: number;
+  scaled?: boolean;
+  width: number;
+  windowId: string;
+}
+
 /** Raise and focus a window by id. Addressed semantically; no coordinates on either path. (operation class: activate) */
 export interface FocusWindowParams {
   clientId?: string;
@@ -472,9 +497,10 @@ export interface WaitForResult {
   waitedMs: number;
 }
 
-export type MethodName = "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "setElementValue" | "setObservationMode" | "waitFor";
+export type MethodName = "captureWindow" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "setElementValue" | "setObservationMode" | "waitFor";
 
 export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
+  captureWindow: "observe",
   focusWindow: "activate",
   getDeltaSince: "observe",
   getDesktopCapabilities: "observe",
@@ -497,6 +523,7 @@ export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
 };
 
 export interface MethodMap {
+  captureWindow: { params: CaptureWindowParams; result: CaptureWindowResult };
   focusWindow: { params: FocusWindowParams; result: FocusWindowResult };
   getDeltaSince: { params: GetDeltaSinceParams; result: GetDeltaSinceResult };
   getDesktopCapabilities: { params: GetDesktopCapabilitiesParams; result: GetDesktopCapabilitiesResult };

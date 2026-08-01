@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 34c4b103b736cea6
+// Protocol version: 1.0   schema sha256: 61030c8f60707395
 
 import { z } from "mastracode/plugin";
 
@@ -69,6 +69,26 @@ export const semanticElementSchema: z.ZodType<unknown> = z.lazy(() =>
     value: z.string().describe("Current value, for elements that hold one. Passed through the value-egress point.").optional(),
   }),
 );
+
+export const captureWindowParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+  maxWidth: z.number().int().min(64).max(4096).describe("Scale the image down to at most this width. Only ever downward: enlarging a capture invents detail that was never captured.").optional(),
+  windowId: z.string(),
+});
+export const captureWindowResult = z.object({
+  backend: z.string(),
+  capturedHeight: z.number().int().optional(),
+  capturedWidth: z.number().int().describe("Width before the invisible client-side-decoration margin was cropped away. Differs from width on GTK windows, which reserve room for their own drop shadow.").optional(),
+  format: z.enum(["png"]),
+  frameCropped: z.boolean().optional(),
+  height: z.number().int(),
+  image: z.string().describe("The image itself, base64-encoded, so a capture travels over any transport this protocol is carried on rather than only over one with a shared filesystem."),
+  revision: z.number().int(),
+  scaled: z.boolean().optional(),
+  width: z.number().int(),
+  windowId: z.string(),
+});
 
 export const focusWindowParams = z.object({
   clientId: z.string().optional(),

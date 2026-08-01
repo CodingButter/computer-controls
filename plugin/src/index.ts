@@ -1,4 +1,4 @@
-import { createTool, defineMastraCodePlugin } from "mastracode/plugin";
+import { createTool, defineMastraCodePlugin, z } from "mastracode/plugin";
 
 import { DesktopServiceError } from "./client.ts";
 import * as schemas from "./schemas.generated.ts";
@@ -15,6 +15,16 @@ import { DesktopSupervisor } from "./supervisor.ts";
  */
 
 const supervisor = new DesktopSupervisor();
+
+/**
+ * A capture result, as the schema declares it — the base64 image plus the facts
+ * about what was captured.
+ *
+ * A tool result is text, and an image is not. The bytes stay on the result
+ * because the protocol says they do, and `toModelOutput` spends them as a media
+ * part instead: the model gets the picture and the facts, never the base64.
+ */
+type CaptureResult = { image: string } & Record<string, unknown>;
 
 /**
  * The push lane: deltas reaching the model with nobody having called a tool.
@@ -269,6 +279,34 @@ export default defineMastraCodePlugin({
         inputSchema: schemas.launchApplicationParams,
         outputSchema: schemas.launchApplicationResult,
         execute: async (input) => await request("launchApplication", { ...input }),
+      }),
+    },
+
+    desktop_capture_window: {
+      tool: createTool({
+        id: "desktop_capture_window",
+        description:
+          "See one window's pixels, for the content the accessibility tree cannot express — " +
+          "what an image shows, what a canvas drew, whether a rendering actually looks right. " +
+          "Takes a window id and never a screen region, so nothing else on the desktop is ever " +
+          "in frame. Looking is not addressing: act through element references, not through " +
+          "what you saw here.",
+        inputSchema: schemas.captureWindowParams,
+        outputSchema: schemas.captureWindowResult,
+        execute: async (input) =>
+          await request("captureWindow", { ...input }) as z.infer<typeof schemas.captureWindowResult>,
+        toModelOutput: (output: unknown) => {
+          const result = output as Partial<CaptureResult> | null;
+          if (typeof result?.image !== "string") return undefined;
+          const { image, ...facts } = result;
+          return {
+            type: "content",
+            value: [
+              { type: "text", text: JSON.stringify(facts) },
+              { type: "media", data: image, mediaType: "image/png" },
+            ],
+          };
+        },
       }),
     },
 

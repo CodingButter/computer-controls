@@ -232,6 +232,19 @@ def attached_display() -> str:
     return _attached_display
 
 
+def window_property(xid: int, name: str) -> list[int] | bytes | None:
+    """One property of one window, or None when the window or the property is absent.
+
+    Exposed because the vision tier needs `_GTK_FRAME_EXTENTS` to know how much of a
+    capture is invisible shadow, and reaching into this module's connection from
+    outside it would put display-server details in two places.
+    """
+    xlib = _connect()
+    if xlib is None:
+        return None
+    return xlib.property_of(xid, name)
+
+
 def _decode(value: list[int] | bytes | None) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", "replace")

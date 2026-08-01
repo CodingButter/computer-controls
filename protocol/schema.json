@@ -826,6 +826,62 @@
         "additionalProperties": false
       },
       "result": { "$ref": "#/$defs/actionResult" }
+    },
+    "captureWindow": {
+      "operationClass": "observe",
+      "summary": "The pixels of one window, for content the accessibility layer cannot express — what an image shows, what a canvas drew. Takes a window id and never a screen region, so only that window is ever in frame and the addressing model gains no second, weaker form. Look at the picture; still act through element references.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "windowId": {
+            "type": "string"
+          },
+          "maxWidth": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 4096,
+            "description": "Scale the image down to at most this width. Only ever downward: enlarging a capture invents detail that was never captured."
+          },
+          "clientId": { "type": "string" }
+        },
+        "required": ["windowId"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "windowId": { "type": "string" },
+          "format": {
+            "type": "string",
+            "enum": ["png"]
+          },
+          "image": {
+            "type": "string",
+            "description": "The image itself, base64-encoded, so a capture travels over any transport this protocol is carried on rather than only over one with a shared filesystem."
+          },
+          "width": { "type": "integer" },
+          "height": { "type": "integer" },
+          "capturedWidth": {
+            "type": "integer",
+            "description": "Width before the invisible client-side-decoration margin was cropped away. Differs from width on GTK windows, which reserve room for their own drop shadow."
+          },
+          "capturedHeight": { "type": "integer" },
+          "frameCropped": { "type": "boolean" },
+          "scaled": { "type": "boolean" },
+          "backend": { "type": "string" },
+          "revision": { "type": "integer" }
+        },
+        "required": [
+          "windowId",
+          "format",
+          "image",
+          "width",
+          "height",
+          "backend",
+          "revision"
+        ],
+        "additionalProperties": false
+      }
     }
   }
 }

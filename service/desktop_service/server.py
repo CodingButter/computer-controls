@@ -17,8 +17,8 @@ import threading
 import time
 from typing import Any
 
-from . import actions, capabilities, deltas, inspect as inspection, state, waitfor, watch
-from .backends import atspi, launcher, loop, x11
+from . import actions, capabilities, deltas, inspect as inspection, policy, state, waitfor, watch
+from .backends import atspi, capture, launcher, loop, x11
 from .errors import DesktopError, ErrorCode, InvalidParams
 from .registry import ElementRegistry
 from .session import Session
@@ -84,6 +84,7 @@ def _int_param(params: dict[str, Any], key: str, default: int, maximum: int) -> 
 def _method_capabilities(_params: dict[str, Any]) -> dict[str, Any]:
     return capabilities.build_report(
         lambda: loop.call_on_loop(atspi.probe_desktop, timeout=10.0),
+        capture.unavailable_reason,
         session_token=_session.token,
         observation_mode=_session.mode,
     )
@@ -601,6 +602,77 @@ def _method_get_desktop_state(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _method_capture_window(params: dict[str, Any]) -> dict[str, Any]:
+    """Hand back the pixels of one window, or refuse the whole application.
+
+    The refusal is checked before the display server is asked for anything, because a
+    capture that is taken and then discarded has already been taken. And it is checked
+    against the application rather than the window: pixels cannot be redacted the way a
+    value can, so the only honest gate is one that produces no image at all.
+    """
+    window_id = _str_param(params, "windowId", required=True)
+    max_width = params.get("maxWidth")
+    if max_width is not None and (not isinstance(max_width, int) or isinstance(max_width, bool)):
+        raise InvalidParams(
+            "'maxWidth' must be an integer",
+            {"parameter": "maxWidth", "received": type(max_width).__name__},
+        )
+
+    if not capture.available():
+        raise DesktopError(
+            ErrorCode.BACKEND_UNAVAILABLE,
+            "This desktop cannot produce window captures",
+            {"reason": capture.unavailable_reason()},
+        )
+
+    def locate() -> tuple[int, str]:
+        window = _require_window(window_id)
+        return (atspi.xid_of(window) or 0, atspi.application_name_of(window))
+
+    xid, application_name = loop.call_on_loop(locate, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
+
+    refusal = policy.capture_refusal(application_name)
+    if refusal:
+        raise DesktopError(
+            ErrorCode.PERMISSION_DENIED,
+            refusal,
+            {"windowId": window_id, "hint": "the blocklist is configuration, not a request"},
+        )
+
+    if xid <= 0:
+        raise DesktopError(
+            ErrorCode.WINDOW_NOT_FOUND,
+            f"The display server has no window matching {window_id!r}",
+            {
+                "windowId": window_id,
+                "hint": "the accessibility layer knows this window; the display server does not",
+            },
+        )
+
+    try:
+        image = capture.capture(xid, max_width)
+    except Exception as exc:  # the window went away, or the display server refused
+        raise DesktopError(
+            ErrorCode.BACKEND_UNAVAILABLE,
+            f"The display server would not produce pixels for {window_id!r}",
+            {"windowId": window_id, "detail": str(exc)},
+        ) from exc
+
+    return {
+        "windowId": window_id,
+        "format": "png",
+        "image": image.encoded(),
+        "width": image.width,
+        "height": image.height,
+        "capturedWidth": image.captured_width,
+        "capturedHeight": image.captured_height,
+        "frameCropped": image.frame_cropped,
+        "scaled": image.scaled,
+        "backend": capture.BACKEND,
+        "revision": _registry.revision,
+    }
+
+
 def _method_list_installable_applications(_params: dict[str, Any]) -> dict[str, Any]:
     applications = loop.call_on_loop(launcher.list_installable)
     return {
@@ -798,6 +870,7 @@ def build_server(socket_path: str) -> JsonRpcServer:
     server.register("getDesktopState", _method_get_desktop_state)
     server.register("listInstallableApplications", _method_list_installable_applications)
     server.register("launchApplication", _method_launch_application)
+    server.register("captureWindow", _method_capture_window)
     return base
 
 

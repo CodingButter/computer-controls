@@ -15,8 +15,14 @@ def broken_probe():
     return {"available": False, "reason": "the accessibility bus refused the connection"}
 
 
-def build(probe):
-    return capabilities.build_report(probe, session_token="tok12345", observation_mode="active")
+def no_capture():
+    return "no xwd on PATH: window capture needs both"
+
+
+def build(probe, capture_probe=no_capture):
+    return capabilities.build_report(
+        probe, capture_probe, session_token="tok12345", observation_mode="active"
+    )
 
 
 def tier(report, tier_id):
@@ -49,10 +55,38 @@ def test_the_report_satisfies_the_frozen_result_schema():
 
 def test_out_of_scope_tiers_are_unavailable_with_a_reason():
     report = build(working_probe)
-    for tier_id in ("app-native", "vision", "raw-input"):
+    for tier_id in ("app-native", "raw-input"):
         entry = tier(report, tier_id)
         assert entry["available"] is False, f"{tier_id} must not claim availability"
         assert entry["reason"], f"{tier_id} must explain why it is unavailable"
+
+
+def test_capture_availability_is_decided_by_its_own_probe():
+    """The vision tier answers to a probe, exactly as the accessibility tier does.
+
+    Both directions matter. A build with the tools reports the tier working; a build
+    without them says which tool is missing rather than claiming the whole idea is out
+    of scope, which is what this report said back when it was true.
+    """
+    unavailable = tier(build(working_probe), "vision")
+    assert unavailable["available"] is False
+    assert "xwd" in unavailable["reason"]
+
+    working = tier(build(working_probe, lambda: ""), "vision")
+    assert working["available"] is True
+    assert working["reason"] is None
+    assert working["detail"]["windowCapture"] is True
+
+
+def test_the_report_never_claims_screen_capture():
+    """Whole-screen capture is not a missing feature here; it is a refused one.
+
+    A caller addresses a window, so the user's other windows are never in frame. That
+    is a privacy claim, and a report that quietly implied otherwise would undermine it.
+    """
+    detail = tier(build(working_probe, lambda: ""), "vision")["detail"]
+    assert detail["screenCapture"] is False
+    assert detail["screenCaptureReason"]
 
 
 def test_every_tier_is_reported_never_omitted():
