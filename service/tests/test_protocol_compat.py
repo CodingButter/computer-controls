@@ -85,8 +85,8 @@ def _compare_params(method: str, old: dict, new: dict) -> list[str]:
             continue
         breaks += _compare_type(f"{method}.params.{name}", spec, new_props[name])
 
-    if old.get("anyOf") and not new.get("anyOf"):
-        breaks.append(f"{method}: request alternatives (anyOf) removed")
+    breaks += _compare_alternatives(f"{method}.params", old, new)
+    breaks += _compare_constraints(f"{method}.params", old, new)
     return breaks
 
 
@@ -103,6 +103,7 @@ def _compare_result(method: str, old: dict, new: dict) -> list[str]:
     # unconditionally.
     for name in set(old.get("required", [])) - set(new.get("required", [])):
         breaks.append(f"{method}: response field {name!r} is no longer guaranteed")
+    breaks += _compare_alternatives(f"{method}.result", old, new)
     return breaks
 
 
@@ -118,11 +119,81 @@ def _compare_type(path: str, old: dict, new: dict) -> list[str]:
         # member always breaks somebody, so that is what is checked.
         for member in set(old_enum) - set(new_enum):
             breaks.append(f"{path}: enum member removed: {member}")
-    for bound, worse in (("minimum", lambda a, b: b > a), ("maximum", lambda a, b: b < a)):
-        if bound in old and bound in new and worse(old[bound], new[bound]):
-            breaks.append(f"{path}: {bound} tightened {old[bound]} -> {new[bound]}")
+    breaks += _compare_constraints(path, old, new)
     if "items" in old and "items" in new:
         breaks += _compare_type(f"{path}[]", old["items"], new["items"])
+
+    # Inline objects are structures too. Without this, a nested field can be
+    # deleted from a result and the suite waves it through because only
+    # $defs-referenced objects ever got their properties compared.
+    breaks += _compare_object(path, old, new)
+    breaks += _compare_alternatives(path, old, new)
+    return breaks
+
+
+#: Keywords that only ever narrow what a caller may send. Listed by name rather
+#: than inferred, so a keyword this suite has never seen is caught below instead
+#: of being silently tolerated.
+LOWER_BOUNDS = ("minimum", "minLength", "minItems")
+UPPER_BOUNDS = ("maximum", "maxLength", "maxItems")
+OTHER_CONSTRAINTS = ("pattern", "const", "multipleOf", "format")
+
+
+def _compare_constraints(path: str, old: dict, new: dict) -> list[str]:
+    breaks: list[str] = []
+    for bound, tighter in (
+        *((b, lambda a, c: c > a) for b in LOWER_BOUNDS),
+        *((b, lambda a, c: c < a) for b in UPPER_BOUNDS),
+    ):
+        # A bound that did not exist before is also a tightening: callers were
+        # free to send anything and now are not.
+        if bound in new and bound not in old:
+            breaks.append(f"{path}: {bound} added: {new[bound]}")
+        elif bound in old and bound in new and tighter(old[bound], new[bound]):
+            breaks.append(f"{path}: {bound} tightened {old[bound]} -> {new[bound]}")
+    for keyword in OTHER_CONSTRAINTS:
+        if old.get(keyword) != new.get(keyword):
+            breaks.append(
+                f"{path}: {keyword} changed {old.get(keyword)} -> {new.get(keyword)}"
+            )
+    return breaks
+
+
+def _compare_object(path: str, old: dict, new: dict) -> list[str]:
+    breaks: list[str] = []
+    # Closing an open object rejects payloads that used to be accepted. Checked
+    # before the properties walk: an object with no declared properties (a free
+    # -form bag like `extra`) is exactly the one this matters most for.
+    if old.get("additionalProperties", True) and new.get("additionalProperties") is False:
+        breaks.append(f"{path}: additionalProperties closed")
+    old_props = old.get("properties")
+    if not old_props:
+        return breaks
+    new_props = new.get("properties", {})
+    for field, spec in old_props.items():
+        if field not in new_props:
+            breaks.append(f"{path}.{field}: field removed")
+            continue
+        breaks += _compare_type(f"{path}.{field}", spec, new_props[field])
+    for field in set(new.get("required", [])) - set(old.get("required", [])):
+        breaks.append(f"{path}.{field}: became required")
+    return breaks
+
+
+def _compare_alternatives(path: str, old: dict, new: dict) -> list[str]:
+    """anyOf branches are a contract: dropping one rejects callers who used it."""
+    breaks: list[str] = []
+    old_branches = old.get("anyOf")
+    if not old_branches:
+        return breaks
+    new_branches = new.get("anyOf") or []
+    if len(new_branches) < len(old_branches):
+        breaks.append(
+            f"{path}: anyOf branches removed {len(old_branches)} -> {len(new_branches)}"
+        )
+    for index, branch in enumerate(old_branches):
+        if index < len(new_branches) and branch != new_branches[index]:
+            breaks.append(f"{path}: anyOf branch {index} changed")
     return breaks
 
 
@@ -132,15 +203,7 @@ def _compare_defs(old: dict, new: dict) -> list[str]:
         if name not in new:
             breaks.append(f"definition removed: {name}")
             continue
-        old_props = spec.get("properties", {})
-        new_props = new[name].get("properties", {})
-        for field, field_spec in old_props.items():
-            if field not in new_props:
-                breaks.append(f"{name}.{field}: field removed")
-                continue
-            breaks += _compare_type(f"{name}.{field}", field_spec, new_props[field])
-        for field in set(new[name].get("required", [])) - set(spec.get("required", [])):
-            breaks.append(f"{name}.{field}: became required")
+        breaks += _compare_type(name, spec, new[name])
     return breaks
 
 

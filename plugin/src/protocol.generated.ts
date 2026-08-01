@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: f8d0bf2f11cbd446
+// Protocol version: 1.0   schema sha256: f649b92ee4ded5d1
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "f8d0bf2f11cbd446" as const;
+export const SCHEMA_DIGEST = "f649b92ee4ded5d1" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -177,6 +177,8 @@ export interface ListApplicationsParams {
 }
 export interface ListApplicationsResult {
   applications: {
+    /** Which backend observed this application. Present per application for the same reason it is present per element: a mixed-backend result must stay attributable. */
+    backend?: string;
     id: string;
     name: string;
     pid: number;
@@ -227,7 +229,10 @@ export interface QueryElementsResult {
   backend: string;
   elements: SemanticElement[];
   matchCount: number;
+  /** More matches exist than were returned — either the search was cut short or the answer hit its limit with tree left unwalked. A caller seeing this should narrow its filter rather than assume it has seen everything. */
+  moreResults?: boolean;
   revision: number;
+  /** The search gave up before covering the window. */
   searchTruncated: boolean;
 }
 

@@ -5,6 +5,6 @@ windows and elements — over a Unix socket. See `service/README.md` for the
 threading contract, which every module here obeys.
 """
 
-from .capabilities import PROTOCOL_VERSION
+from .protocol_generated import PROTOCOL_VERSION
 
 __all__ = ["PROTOCOL_VERSION"]

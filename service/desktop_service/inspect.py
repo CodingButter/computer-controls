@@ -37,6 +37,17 @@ class InspectionResult:
 
 
 @dataclass
+class QueryResult:
+    matches: list[SemanticElement]
+    observations: list[Observation]
+    #: The search itself gave up before covering the window.
+    truncated: bool
+    #: There are more matches to be had — either because the search was cut
+    #: short or because the answer hit its limit with tree still unwalked.
+    more: bool
+
+
+@dataclass
 class Bounds:
     """The limits on a single inspection.
 
@@ -143,7 +154,7 @@ def query(
     states: frozenset[str] = frozenset(),
     limit: int = 50,
     max_nodes: int = 2000,
-) -> tuple[list[SemanticElement], list[Observation], bool]:
+) -> "QueryResult":
     """Find matching elements without building a tree.
 
     Returns a flat list, because a query's answer is "these elements", not "here
@@ -155,6 +166,9 @@ def query(
     searched = 0
     truncated = False
     needle = name.casefold() if name else None
+    # Two different endings that look identical from the outside: the walk gave
+    # up (truncated) or the answer filled up (limit reached). A caller deciding
+    # whether to narrow its filter needs to know which one it got.
 
     frontier: list[tuple[Any, int, str]] = [(root_obj, 0, "")]
     while frontier and len(matches) < limit:
@@ -173,7 +187,10 @@ def query(
         for child_index, child in enumerate(children(obj)):
             frontier.append((child, child_index, digest))
 
-    return matches, observations, truncated
+    more = truncated or (len(matches) >= limit and bool(frontier))
+    return QueryResult(
+        matches=matches, observations=observations, truncated=truncated, more=more
+    )
 
 
 def _matches(

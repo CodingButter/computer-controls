@@ -289,10 +289,12 @@ function generatePython() {
   ];
 
   for (const [name, values] of Object.entries(schema.enums)) {
-    const constant = name.replace(/([a-z])([A-Z])/g, "$1_$2").toUpperCase();
+    const singular = name.replace(/([a-z])([A-Z])/g, "$1_$2").toUpperCase();
+    // "operationClass" pluralises to OPERATION_CLASSES, not OPERATION_CLASSS.
+    const constant = singular.endsWith("S") ? `${singular}ES` : `${singular}S`;
     out.push(`#: ${values.description}`);
     out.push(
-      `${constant}S: Final[tuple[str, ...]] = (${Object.keys(values.values)
+      `${constant}: Final[tuple[str, ...]] = (${Object.keys(values.values)
         .map(quote)
         .join(", ")})`,
       "",

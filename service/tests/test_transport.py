@@ -11,6 +11,7 @@ import socket
 import stat
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -221,3 +222,32 @@ def test_concurrent_requests_on_the_glib_thread_do_not_deadlock():
         assert all(r["available"] for r in results.values())
     finally:
         desktop_loop.stop()
+
+
+def test_the_service_gives_up_before_its_callers_do():
+    """A slow-but-working sweep must not reach the model as a transport failure.
+
+    The plugin's request timeout and the service's backend budgets are written
+    in two languages in two files. If someone lowers one of them, this is the
+    only thing that notices.
+    """
+    import re
+
+    from desktop_service import server
+
+    client = (
+        Path(__file__).resolve().parents[2] / "plugin" / "src" / "client.ts"
+    ).read_text()
+    match = re.search(r"DEFAULT_REQUEST_TIMEOUT_MS\s*=\s*([\d_]+)", client)
+    assert match, "the plugin's request timeout is no longer where this test looks"
+    client_budget = int(match.group(1).replace("_", "")) / 1000
+
+    for name, budget in (
+        ("WALK_TIMEOUT_SECONDS", server.WALK_TIMEOUT_SECONDS),
+        ("SINGLE_ELEMENT_TIMEOUT_SECONDS", server.SINGLE_ELEMENT_TIMEOUT_SECONDS),
+    ):
+        assert budget < client_budget, (
+            f"{name} ({budget}s) is not under the client's {client_budget}s request "
+            "timeout — the client would abandon a request the service was about to "
+            "answer, and the model would see a transport error instead of a result"
+        )

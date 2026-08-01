@@ -132,7 +132,9 @@ def list_applications() -> list[dict[str, Any]]:
         applications.append(
             {
                 "id": application_id(app),
-                "name": name,
+                "name": model.egress_value(
+                    name, field=model.APPLICATION_NAME, role="application"
+                ),
                 "pid": _safe(app.get_process_id, -1),
                 "toolkit": {
                     "name": _safe(app.get_toolkit_name, "") or "",
@@ -173,8 +175,16 @@ def list_windows(application_id_filter: str | None = None) -> list[dict[str, Any
                 {
                     "id": window_id(window),
                     "applicationId": app_id,
-                    "applicationName": app_name,
-                    "title": _safe(window.get_name, "") or "",
+                    "applicationName": model.egress_value(
+                        app_name, field=model.APPLICATION_NAME, role="application"
+                    ),
+                    "title": model.egress_value(
+                        _safe(window.get_name, "") or "",
+                        field=model.TITLE,
+                        role=_safe(window.get_role_name, "") or "",
+                        states=states,
+                        element_id=window_id(window),
+                    ),
                     "role": _safe(window.get_role_name, "") or "",
                     "active": "active" in states,
                     "states": states,
@@ -312,9 +322,9 @@ def _parent_digest(obj: Atspi.Accessible) -> str:
 def describe(obj: Atspi.Accessible, index: int, parent_digest: str) -> tuple:
     """One accessible, as (SemanticElement, Fingerprint, reference).
 
-    Every piece of human-readable text leaves through `egress_value`. There is no
-    other path out of this function, which is the property a later segment's
-    redaction guarantee rests on.
+    Human-readable text is handed over raw and leaves through the egress policy
+    inside `SemanticElement`, which is the property a later segment's redaction
+    guarantee rests on.
     """
     obj_id = element_id(obj)
     _remember(obj, obj_id)
@@ -324,23 +334,11 @@ def describe(obj: Atspi.Accessible, index: int, parent_digest: str) -> tuple:
         id=obj_id,
         backend=BACKEND_NAME,
         role=role,
-        # Inlined rather than assigned above, so that the egress point is visible
-        # at the construction site. `test_model.py` enforces this structurally:
-        # a name or value built from anything else fails the suite.
-        name=model.egress_value(
-            _safe(obj.get_name, "") or "",
-            field=model.NAME,
-            role=role,
-            states=states,
-            element_id=obj_id,
-        ),
-        value=model.egress_value(
-            _text_value(obj, role),
-            field=model.VALUE,
-            role=role,
-            states=states,
-            element_id=obj_id,
-        ),
+        # Raw as read from the toolkit. `SemanticElement` applies the egress
+        # policy in its constructor, so this text cannot reach a caller without
+        # passing it — see `model.SemanticElement.__post_init__`.
+        name=_safe(obj.get_name, "") or "",
+        value=_text_value(obj, role),
         states=states,
         actions=_actions_of(obj),
         bounds=_bounds_of(obj),
@@ -415,3 +413,68 @@ def fingerprint_of(reference: dict[str, Any]) -> registry.Fingerprint | None:
         index=index if index is not None else -1,
         parent=_parent_digest(obj),
     )
+
+
+#: How much of an application to search when re-finding a moved element. A stale
+#: reference is an error path, not a browsing path: it is worth one bounded sweep
+#: to hand the caller a usable id, and not worth walking a whole browser.
+REDISCOVERY_MAX_NODES = 400
+
+
+def rediscover(
+    old: registry.Fingerprint, reference: dict[str, Any]
+) -> tuple[str, dict[str, Any], registry.Fingerprint] | None:
+    """Find an element that matches a fingerprint whose object no longer resolves.
+
+    Searches the application the element came from, because that is where a
+    widget that moved within its window still lives, and matches on role and
+    name — deliberately not on position, since moving is exactly what happened.
+
+    Returns None rather than guessing when the match is ambiguous: two identical
+    buttons and no way to tell them apart is precisely the situation where
+    handing back "one of them" would be worse than admitting the reference died.
+    """
+    bus = reference.get("busName", "")
+    if not bus:
+        return None
+
+    candidates: list[tuple[Any, str, dict[str, Any], registry.Fingerprint]] = []
+    searched = 0
+    for app in _iter_desktop_apps():
+        if _bus_name(app) != bus:
+            continue
+        frontier = list(_windows_of(app))
+        while frontier and searched < REDISCOVERY_MAX_NODES:
+            obj = frontier.pop(0)
+            searched += 1
+            role = _safe(obj.get_role_name)
+            if role is None:
+                continue
+            name = model.egress_value(
+                _safe(obj.get_name, "") or "", field=model.NAME, role=role
+            )
+            if role == old.role and name == old.name:
+                new_id = element_id(obj)
+                index = _safe(obj.get_index_in_parent, -1)
+                candidates.append(
+                    (
+                        obj,
+                        new_id,
+                        _reference(obj, new_id),
+                        registry.Fingerprint(
+                            role=role,
+                            name=name,
+                            index=index if index is not None else -1,
+                            parent=_parent_digest(obj),
+                        ),
+                    )
+                )
+                if len(candidates) > 1:
+                    return None
+            frontier.extend(children_of(obj))
+    if len(candidates) != 1:
+        return None
+    obj, new_id, new_reference, fingerprint = candidates[0]
+    # The caller is about to be handed this id; it has to resolve.
+    _remember(obj, new_id)
+    return new_id, new_reference, fingerprint

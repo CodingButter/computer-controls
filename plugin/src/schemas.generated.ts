@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: f8d0bf2f11cbd446
+// Protocol version: 1.0   schema sha256: f649b92ee4ded5d1
 
 import { z } from "mastracode/plugin";
 
@@ -116,6 +116,7 @@ export const listApplicationsParams = z.object({
 });
 export const listApplicationsResult = z.object({
   applications: z.array(z.object({
+    backend: z.string().describe("Which backend observed this application. Present per application for the same reason it is present per element: a mixed-backend result must stay attributable.").optional(),
     id: z.string(),
     name: z.string(),
     pid: z.number().int(),
@@ -162,8 +163,9 @@ export const queryElementsResult = z.object({
   backend: z.string(),
   elements: z.array(semanticElementSchema),
   matchCount: z.number().int(),
+  moreResults: z.boolean().describe("More matches exist than were returned — either the search was cut short or the answer hit its limit with tree left unwalked. A caller seeing this should narrow its filter rather than assume it has seen everything.").optional(),
   revision: z.number().int(),
-  searchTruncated: z.boolean(),
+  searchTruncated: z.boolean().describe("The search gave up before covering the window."),
 });
 
 export const setObservationModeParams = z.object({

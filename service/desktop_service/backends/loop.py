@@ -38,6 +38,12 @@ class DesktopLoop:
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
         self._lock = threading.Lock()
+        #: Callers blocked on a marshalled call. On shutdown they are released
+        #: with an error instead of being left to burn their whole timeout: a
+        #: client waiting fifteen seconds for a service that already stopped
+        #: learns nothing the first second could not have told it.
+        self._pending: set[threading.Event] = set()
+        self._stopping = False
 
     @property
     def is_running(self) -> bool:
@@ -77,7 +83,15 @@ class DesktopLoop:
         with self._lock:
             loop, thread = self._loop, self._thread
             self._loop, self._thread = None, None
+            self._stopping = True
+            pending, self._pending = list(self._pending), set()
+        # Release anyone mid-call first: their work will never finish now, and
+        # the loop thread is about to stop being able to tell them so.
+        for event in pending:
+            event.set()
         if loop is None or thread is None:
+            with self._lock:
+                self._stopping = False
             return
 
         # The quit must be attached to *this* loop's context. `GLib.idle_add`
@@ -89,6 +103,8 @@ class DesktopLoop:
         source.attach(loop.get_context())
         loop.get_context().wakeup()
         thread.join(timeout)
+        with self._lock:
+            self._stopping = False
 
     def call(
         self,
@@ -114,6 +130,14 @@ class DesktopLoop:
 
         done = threading.Event()
         box: dict[str, Any] = {}
+        with self._lock:
+            if self._stopping:
+                raise DesktopError(
+                    ErrorCode.BACKEND_UNAVAILABLE,
+                    "The desktop loop is shutting down",
+                    {"backend": "glib"},
+                )
+            self._pending.add(done)
 
         def invoke() -> bool:
             try:
@@ -136,11 +160,22 @@ class DesktopLoop:
         source.attach(loop.get_context())
         loop.get_context().wakeup()
 
-        if not done.wait(timeout):
-            source.destroy()
-            raise TimeoutError_(getattr(fn, "__name__", "backend call"), timeout)
+        try:
+            if not done.wait(timeout):
+                source.destroy()
+                raise TimeoutError_(getattr(fn, "__name__", "backend call"), timeout)
+        finally:
+            with self._lock:
+                self._pending.discard(done)
         if "error" in box:
             raise box["error"]
+        if "value" not in box:
+            # Released by shutdown rather than by the call completing.
+            raise DesktopError(
+                ErrorCode.BACKEND_UNAVAILABLE,
+                "The desktop loop stopped before the call completed",
+                {"backend": "glib", "call": getattr(fn, "__name__", "backend call")},
+            )
         return box["value"]
 
 

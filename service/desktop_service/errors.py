@@ -80,6 +80,11 @@ class InvalidParams(DesktopError):
         )
 
 
+class InternalError(DesktopError):
+    def __init__(self, message: str, detail: dict[str, Any] | None = None) -> None:
+        super().__init__(ErrorCode.INTERNAL_ERROR, message, detail)
+
+
 class BackendUnavailable(DesktopError):
     def __init__(self, backend: str, reason: str) -> None:
         super().__init__(

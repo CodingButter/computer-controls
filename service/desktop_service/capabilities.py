@@ -17,19 +17,8 @@ that yet", which are very different facts.
 from __future__ import annotations
 
 import os
-import secrets
 import shutil
 from typing import Any, Callable
-
-PROTOCOL_VERSION = "0.1.0"
-
-_SESSION_TOKEN = secrets.token_hex(4)
-
-
-def session_token() -> str:
-    """A per-run random token. Verification gates assert on it so a transcript
-    cannot be produced by a plausible reconstruction of what the tool would say."""
-    return _SESSION_TOKEN
 
 
 def _detect_session() -> dict[str, Any]:
@@ -56,7 +45,6 @@ def _detect_session() -> dict[str, Any]:
 
     return {
         "displayServer": display_server,
-        "sessionType": session_type,
         "desktopEnvironment": desktop,
         "compositor": compositor,
         "compositorSource": "inferred from XDG_CURRENT_DESKTOP",
@@ -80,8 +68,10 @@ def _raw_input_reason() -> str:
 
 def build_report(
     probe_accessibility: Callable[[], dict[str, Any]],
+    session_token: str,
+    observation_mode: str,
 ) -> dict[str, Any]:
-    session = _detect_session()
+    session = {"token": session_token, **_detect_session()}
     accessibility = probe_accessibility()
 
     tiers = [
@@ -109,27 +99,22 @@ def build_report(
             },
         },
         {
-            "id": "window-management",
-            "name": "Display server window management",
+            "id": "compositor",
+            "name": "Display server and compositor window management",
             "available": session["displayServer"] == "x11",
             "reason": (
                 None
                 if session["displayServer"] == "x11"
-                else f"session display server is {session['displayServer']!r}, not x11"
+                else f"session display server is {session['displayServer']!r}: X11 window "
+                "management is unavailable and the Wayland portal path is deferred by scope"
             ),
-        },
-        {
-            "id": "wayland-portals",
-            "name": "Wayland portals (ScreenCast / RemoteDesktop)",
-            "available": False,
-            "reason": (
-                "deferred by scope: portal-based control is not implemented in this build"
-                + (
-                    ""
-                    if session["displayServer"] == "wayland"
-                    else "; this session is not a Wayland session"
-                )
-            ),
+            "detail": {
+                "x11": session["displayServer"] == "x11",
+                "waylandPortals": False,
+                "waylandPortalsReason": (
+                    "deferred by scope: portal-based control is not implemented in this build"
+                ),
+            },
         },
         {
             "id": "vision",
@@ -148,9 +133,8 @@ def build_report(
     recommended = [t["id"] for t in tiers if t["available"]]
 
     return {
-        "protocolVersion": PROTOCOL_VERSION,
-        "sessionToken": session_token(),
         "session": session,
         "tiers": tiers,
         "recommendedBackends": recommended,
+        "observationMode": observation_mode,
     }

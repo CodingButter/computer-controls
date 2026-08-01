@@ -273,7 +273,11 @@
                   "required": ["name", "version"],
                   "additionalProperties": false
                 },
-                "windowCount": { "type": "integer" }
+                "windowCount": { "type": "integer" },
+                "backend": {
+                  "type": "string",
+                  "description": "Which backend observed this application. Present per application for the same reason it is present per element: a mixed-backend result must stay attributable."
+                }
               },
               "required": ["id", "name", "pid", "toolkit"],
               "additionalProperties": false
@@ -380,7 +384,14 @@
         "properties": {
           "elements": { "type": "array", "items": { "$ref": "#/$defs/semanticElement" } },
           "matchCount": { "type": "integer" },
-          "searchTruncated": { "type": "boolean" },
+          "searchTruncated": {
+            "type": "boolean",
+            "description": "The search gave up before covering the window."
+          },
+          "moreResults": {
+            "type": "boolean",
+            "description": "More matches exist than were returned — either the search was cut short or the answer hit its limit with tree left unwalked. A caller seeing this should narrow its filter rather than assume it has seen everything."
+          },
           "revision": { "type": "integer" },
           "backend": { "type": "string" }
         },

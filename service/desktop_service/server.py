@@ -21,15 +21,22 @@ from .errors import DesktopError, ErrorCode, InvalidParams
 from .registry import ElementRegistry
 from .session import Session
 from .transport import JsonRpcServer, default_socket_path
-from .validate import validate_params
+from .validate import validate_params, validate_result
 
 # One registry per service process: element ids and the revision counter are
 # session-scoped, and the session is the process.
-_registry = ElementRegistry(prober=atspi.fingerprint_of)
+_registry = ElementRegistry(prober=atspi.fingerprint_of, rediscoverer=atspi.rediscover)
 
 # Likewise one session: several clients share this service instance, so they
 # share its element namespace, its revision counter and its observation mode.
 _session = Session()
+
+#: The service must always give up before its callers do, or a slow-but-working
+#: sweep surfaces to the model as a transport failure with nothing to act on.
+#: The client's request timeout is 20s; every backend budget here stays under it
+#: so the caller receives a structured TIMEOUT naming what timed out.
+WALK_TIMEOUT_SECONDS = 15.0
+SINGLE_ELEMENT_TIMEOUT_SECONDS = 10.0
 
 
 def _require_window(window_id: str):
@@ -71,7 +78,9 @@ def _int_param(params: dict[str, Any], key: str, default: int, maximum: int) -> 
 
 def _method_capabilities(_params: dict[str, Any]) -> dict[str, Any]:
     return capabilities.build_report(
-        lambda: loop.call_on_loop(atspi.probe_desktop, timeout=10.0)
+        lambda: loop.call_on_loop(atspi.probe_desktop, timeout=10.0),
+        session_token=_session.token,
+        observation_mode=_session.mode,
     )
 
 
@@ -113,7 +122,7 @@ def _method_inspect_window(params: dict[str, Any]) -> dict[str, Any]:
             window, describe=atspi.describe, children=atspi.children_of, bounds=bounds
         )
 
-    result = loop.call_on_loop(work, timeout=20.0)
+    result = loop.call_on_loop(work, timeout=WALK_TIMEOUT_SECONDS)
     revision = _registry.record(result.observations)
     return {
         "window": result.root.to_json(),
@@ -149,12 +158,13 @@ def _method_query_elements(params: dict[str, Any]) -> dict[str, Any]:
             limit=limit,
         )
 
-    matches, observations, truncated = loop.call_on_loop(work, timeout=20.0)
-    revision = _registry.record(observations)
+    found = loop.call_on_loop(work, timeout=WALK_TIMEOUT_SECONDS)
+    revision = _registry.record(found.observations)
     return {
-        "elements": [m.to_json() for m in matches],
-        "matchCount": len(matches),
-        "searchTruncated": truncated,
+        "elements": [m.to_json() for m in found.matches],
+        "matchCount": len(found.matches),
+        "searchTruncated": found.truncated,
+        "moreResults": found.more,
         "revision": revision,
         "backend": atspi.BACKEND_NAME,
     }
@@ -175,7 +185,7 @@ def _method_get_element(params: dict[str, Any]) -> dict[str, Any]:
         element, _fp, _ref = atspi.describe(obj, entry.fingerprint.index, "")
         return element
 
-    element = loop.call_on_loop(work, timeout=10.0)
+    element = loop.call_on_loop(work, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
     return {
         "element": element.to_json(),
         "revision": _registry.revision,
@@ -214,14 +224,16 @@ def _die_with_parent() -> None:
 
 
 def _validated(method: str, handler):
-    """Enforce the frozen request schema before a handler ever runs.
+    """Enforce the frozen schema on both directions before and after a handler runs.
 
     Applied once at registration rather than inside each handler, so a new method
-    cannot be added without validation by forgetting a line.
+    cannot be added without validation by forgetting a line. The response half
+    matters as much as the request half: a generated result schema that nothing
+    ever checks is a contract in name only.
     """
 
     def call(params: dict[str, Any]) -> dict[str, Any]:
-        return handler(validate_params(method, params))
+        return validate_result(method, handler(validate_params(method, params)))
 
     return call
 

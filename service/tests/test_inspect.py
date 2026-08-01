@@ -127,27 +127,31 @@ def test_exclude_roles_removes_matching_nodes():
 
 def test_query_returns_a_flat_list_bounded_by_limit():
     tree = Node("frame", "W", [Node("push button", f"B{i}") for i in range(20)])
-    matches, observations, truncated = inspection.query(
+    found = inspection.query(
         tree, describe=describe, children=children, role="push button", limit=5
     )
-    assert len(matches) == 5
-    assert not truncated
-    assert all(m.role == "push button" for m in matches)
-    assert len(observations) >= 5
+    assert len(found.matches) == 5
+    assert not found.truncated
+    assert all(m.role == "push button" for m in found.matches)
+    assert len(found.observations) >= 5
+    # Fifteen more buttons were never reached: saying so is the difference
+    # between "these five" and "the five that exist".
+    assert found.more
 
 
 def test_query_matches_name_case_insensitively_as_a_substring():
     tree = Node("frame", "W", [Node("push button", "Save As…"), Node("push button", "Open")])
-    matches, _obs, _t = inspection.query(
-        tree, describe=describe, children=children, name="save"
-    )
-    assert [m.name for m in matches] == ["Save As…"]
+    found = inspection.query(tree, describe=describe, children=children, name="save")
+    assert [m.name for m in found.matches] == ["Save As…"]
+    # The whole window fitted: a caller can trust this is the complete answer.
+    assert not found.more
 
 
 def test_query_search_is_bounded_and_reports_truncation():
     tree = Node("frame", "W", [Node("panel", f"P{i}") for i in range(100)])
-    matches, _obs, truncated = inspection.query(
+    found = inspection.query(
         tree, describe=describe, children=children, role="push button", max_nodes=10
     )
-    assert matches == []
-    assert truncated
+    assert found.matches == []
+    assert found.truncated
+    assert found.more

@@ -80,24 +80,70 @@ def _is_egress_call(node) -> bool:
     )
 
 
-def test_no_backend_builds_an_element_whose_text_skipped_the_egress_point():
-    """The structural guarantee, checked by reading the code rather than trusting it.
+def test_the_constructor_applies_the_policy_to_name_and_value():
+    """No construction site can opt out, because the door is inside the door frame."""
+    model.set_value_policy(lambda ctx: f"<{ctx.field}>")
+    element = model.SemanticElement(
+        id="el-000000000000", backend="atspi", role="entry", name="Password", value="hunter2"
+    )
+    assert element.name == "<name>"
+    assert element.value == "<value>"
+    assert "hunter2" not in repr(element.to_json())
 
-    A behavioural test can only prove that the paths it happens to exercise are
-    clean. This one fails the moment *any* backend gains a second construction
-    site that assigns a name or value from something other than `egress_value` —
-    which is exactly how a redaction hole gets introduced a segment from now.
+
+def test_positional_construction_cannot_smuggle_text_past_the_policy():
+    """The bypass a keyword-only check would have missed."""
+    model.set_value_policy(lambda ctx: "***")
+    element = model.SemanticElement("el-000000000000", "atspi", "entry", "Password", "hunter2")
+    assert element.name == "***"
+    assert element.value == "***"
+
+
+def test_backend_surplus_leaves_by_the_same_door():
+    """`extra` is text a backend chose not to flatten — not text exempt from policy."""
+    model.set_value_policy(lambda ctx: "***" if ctx.field == model.EXTRA else ctx.text)
+    element = model.SemanticElement(
+        id="el-000000000000",
+        backend="atspi",
+        role="entry",
+        extra={"atspi": {"tooltip": "hunter2", "nested": ["hunter2"], "index": 3}},
+    )
+    payload = element.to_json()
+    assert payload["extra"]["atspi"]["tooltip"] == "***"
+    assert payload["extra"]["atspi"]["nested"] == ["***"]
+    # Non-text is left alone: a policy is for text, and mangling an integer
+    # would corrupt data while protecting nothing.
+    assert payload["extra"]["atspi"]["index"] == 3
+    assert "hunter2" not in repr(payload)
+
+
+def test_no_backend_emits_element_text_outside_a_semantic_element():
+    """The structural half: reading the code rather than trusting the paths tested.
+
+    The constructor guarantees that anything built as a `SemanticElement` is
+    clean. This fails if a backend gains a *second* way to emit element text —
+    a hand-rolled dict with a name or value key — which is exactly how a
+    redaction hole gets introduced a segment from now.
     """
     backends = Path(__file__).resolve().parents[1] / "desktop_service" / "backends"
-    checked = 0
-    for path in backends.glob("*.py"):
-        for call in _semantic_element_constructions(path.read_text()):
-            checked += 1
-            for keyword in call.keywords:
-                if keyword.arg in {"name", "value"}:
-                    assert _is_egress_call(keyword.value), (
-                        f"{path.name}: SemanticElement({keyword.arg}=...) bypasses "
-                        "model.egress_value — every value leaving a backend must "
-                        "pass the egress point"
-                    )
-    assert checked > 0, "found no SemanticElement construction to check"
+    text_keys = {model.NAME, model.VALUE, model.TITLE, model.APPLICATION_NAME}
+    # rglob, not glob: a backend package added under this directory is still a
+    # backend, and a top-level-only check would not look at it.
+    for path in backends.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, ast.Dict):
+                continue
+            keys = {k.value for k in node.keys if isinstance(k, ast.Constant)}
+            for key, value in zip(node.keys, node.values):
+                if not isinstance(key, ast.Constant) or key.value not in text_keys:
+                    continue
+                # A bare "name" is only user text when the dict identifies
+                # something on the desktop. {"name": "GTK", "version": ...}
+                # describes a toolkit, and redacting that protects nobody.
+                if key.value == model.NAME and "id" not in keys:
+                    continue
+                assert _is_egress_call(value), (
+                    f"{path.name}:{node.lineno}: {key.value!r} is being put into a "
+                    "hand-built dict without passing model.egress_value — every "
+                    "piece of human-readable text leaves by the one door"
+                )

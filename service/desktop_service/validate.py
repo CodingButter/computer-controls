@@ -11,10 +11,31 @@ mechanism that enforces them.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from .errors import InvalidParams
-from .protocol_generated import DEFS, PARAMS_SCHEMA
+from .errors import InternalError, InvalidParams
+from .protocol_generated import DEFS, PARAMS_SCHEMA, RESULT_SCHEMA
+
+# Every construct this validator implements. A schema keyword outside this set
+# means the schema grew a feature the validator cannot enforce, and silently
+# ignoring it is exactly how an unenforced contract happens.
+_SUPPORTED_KEYWORDS = frozenset(
+    {
+        "$ref",
+        "additionalProperties",
+        "anyOf",
+        "description",
+        "enum",
+        "items",
+        "maximum",
+        "minimum",
+        "pattern",
+        "properties",
+        "required",
+        "type",
+    }
+)
 
 _TYPES: dict[str, type | tuple[type, ...]] = {
     "string": str,
@@ -46,7 +67,31 @@ def validate_params(method: str, params: Any) -> dict[str, Any]:
     return params
 
 
+def validate_result(method: str, result: Any) -> Any:
+    """Check a response against the frozen result schema.
+
+    A result that violates the schema is our bug, not the caller's, so it fails as
+    an internal error rather than reaching a client that trusts the contract.
+    """
+    schema = RESULT_SCHEMA.get(method)
+    if schema is None:
+        return result
+    problems: list[str] = []
+    _check(result, schema, "result", problems)
+    if problems:
+        raise InternalError(
+            f"{method}: response violates the frozen protocol: {problems[0]}",
+            detail={"method": method, "violations": problems},
+        )
+    return result
+
+
 def _resolve(node: dict[str, Any]) -> dict[str, Any]:
+    unknown = set(node) - _SUPPORTED_KEYWORDS
+    if unknown:
+        raise SchemaFeatureUnsupported(
+            f"schema uses unsupported keyword(s): {sorted(unknown)}"
+        )
     ref = node.get("$ref")
     if ref is None:
         return node
@@ -81,6 +126,11 @@ def _check(value: Any, node: dict[str, Any], path: str, problems: list[str]) -> 
 
     if "enum" in node and value not in node["enum"]:
         problems.append(f"{path} must be one of {node['enum']}, got {value!r}")
+        return
+
+    pattern = node.get("pattern")
+    if pattern is not None and isinstance(value, str) and not re.search(pattern, value):
+        problems.append(f"{path} must match {pattern}, got {value!r}")
         return
 
     if isinstance(value, dict):

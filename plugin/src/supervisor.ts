@@ -51,10 +51,18 @@ export class DesktopSupervisor {
   #armExitCleanup(): void {
     if (this.#exitCleanupArmed) return;
     this.#exitCleanupArmed = true;
-    const stop = () => this.stop();
-    process.once("exit", stop);
-    process.once("SIGINT", stop);
-    process.once("SIGTERM", stop);
+    process.once("exit", () => this.stop());
+    // On a signal, cleaning up is not enough: Node installs no default handler
+    // once one is registered, so the process would keep running with nothing
+    // left to do and the terminal would need a second Ctrl-C to get out.
+    for (const signal of ["SIGINT", "SIGTERM"] as const) {
+      process.once(signal, () => {
+        this.stop();
+        if (process.listenerCount(signal) === 0) {
+          process.exit(signal === "SIGINT" ? 130 : 143);
+        }
+      });
+    }
   }
 
   async #start(): Promise<DesktopClient> {

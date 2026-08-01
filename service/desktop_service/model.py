@@ -21,11 +21,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-# Fields that carry human-readable text out of a backend. Anything added here
-# must also be routed through `egress_value` at its construction site.
+# Fields that carry human-readable text out of a backend. A policy sees the
+# field name so it can treat a value differently from a label.
 NAME = "name"
 VALUE = "value"
-DESCRIPTION = "description"
+EXTRA = "extra"
+#: A window title is text the user typed somewhere — a document name, a chat
+#: partner, a subject line. It leaves by the same door as element text.
+TITLE = "title"
+APPLICATION_NAME = "applicationName"
 
 
 @dataclass(frozen=True)
@@ -129,6 +133,52 @@ class SemanticElement:
     # Set when this node's children were cut short by a bound. A caller that
     # sees this knows the tree is partial rather than the element being childless.
     truncated: bool = False
+
+    def __post_init__(self) -> None:
+        """Apply the egress policy to every piece of text this element carries.
+
+        Enforced here rather than at each construction site because a construction
+        site can be forgotten, called with positional arguments, or grow a new
+        text-bearing field. Inside the constructor there is no way to build one of
+        these that skipped the policy — which is the property segment 3's
+        redaction guarantee actually needs.
+        """
+        self.name = egress_value(
+            self.name,
+            field=NAME,
+            role=self.role,
+            states=self.states,
+            element_id=self.id,
+        )
+        self.value = egress_value(
+            self.value,
+            field=VALUE,
+            role=self.role,
+            states=self.states,
+            element_id=self.id,
+        )
+        if self.extra:
+            self.extra = self._egress_extra(self.extra)
+
+    def _egress_extra(self, value: Any) -> Any:
+        """Backend surplus is text too, so it leaves by the same door.
+
+        Walked rather than passed whole: a backend is free to nest, and an
+        unwalked branch is exactly where a password would sit unnoticed.
+        """
+        if isinstance(value, str):
+            return egress_value(
+                value,
+                field=EXTRA,
+                role=self.role,
+                states=self.states,
+                element_id=self.id,
+            )
+        if isinstance(value, dict):
+            return {key: self._egress_extra(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._egress_extra(item) for item in value]
+        return value
 
     def to_json(self) -> dict[str, Any]:
         payload: dict[str, Any] = {

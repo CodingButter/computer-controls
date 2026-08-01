@@ -2,17 +2,17 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: f8d0bf2f11cbd446
+# Protocol version: 1.0   schema sha256: f649b92ee4ded5d1
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "f8d0bf2f11cbd446"
+SCHEMA_DIGEST: Final = "f649b92ee4ded5d1"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
-OPERATION_CLASSS: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
+OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
 
 #: The complete tier vocabulary, including tiers deliberately not implemented. Declared complete at freeze so deferred backends land as additive fills rather than as a widened enum.
 CAPABILITY_TIERS: Final[tuple[str, ...]] = ("app-native", "accessibility", "compositor", "vision", "raw-input")
@@ -442,6 +442,10 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 "items": {
                     "additionalProperties": False,
                     "properties": {
+                        "backend": {
+                            "description": "Which backend observed this application. Present per application for the same reason it is present per element: a mixed-backend result must stay attributable.",
+                            "type": "string",
+                        },
                         "id": {
                             "type": "string",
                         },
@@ -570,10 +574,15 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             "matchCount": {
                 "type": "integer",
             },
+            "moreResults": {
+                "description": "More matches exist than were returned — either the search was cut short or the answer hit its limit with tree left unwalked. A caller seeing this should narrow its filter rather than assume it has seen everything.",
+                "type": "boolean",
+            },
             "revision": {
                 "type": "integer",
             },
             "searchTruncated": {
+                "description": "The search gave up before covering the window.",
                 "type": "boolean",
             },
         },
