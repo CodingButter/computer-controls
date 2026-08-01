@@ -15,12 +15,40 @@ import { DesktopSupervisor } from "./supervisor.ts";
 
 const supervisor = new DesktopSupervisor();
 
-/** Turn a service error into something the model can act on rather than a stack trace. */
-function describeFailure(error: unknown): never {
+/** Turn a service error into something the model can act on rather than a stack trace.
+ *
+ * The detail travels with the message. A startup failure knows exactly why it failed —
+ * the service says so on stderr and the supervisor captures it — and dropping that on
+ * the way to the model turns a one-line diagnosis into an investigation. This cost a
+ * real one: "exited with code 1" was actually "another service is already listening on
+ * that socket", which the caller could have acted on immediately.
+ */
+export function describeFailure(error: unknown): never {
   if (error instanceof DesktopServiceError) {
-    throw new Error(`[${error.code}] ${error.message}`);
+    const stderr = error.detail.stderr;
+    const because = typeof stderr === "string" && stderr.trim()
+      ? `\n${diagnosisFrom(stderr)}`
+      : "";
+    throw new Error(`[${error.code}] ${error.message}${because}`);
   }
   throw error;
+}
+
+/** The tail of a traceback, where Python puts the diagnosis.
+ *
+ * Deliberately not clever. An earlier version took the single last line, which
+ * silently truncated any exception whose message wrapped — losing exactly the half
+ * that named the problem. A few lines of frame noise costs the model nothing; a
+ * confidently-cropped diagnosis costs it the answer.
+ */
+const DIAGNOSIS_LINES = 3;
+
+function diagnosisFrom(stderr: string): string {
+  return stderr
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .slice(-DIAGNOSIS_LINES)
+    .join("\n");
 }
 
 async function request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
