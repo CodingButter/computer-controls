@@ -200,6 +200,7 @@
         "revision": { "type": "integer", "minimum": 0, "description": "The revision at which this change was observed." },
         "attribution": { "type": "string", "enum": ["self", "external", "unattributed"] },
         "applicationId": { "type": "string" },
+        "applicationName": { "type": "string", "description": "The application this change happened in. Present because the identifier above is opaque, and a reader deciding whether a change concerns them should not have to look one up to find out." },
         "windowId": { "type": "string" },
         "elementId": { "type": "string" },
         "summary": { "type": "string", "description": "One human-readable sentence. Passed through the value-egress point, because it can quote an element's name." },
@@ -634,7 +635,7 @@
             "items": {
               "type": "object",
               "properties": {
-                "method": { "type": "string", "enum": ["focusWindow", "invokeElement", "setElementValue"] },
+                "method": { "type": "string", "enum": ["focusWindow", "invokeElement", "setElementValue", "typeText", "editText"], "description": "Which call this step is. Widened when typing arrived: focus a window and then type into it is the sequence somebody writing a message actually wants, and splitting it across two calls leaves a gap in which the desktop can change underneath the second one." },
                 "params": { "type": "object", "additionalProperties": true }
               },
               "required": ["method", "params"],

@@ -277,3 +277,33 @@ def test_the_worked_example_is_a_configuration_this_code_accepts(tmp_path):
     ceiling = security.Ceiling.from_config(config.EXAMPLE["scopes"])
     assert "edit" in ceiling.classes
     assert "bitwarden" in ceiling.blocked_applications
+
+
+def test_a_first_run_is_told_to_write_the_file_not_to_edit_it():
+    # The out-of-the-box refusal is the first thing a client author reads, and
+    # on a first run the file it names is not there. "Widen the ceiling in this
+    # file" sends them looking for a file that does not exist, and the obvious
+    # conclusion — wrong path — is the wrong one.
+    ceiling = security.Ceiling.from_config(None, "/home/someone/.config/x/config.json", exists=False)
+    consent = security.Consent(ceiling)
+
+    with pytest.raises(security.PermissionDenied) as denial:
+        consent.enforce(method="focusWindow", operation_class="activate", client_id="new")
+
+    remedy = denial.value.detail["remedy"]
+    assert "/home/someone/.config/x/config.json" in remedy
+    assert "Create" in remedy
+    assert "operationClasses" in remedy, "a reader guessing key names guesses wrong silently"
+
+
+def test_an_existing_file_is_named_as_something_to_widen():
+    ceiling = security.Ceiling.from_config(
+        {"operationClasses": ["observe"]}, "/home/someone/config.json", exists=True
+    )
+    consent = security.Consent(ceiling)
+
+    with pytest.raises(security.PermissionDenied) as denial:
+        consent.enforce(method="focusWindow", operation_class="activate", client_id="new")
+
+    remedy = denial.value.detail["remedy"]
+    assert "Widen" in remedy and "does not exist" not in remedy

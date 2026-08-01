@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: affc9e7886501041
+# Protocol version: 1.0   schema sha256: ec17f85647e0ef4f
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "affc9e7886501041"
+SCHEMA_DIGEST: Final = "ec17f85647e0ef4f"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -536,10 +536,13 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                     "additionalProperties": False,
                     "properties": {
                         "method": {
+                            "description": "Which call this step is. Widened when typing arrived: focus a window and then type into it is the sequence somebody writing a message actually wants, and splitting it across two calls leaves a gap in which the desktop can change underneath the second one.",
                             "enum": [
                                 "focusWindow",
                                 "invokeElement",
                                 "setElementValue",
+                                "typeText",
+                                "editText",
                             ],
                             "type": "string",
                         },
@@ -1633,6 +1636,10 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
         "description": "One semantic change, produced by the single diff engine. Says what changed and where, never where on screen.",
         "properties": {
             "applicationId": {
+                "type": "string",
+            },
+            "applicationName": {
+                "description": "The application this change happened in. Present because the identifier above is opaque, and a reader deciding whether a change concerns them should not have to look one up to find out.",
                 "type": "string",
             },
             "attribution": {

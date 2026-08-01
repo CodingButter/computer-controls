@@ -141,16 +141,26 @@ def test_the_serialised_record_carries_only_the_keys_we_chose(log):
             application="Text Editor",
             window_id="win-1",
             element_id="el-1",
-            detail={"actionId": "page.save"},
         )
     )
     entry = log.tail()[0]
     allowed = {
         "v", "at", "method", "operationClass", "clientId", "decision", "reason",
         "application", "windowId", "elementId", "backend", "errorCode",
-        "fallbacksUsed", "durationMs", "revisions", "detail",
+        "fallbacksUsed", "durationMs", "revisions",
     }
     assert set(entry) <= allowed, set(entry) - allowed
+
+
+def test_a_record_has_nowhere_to_put_anything_else():
+    # No free-form bag. A field meaning "anything else relevant" is the field
+    # that eventually holds the contents of a text box, put there by somebody
+    # debugging who meant to take it out again.
+    with pytest.raises(TypeError):
+        audit.Record(
+            method="typeText", operation_class="edit", client_id="c",
+            decision="allowed", detail={"typed": "hunter2"},
+        )
 
 
 def test_every_record_is_stamped_with_a_version(log):

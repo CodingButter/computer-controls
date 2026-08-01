@@ -9,10 +9,12 @@ the method that quietly does not use it.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from desktop_service import audit, protocol_generated, security, server
-from desktop_service.errors import DesktopError, ErrorCode
+from desktop_service import audit, protocol_generated, security, server, state
+from desktop_service.errors import DesktopError, ErrorCode, PermissionDenied
 
 
 @pytest.fixture
@@ -214,3 +216,140 @@ def test_an_oversized_identifier_does_not_become_an_oversized_log_line(built):
     with pytest.raises(DesktopError):
         call(srv, "focusWindow", windowId="w" * 100_000, clientId="nobody")
     assert len(log.path.read_text()) < 4_000
+
+
+def test_every_step_a_batch_accepts_is_a_step_the_schema_names():
+    # These two drifted once already: the server grew typing into batches and
+    # the schema's list of what may appear in one was never widened, so the
+    # capability existed in the code and was rejected at the door. A batch step
+    # the schema does not name is unreachable; one the server does not know is
+    # a crash.
+    named = set(
+        protocol_generated.PARAMS_SCHEMA["performActions"]["properties"]["actions"]["items"][
+            "properties"
+        ]["method"]["enum"]
+    )
+    assert named == set(server._BATCH_METHODS)
+
+
+def test_a_batch_cannot_reach_an_application_a_direct_call_cannot(monkeypatch):
+    # The exploit this closes: a blocklist checked against the batch's own
+    # parameters is checked against a call that targets nothing, because the
+    # target lives one level down in the steps.
+    ceiling = security.Ceiling(
+        classes=frozenset({"observe", "activate", "submit"}),
+        blocked_applications=frozenset({"a-password-manager"}),
+    )
+    server._consent = security.Consent(ceiling)
+    server._consent.grant("agent", classes=["activate", "submit"])
+    monkeypatch.setattr(server, "_application_of", lambda params: (
+        "a-password-manager" if params.get("windowId") == "win-blocked" else ""
+    ))
+    ran: list[str] = []
+    monkeypatch.setitem(server._BATCH_METHODS, "focusWindow", lambda params: ran.append("focus"))
+
+    guarded = server._guarded("performActions", server._method_perform_actions)
+    with pytest.raises(PermissionDenied):
+        guarded({
+            "clientId": "agent",
+            "confirm": True,
+            "actions": [{"method": "focusWindow", "params": {"windowId": "win-blocked"}}],
+        })
+    assert ran == [], "the batch must be refused before any step of it happens"
+
+
+def test_a_batch_of_permitted_steps_still_runs(monkeypatch):
+    ceiling = security.Ceiling(classes=frozenset({"observe", "activate", "submit"}))
+    server._consent = security.Consent(ceiling)
+    server._consent.grant("agent", classes=["activate", "submit"])
+    monkeypatch.setattr(server, "_application_of", lambda params: "some-editor")
+    ran: list[str] = []
+    monkeypatch.setitem(
+        server._BATCH_METHODS, "focusWindow",
+        lambda params: (ran.append("focus"), {"actionId": "act-1", "ok": True})[1],
+    )
+
+    guarded = server._guarded("performActions", server._method_perform_actions)
+    guarded({
+        "clientId": "agent",
+        "confirm": True,
+        "actions": [{"method": "focusWindow", "params": {"windowId": "win-ok"}}],
+    })
+    assert ran == ["focus"]
+
+
+@pytest.fixture
+def walled(monkeypatch):
+    """A desktop with one application the user walled off."""
+    server._consent = security.Consent(
+        security.Ceiling(
+            classes=frozenset({"observe", "activate"}),
+            blocked_applications=frozenset({"a-password-manager"}),
+        )
+    )
+    return server._consent
+
+
+def test_a_blocked_application_is_absent_from_the_window_list(walled, monkeypatch):
+    # Absent, not present-and-refused: a refusal confirms the application is
+    # running, and its window title is a document name, a contact, a subject
+    # line — the thing somebody blocks an application to keep out of a
+    # transcript in the first place.
+    rows = [
+        {"id": "win-1", "applicationName": "a-password-manager", "title": "Vault — personal"},
+        {"id": "win-2", "applicationName": "some-editor", "title": "notes"},
+    ]
+    monkeypatch.setattr(server.loop, "call_on_loop", lambda fn, *a, **k: rows)
+    listed = server._method_list_windows({})["windows"]
+    assert [row["id"] for row in listed] == ["win-2"]
+    assert "Vault — personal" not in json.dumps(listed)
+
+
+def test_a_blocked_application_does_not_announce_itself_in_a_delta(walled, monkeypatch):
+    # Built the way the diff engine builds them: the id is an opaque hash, so
+    # a filter keyed on it matches nothing while the summary quotes the name
+    # in full. That was the real leak, and it survived a test that put the
+    # name in the id field.
+    changes = [
+        {"kind": "window-opened", "revision": 4, "applicationId": "app-5ba8ad86f3c9",
+         "applicationName": "a-password-manager", "summary": "a window appeared — a-password-manager: Vault"},
+        {"kind": "focus-changed", "revision": 4, "applicationId": "app-19471371d5a5",
+         "applicationName": "some-editor", "summary": "focus moved to some-editor: notes"},
+    ]
+    monkeypatch.setattr(server, "_snapshot", lambda: None)
+    monkeypatch.setattr(
+        server._deltas, "since",
+        lambda revision, client: {"changes": list(changes), "complete": True, "revision": 4},
+    )
+    delta = server._method_get_delta_since({"sinceRevision": 0, "clientId": "c"})
+    assert [change["applicationName"] for change in delta["changes"]] == ["some-editor"]
+    assert "Vault" not in json.dumps(delta)
+
+
+def test_an_allowlist_does_not_hide_what_it_allows(monkeypatch):
+    # The failure this guards against: matching an allowlist entry against
+    # every identifying field on a row, so a rule naming an application by
+    # name fails against the same row's opaque id and hides it.
+    server._consent = security.Consent(
+        security.Ceiling(classes=frozenset({"observe"}), applications=frozenset({"some-editor"}))
+    )
+    rows = [
+        {"id": "win-1", "applicationName": "some-editor", "applicationId": "app-9f3c11"},
+        {"id": "win-2", "applicationName": "something-else", "applicationId": "app-77aa02"},
+    ]
+    monkeypatch.setattr(server.loop, "call_on_loop", lambda fn, *a, **k: rows)
+    listed = server._method_list_windows({})["windows"]
+    assert [row["id"] for row in listed] == ["win-1"]
+
+
+def test_the_active_window_is_not_named_when_it_is_withheld(walled, monkeypatch):
+    # Otherwise "is the password manager in front right now" has an answer.
+    facts = state.WindowFacts(
+        window_id="win-1", application_id="a-password-manager",
+        application_name="a-password-manager", title="Vault", role="frame", active=True,
+    )
+    snapshot = state.Snapshot(revision=3, windows={"win-1": facts})
+    monkeypatch.setattr(server, "_snapshot", lambda: snapshot)
+    result = server._method_get_desktop_state({})
+    assert result["windows"] == []
+    assert result["activeWindowId"] == ""

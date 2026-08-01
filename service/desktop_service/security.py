@@ -83,14 +83,42 @@ class Ceiling:
     #: difference between "ask your administrator" and "edit this".
     config_key: str = "desktop.scopes"
     config_path: str = ""
+    #: Whether that file was there to read. A refusal that says "raise the
+    #: ceiling in this file" sends a first-time reader looking for a file that
+    #: does not exist, and the obvious conclusion — that they are looking in the
+    #: wrong place — is the wrong one.
+    config_exists: bool = False
 
     @property
     def where(self) -> str:
         """How to name this ceiling's source in a refusal."""
-        return f"{self.config_key} in {self.config_path}" if self.config_path else self.config_key
+        if not self.config_path:
+            return self.config_key
+        if not self.config_exists:
+            return f"{self.config_key} in {self.config_path}, a file that does not exist yet"
+        return f"{self.config_key} in {self.config_path}"
+
+    @property
+    def how_to_raise(self) -> str:
+        """A refusal's last line: what the reader should go and do about it.
+
+        A first run has no configuration at all, and the honest instruction
+        there is to write one rather than to edit one. The example is spelled
+        out because the alternative is a reader guessing at key names, and a
+        guessed key is silently ignored by every JSON reader ever written.
+        """
+        if not self.config_path:
+            return f"Widen {self.config_key}."
+        if self.config_exists:
+            return f"Widen {self.where}. Nothing reachable over this socket can do it for you."
+        return (
+            f"Create {self.config_path} containing "
+            '{"scopes": {"operationClasses": ["observe", "edit", "activate"]}} '
+            "and restart the service. Nothing reachable over this socket can do it for you."
+        )
 
     @classmethod
-    def from_config(cls, config: dict | None, path: str = "") -> "Ceiling":
+    def from_config(cls, config: dict | None, path: str = "", exists: bool | None = None) -> "Ceiling":
         config = config or {}
         classes = config.get("operationClasses")
         allowed = frozenset(_normalise(classes)) if classes else DEFAULT_CLASSES
@@ -104,6 +132,7 @@ class Ceiling:
             idle_expiry_seconds=float(config.get("idleExpirySeconds", DEFAULT_IDLE_EXPIRY_SECONDS)),
             confirm_classes=frozenset(_normalise(config.get("confirmClasses", CONFIRM_BY_DEFAULT))),
             config_path=path,
+            config_exists=bool(config) if exists is None else exists,
         )
 
     def permits_application(self, application: str) -> bool:
@@ -169,8 +198,8 @@ class Decision:
             granted=tuple(sorted(granted)),
             application=self.application,
             remedy=(
-                f"Ask for it with grantScope, or widen {ceiling.where} "
-                "if the ceiling is what refused you."
+                f"Ask for it with grantScope. If the ceiling is what refused you: "
+                f"{ceiling.how_to_raise}"
             ),
         )
 
@@ -241,10 +270,7 @@ class Consent:
                 method="grantScope",
                 required=", ".join(sorted(above)),
                 granted=tuple(sorted(self._ceiling.classes)),
-                remedy=(
-                    f"Raise {self._ceiling.where}. "
-                    "Nothing reachable over this socket can do it for you."
-                ),
+                remedy=self._ceiling.how_to_raise,
             )
         apps = frozenset(_normalise(applications))
         refused = {app for app in apps if not self._ceiling.permits_application(app)}

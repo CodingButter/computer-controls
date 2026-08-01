@@ -15,6 +15,7 @@ import signal
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from . import (
@@ -106,9 +107,40 @@ def _method_capabilities(_params: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _withheld(rows: list[dict[str, Any]], *keys: str) -> list[dict[str, Any]]:
+    """Drop the rows belonging to an application the user walled off.
+
+    A blocked application is absent rather than present-and-refused. The
+    difference matters: a refusal confirms the application is running, and its
+    window title — which is a document name, a contact's name, the subject of a
+    message — is exactly the kind of thing somebody blocks an application to
+    keep out of a transcript. Filtering here rather than deeper down keeps the
+    delta engine's own picture of the desktop complete, so a window that
+    reappears from behind the wall is still noticed as having moved.
+    """
+    ceiling = _consent.ceiling
+    if not ceiling.blocked_applications and not ceiling.applications:
+        return rows
+
+    def identity(row: dict[str, Any]) -> str:
+        # One identity per row, in the caller's order of preference — the same
+        # name the guard resolves for a targeted call, so a row that is listed
+        # is a row that can then be acted on. Checking every field instead
+        # would break an allowlist: an entry naming an application by name
+        # would fail against the same row's opaque id and hide what the user
+        # asked to allow.
+        for key in keys:
+            value = row.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return ""
+
+    return [row for row in rows if ceiling.permits_application(identity(row))]
+
+
 def _method_list_applications(_params: dict[str, Any]) -> dict[str, Any]:
     applications = loop.call_on_loop(atspi.list_applications)
-    return {"applications": applications, "backend": atspi.BACKEND_NAME}
+    return {"applications": _withheld(applications, "name", "id"), "backend": atspi.BACKEND_NAME}
 
 
 def _method_list_windows(params: dict[str, Any]) -> dict[str, Any]:
@@ -119,7 +151,10 @@ def _method_list_windows(params: dict[str, Any]) -> dict[str, Any]:
             {"received": type(application_id).__name__},
         )
     windows = loop.call_on_loop(atspi.list_windows, application_id)
-    return {"windows": windows, "backend": atspi.BACKEND_NAME}
+    return {
+        "windows": _withheld(windows, "applicationName", "applicationId"),
+        "backend": atspi.BACKEND_NAME,
+    }
 
 
 MAX_DEPTH = 12
@@ -273,7 +308,11 @@ _consent = security.Consent()
 _audit = audit.AuditLog()
 
 
-def configure(settings: dict[str, Any] | None, config_path: str = "") -> None:
+def configure(
+    settings: dict[str, Any] | None,
+    config_path: str = "",
+    config_exists: bool | None = None,
+) -> None:
     """Install the user's ceiling, redaction list and audit path.
 
     Called once, at startup, from the process entry point. Deliberately not
@@ -283,7 +322,11 @@ def configure(settings: dict[str, Any] | None, config_path: str = "") -> None:
     global _consent, _audit
     settings = settings or {}
     _consent = security.Consent(
-        security.Ceiling.from_config(settings.get("scopes"), str(config_path or ""))
+        security.Ceiling.from_config(
+            settings.get("scopes"),
+            str(config_path or ""),
+            exists=config_exists,
+        )
     )
     _audit = audit.AuditLog(
         settings.get("auditPath") or None,
@@ -864,6 +907,11 @@ def _method_get_delta_since(params: dict[str, Any]) -> dict[str, Any]:
     """
     _snapshot()
     delta = _deltas.since(int(params["sinceRevision"]), _client_id(params))
+    # A walled-off application does not announce itself either. The engine
+    # still recorded the change — its picture of the desktop has to stay whole
+    # or the next revision would be computed against a fiction — but a caller
+    # who may not see the window does not get told the window moved.
+    delta["changes"] = _withheld(delta.get("changes") or [], "applicationName")
     if not delta["complete"]:
         delta["resumeRevision"] = _deltas.resume_revision
     return delta
@@ -872,8 +920,8 @@ def _method_get_delta_since(params: dict[str, Any]) -> dict[str, Any]:
 def _method_get_desktop_state(params: dict[str, Any]) -> dict[str, Any]:
     """The whole current picture — what a caller reads to re-acquire after a gap."""
     snapshot = _snapshot()
-    return {
-        "windows": [
+    windows = _withheld(
+        [
             {
                 "windowId": window.window_id,
                 "applicationId": window.application_id,
@@ -884,7 +932,19 @@ def _method_get_desktop_state(params: dict[str, Any]) -> dict[str, Any]:
             }
             for window in snapshot.windows.values()
         ],
-        "activeWindowId": snapshot.active_window,
+        "applicationName",
+        "applicationId",
+    )
+    visible = {window["windowId"] for window in windows}
+    return {
+        "windows": windows,
+        # The active window is a window like any other. Naming it while
+        # withholding it from the list would answer "is the password manager
+        # in front right now". Empty is already this field's word for nothing
+        # holding focus, and from out here the two are indistinguishable.
+        "activeWindowId": (
+            snapshot.active_window if snapshot.active_window in visible else ""
+        ),
         "revision": snapshot.revision,
         "observationMode": _session.mode,
     }
@@ -1228,6 +1288,59 @@ def _needs_application(operation_class: str) -> bool:
     return False
 
 
+#: Methods whose parameters carry other calls inside them. A batch reaches the
+#: desktop through its steps, and a step's target is not visible in the
+#: parameters the batch itself was checked against — so a rule about which
+#: application may be touched would be checked against a call that touches
+#: none. Derived from the schema rather than listed here, because a second
+#: nesting method added next year would otherwise arrive unguarded and nothing
+#: would say so.
+_NESTING_METHODS = frozenset(
+    name
+    for name, schema in protocol_generated.PARAMS_SCHEMA.items()
+    if isinstance(((schema.get("properties") or {}).get("actions") or {}).get("items"), dict)
+    and "method" in (
+        ((schema["properties"]["actions"]["items"]).get("properties") or {})
+    )
+)
+
+
+def _enforce_nested(method: str, params: dict[str, Any], client_id: str) -> None:
+    """Check a batch's steps before any of them runs.
+
+    The whole batch is refused when one step is, rather than the batch running
+    until it hits the refusal. A caller who is not allowed to touch an
+    application should not discover that halfway through a sequence, with the
+    first half already done and no way to say what state the desktop is now in.
+    """
+    if method not in _NESTING_METHODS:
+        return
+    steps = params.get("actions")
+    if not isinstance(steps, list):
+        return
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        inner = step.get("method")
+        if not isinstance(inner, str) or not inner:
+            continue
+        inner_params = step.get("params")
+        inner_class = protocol_generated.OPERATION_CLASS.get(inner, "submit")
+        _consent.enforce(
+            method=inner,
+            operation_class=inner_class,
+            client_id=client_id,
+            application=(
+                _application_of(inner_params)
+                if isinstance(inner_params, dict) and _needs_application(inner_class)
+                else ""
+            ),
+            # The batch carried the confirmation. Asking for it again per step
+            # would make a confirmed batch impossible to express.
+            confirmed=bool(params.get("confirm")),
+        )
+
+
 def _guarded(method: str, handler):
     """Consent, then the call, then the record — including when it is refused.
 
@@ -1264,6 +1377,7 @@ def _guarded(method: str, handler):
                 application=application,
                 confirmed=bool(params.get("confirm")),
             )
+            _enforce_nested(method, params, client_id)
         except DesktopError as denial:
             record.decision = "denied"
             record.reason = denial.message
@@ -1393,8 +1507,9 @@ def main(argv: list[str] | None = None) -> int:
     # Before anything is listening. A window between the socket opening and the
     # ceiling being installed is a window in which the defaults are wrong in
     # the permissive direction, and it would be a rare one, which is worse.
+    config_path = Path(args.config) if args.config else config.default_path()
     try:
-        configure(config.load(args.config), str(args.config or config.default_path()))
+        configure(config.load(args.config), str(config_path), config_path.exists())
     except ValueError as error:
         print(f"desktop_service: {error}", file=sys.stderr)
         return 2

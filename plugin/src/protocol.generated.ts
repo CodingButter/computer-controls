@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: affc9e7886501041
+// Protocol version: 1.0   schema sha256: ec17f85647e0ef4f
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "affc9e7886501041" as const;
+export const SCHEMA_DIGEST = "ec17f85647e0ef4f" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -68,6 +68,8 @@ export interface CapabilityTierReport {
 /** One semantic change, produced by the single diff engine. Says what changed and where, never where on screen. */
 export interface Change {
   applicationId?: string;
+  /** The application this change happened in. Present because the identifier above is opaque, and a reader deciding whether a change concerns them should not have to look one up to find out. */
+  applicationName?: string;
   attribution?: "self" | "external" | "unattributed";
   /** Kind-specific facts, such as the old and new value of a changed state. */
   detail?: Record<string, unknown>;
@@ -476,7 +478,8 @@ export interface ListWindowsResult {
 /** Run a sequence of actions in one round trip. The token-efficiency lever: a sequence costs one exchange rather than one per step. (operation class: submit) */
 export interface PerformActionsParams {
   actions: {
-    method: "focusWindow" | "invokeElement" | "setElementValue";
+    /** Which call this step is. Widened when typing arrived: focus a window and then type into it is the sequence somebody writing a message actually wants, and splitting it across two calls leaves a gap in which the desktop can change underneath the second one. */
+    method: "focusWindow" | "invokeElement" | "setElementValue" | "typeText" | "editText";
     params: Record<string, unknown>;
   }[];
   clientId?: string;

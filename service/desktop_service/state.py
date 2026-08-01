@@ -154,6 +154,7 @@ def diff(before: Snapshot, after: Snapshot) -> list[dict[str, Any]]:
                     "kind": "window-opened",
                     "revision": after.revision,
                     "applicationId": window.application_id,
+                    "applicationName": window.application_name,
                     "windowId": window_id,
                     "summary": model.egress_value(
                         f"a window appeared — {_describe_window(window)}",
@@ -172,6 +173,7 @@ def diff(before: Snapshot, after: Snapshot) -> list[dict[str, Any]]:
                     "kind": "window-closed",
                     "revision": after.revision,
                     "applicationId": window.application_id,
+                    "applicationName": window.application_name,
                     "windowId": window_id,
                     "summary": model.egress_value(
                         f"a window closed — {_describe_window(window)}",
@@ -191,6 +193,7 @@ def diff(before: Snapshot, after: Snapshot) -> list[dict[str, Any]]:
                 "revision": after.revision,
                 "windowId": after.active_window or None,
                 "applicationId": now.application_id if now else None,
+                "applicationName": now.application_name if now else None,
                 "summary": model.egress_value(
                     f"focus moved to {_describe_window(now)}" if now else "focus left every known window",
                     field=model.SUMMARY,

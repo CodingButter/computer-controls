@@ -63,7 +63,6 @@ class Record:
     from_revision: int = 0
     to_revision: int = 0
     error_code: str = ""
-    detail: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self, *, at: float) -> str:
         payload: dict[str, Any] = {
@@ -91,8 +90,10 @@ class Record:
             payload["durationMs"] = self.duration_ms
         if self.to_revision or self.from_revision:
             payload["revisions"] = [self.from_revision, self.to_revision]
-        if self.detail:
-            payload["detail"] = self.detail
+        # Every field above is named. There is deliberately no free-form bag
+        # here: a record with somewhere to put "anything else relevant" is a
+        # record that eventually has the contents of a field in it, added by
+        # somebody who was debugging and meant to take it out again.
         return json.dumps(payload, ensure_ascii=False, sort_keys=False)
 
 

@@ -1,11 +1,12 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: affc9e7886501041
+// Protocol version: 1.0   schema sha256: ec17f85647e0ef4f
 
 import { z } from "mastracode/plugin";
 
 export const changeSchema = z.object({
   applicationId: z.string().optional(),
+  applicationName: z.string().describe("The application this change happened in. Present because the identifier above is opaque, and a reader deciding whether a change concerns them should not have to look one up to find out.").optional(),
   attribution: z.enum(["self", "external", "unattributed"]).optional(),
   detail: z.record(z.string(), z.unknown()).describe("Kind-specific facts, such as the old and new value of a changed state.").optional(),
   elementId: z.string().optional(),
@@ -341,7 +342,7 @@ export const listWindowsResult = z.object({
 
 export const performActionsParams = z.object({
   actions: z.array(z.object({
-    method: z.enum(["focusWindow", "invokeElement", "setElementValue"]),
+    method: z.enum(["focusWindow", "invokeElement", "setElementValue", "typeText", "editText"]).describe("Which call this step is. Widened when typing arrived: focus a window and then type into it is the sequence somebody writing a message actually wants, and splitting it across two calls leaves a gap in which the desktop can change underneath the second one."),
     params: z.record(z.string(), z.unknown()),
   })),
   clientId: z.string().optional(),
