@@ -681,6 +681,104 @@ def set_text_value(obj: Atspi.Accessible, text: str) -> bool:
     return bool(_safe(lambda: obj.set_text_contents(text), False))
 
 
+def insert_text(obj: Atspi.Accessible, text: str, offset: int = -1) -> bool:
+    """Insert at a caret position without disturbing what is already there.
+
+    The interface an application receives dictated speech through, used here for
+    the same reason: an application that listens for edits hears these, where it
+    hears nothing at all when a field's whole contents are swapped underneath it.
+
+    An offset of -1 means the end, which is where a person typing would be.
+    """
+    if not _safe(lambda: obj.get_editable_text_iface()):
+        return False
+    at = offset
+    if at < 0:
+        at = len(_safe(lambda: Atspi.Text.get_text(obj, 0, -1), "") or "")
+    return bool(_safe(lambda: obj.insert_text(at, text, len(text)), False))
+
+
+def delete_text(obj: Atspi.Accessible, start: int, end: int) -> bool:
+    """Remove a range of characters by offset.
+
+    This is what editing is at this layer. There is no backspace to press and no
+    selection to make first: a range is spliced out in one call, atomically,
+    which is both simpler than imitating a person and more truthful — an
+    application sees one edit rather than forty deletions it has to coalesce.
+
+    A selection can be set beforehand if a human should watch the text highlight
+    before it goes, but that is presentation. The removal does not need it.
+    """
+    if not _safe(lambda: obj.get_editable_text_iface()):
+        return False
+    length = len(_safe(lambda: Atspi.Text.get_text(obj, 0, -1), "") or "")
+    if start < 0 or end > length or start >= end:
+        # Out-of-range offsets are the caller holding a stale idea of the field,
+        # which is worth an honest refusal rather than a clamp that deletes
+        # something adjacent to what was meant.
+        return False
+    return bool(_safe(lambda: obj.delete_text(start, end), False))
+
+
+def select_text(obj: Atspi.Accessible, start: int, end: int) -> bool:
+    """Highlight a range, so a person can see what is about to change."""
+    if not _safe(lambda: obj.get_text_iface()):
+        return False
+    if _safe(lambda: Atspi.Text.get_n_selections(obj), 0):
+        _safe(lambda: Atspi.Text.remove_selection(obj, 0), False)
+    return bool(_safe(lambda: Atspi.Text.add_selection(obj, start, end), False))
+
+
+def find_range(obj: Atspi.Accessible, needle: str) -> tuple[int, int] | None:
+    """Where a piece of text sits in a field, as offsets, or nothing if absent.
+
+    Addressing an edit by the text being replaced rather than by raw offsets is
+    the same discipline as naming an action instead of indexing it: an offset
+    computed from a field somebody has since typed into points at the wrong
+    characters, while text that has moved simply is not found.
+    """
+    if not needle:
+        return None
+    body = _safe(lambda: Atspi.Text.get_text(obj, 0, -1), "") or ""
+    at = body.find(needle)
+    if at < 0 or body.find(needle, at + 1) >= 0:
+        # Ambiguity is refused: two matches mean the caller does not know which
+        # one it meant, and guessing edits the wrong sentence.
+        return None
+    return at, at + len(needle)
+
+
+def text_contains(obj: Atspi.Accessible, needle: str) -> bool:
+    """Whether a field holds this text anywhere in it — the verdict, not the text.
+
+    An edit lands in the middle of a field, so confirming one is a containment
+    question rather than an equality question. Same discipline as `text_matches`:
+    the comparison happens against the raw contents in here, and only a boolean
+    comes back out, so a redacted field can still be verified.
+    """
+    role = _safe(obj.get_role_name, "") or ""
+    return needle in _text_value(obj, role)
+
+
+def is_editable(obj: Atspi.Accessible) -> bool:
+    """Whether this element accepts text at all, asked before any is sent."""
+    return bool(_safe(lambda: obj.get_editable_text_iface()))
+
+
+def text_matches(obj: Atspi.Accessible, expected: str, exact: bool) -> bool:
+    """Does the field now say what it was supposed to say?
+
+    The comparison happens here, against the raw text, and only the verdict
+    leaves. Asking the caller to compare would mean handing it the field's
+    contents to compare against — and a field whose contents are redacted on the
+    way out could never be verified at all. A boolean is not text, so a password
+    field can be confirmed without being disclosed.
+    """
+    role = _safe(obj.get_role_name, "") or ""
+    actual = _text_value(obj, role)
+    return actual == expected if exact else actual.endswith(expected)
+
+
 def set_numeric_value(obj: Atspi.Accessible, amount: float) -> bool:
     """Set a slider or spinner through the Value interface, refusing out-of-range.
 

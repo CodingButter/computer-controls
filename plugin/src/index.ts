@@ -105,9 +105,32 @@ export function staleDaemonHint(
   return "";
 }
 
+/**
+ * How long to wait for a method that spends real time on purpose.
+ *
+ * Typing a paragraph at seventy words a minute takes the better part of a
+ * minute, and the default deadline would cut the connection while the service
+ * was still doing exactly what it was asked to do — abandoning a half-typed
+ * sentence with nobody left holding the result. The estimate is the same
+ * arithmetic the service uses, plus room for the settling that follows.
+ */
+export function pacedTimeoutMs(params: Record<string, unknown>): number | undefined {
+  const text = typeof params.text === "string" ? params.text : params.replaceWith;
+  if (typeof text !== "string") return undefined;
+  const wpm = typeof params.wordsPerMinute === "number" ? params.wordsPerMinute : 70;
+  const typing = (text.length * 60_000) / (wpm * 5);
+  return Math.ceil(typing) + PACED_HEADROOM_MS;
+}
+
+/** Settling, a stalled toolkit call, and the round trip — not typing time. */
+const PACED_HEADROOM_MS = 30_000;
+
+const PACED_METHODS = new Set(["typeText", "editText"]);
+
 async function request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
   try {
-    return await supervisor.request<T>(method, params);
+    const timeout = PACED_METHODS.has(method) ? pacedTimeoutMs(params) : undefined;
+    return await supervisor.request<T>(method, params, timeout);
   } catch (error) {
     if (error instanceof DesktopServiceError && error.code === "METHOD_NOT_FOUND") {
       const hint = staleDaemonHint(await supervisor.schemaDigest(), SCHEMA_DIGEST);
@@ -247,6 +270,45 @@ export default defineMastraCodePlugin({
         inputSchema: schemas.setElementValueParams,
         outputSchema: schemas.setElementValueResult,
         execute: async (input) => await request("setElementValue", { ...input }),
+      }),
+    },
+
+    desktop_type_text: {
+      tool: createTool({
+        id: "desktop_type_text",
+        description:
+          "Type into an editable element the way a person does: a word at a time, at a " +
+          "typist's speed, through the same interface dictation software uses. Use this for " +
+          "anything a human will watch arrive — a message, a chat, a document — and use " +
+          "desktop_set_element_value for a form field nobody is looking at. Some applications " +
+          "only notice text that arrives as edits and ignore having their field replaced " +
+          "wholesale; this is the one that works on those. The call is held open for as long " +
+          "as the typing takes, which is roughly the character count divided by five times the " +
+          "words-per-minute. Success means the field read back what you asked for, not that " +
+          "the insertions were accepted. If it stops early the result still returns: read " +
+          "'progress' for how many words landed and why it stopped, then decide whether to " +
+          "wait, finish it, or clear the field — the text that already landed is really there.",
+        inputSchema: schemas.typeTextParams,
+        outputSchema: schemas.typeTextResult,
+        execute: async (input) => await request("typeText", { ...input }),
+      }),
+    },
+
+    desktop_edit_text: {
+      tool: createTool({
+        id: "desktop_edit_text",
+        description:
+          "Replace or delete part of an editable element's text, addressed by the text itself " +
+          "rather than by character positions. Editing here is a splice — the range is removed " +
+          "and the replacement put in its place — because there is no keyboard at this layer " +
+          "and nothing to press backspace on. Give 'find' text that appears exactly once: two " +
+          "matches, or text that has changed since you read it, are refused rather than guessed " +
+          "at, so a stale idea of a field can never edit the wrong sentence. Omit 'replaceWith' " +
+          "to delete. Add 'showSelection' to highlight the range first when a person is " +
+          "watching, and 'wordsPerMinute' to type the replacement in at human speed.",
+        inputSchema: schemas.editTextParams,
+        outputSchema: schemas.editTextResult,
+        execute: async (input) => await request("editText", { ...input }),
       }),
     },
 

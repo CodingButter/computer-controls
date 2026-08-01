@@ -30,6 +30,7 @@ _SUPPORTED_KEYWORDS = frozenset(
         "items",
         "maxItems",
         "maximum",
+        "maxLength",
         "minItems",
         "minimum",
         "pattern",
@@ -133,6 +134,14 @@ def _check(value: Any, node: dict[str, Any], path: str, problems: list[str]) -> 
     pattern = node.get("pattern")
     if pattern is not None and isinstance(value, str) and not re.search(pattern, value):
         problems.append(f"{path} must match {pattern}, got {value!r}")
+        return
+
+    longest = node.get("maxLength")
+    if longest is not None and isinstance(value, str) and len(value) > longest:
+        # A bound on text is a bound on how long a call may hold the caller, so a
+        # string over the limit is refused at the door rather than truncated
+        # into something the caller never asked to say.
+        problems.append(f"{path} allows at most {longest} character(s), got {len(value)}")
         return
 
     if isinstance(value, dict):

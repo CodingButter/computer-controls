@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: ab6162fb626960de
+// Protocol version: 1.0   schema sha256: 8667ac699a620c5c
 
 import { z } from "mastracode/plugin";
 
@@ -37,6 +37,7 @@ export const actionResultSchema = z.object({
   fallbacksUsed: z.array(z.string()),
   observedEffects: observedEffectsSchema.optional(),
   ok: z.boolean(),
+  progress: z.record(z.string(), z.unknown()).describe("How far an action that takes real time actually got, present whether or not it succeeded. An action interrupted partway has still changed the desktop, so a deadline or a stalled application is reported here rather than raised: the caller reads how much landed, decides whether waiting is still reasonable, and acts on the state instead of on the absence of an answer.").optional(),
 });
 
 export const boundsSchema = z.object({
@@ -89,6 +90,18 @@ export const captureWindowResult = z.object({
   width: z.number().int(),
   windowId: z.string(),
 });
+
+export const editTextParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  elementId: z.string(),
+  find: z.string().max(4000).describe("The existing text to replace. Must appear exactly once: two matches mean the caller does not know which one it meant, and the edit is refused rather than guessed."),
+  replaceWith: z.string().max(4000).describe("What to put in its place. Omit to delete the range outright.").optional(),
+  settleMs: z.number().int().min(0).max(10000).optional(),
+  showSelection: z.boolean().describe("Highlight the range before removing it, so a watching human sees what changed. Presentation only: the edit does not need it.").optional(),
+  wordsPerMinute: z.number().int().min(10).max(220).describe("When present the replacement is typed at this speed rather than inserted at once, for an edit a person is watching.").optional(),
+});
+export const editTextResult = z.record(z.string(), z.unknown());
 
 export const focusWindowParams = z.object({
   clientId: z.string().optional(),
@@ -344,6 +357,17 @@ export const setObservationModeResult = z.object({
   reconcileIntervalMs: z.number().int(),
   revision: z.number().int(),
 });
+
+export const typeTextParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  elementId: z.string(),
+  replace: z.boolean().describe("Clear the field first. Defaults to false, which appends: extending a field is what typing does, and it leaves anything already there alone.").optional(),
+  settleMs: z.number().int().min(0).max(10000).optional(),
+  text: z.string().max(4000).describe("What to type. Bounded because the call is held open for as long as the typing takes, and a caller cannot wait forever."),
+  wordsPerMinute: z.number().int().min(10).max(220).describe("Typing speed. Defaults to a competent typist. Faster than a person can type is available and is a choice the caller makes knowingly.").optional(),
+});
+export const typeTextResult = z.record(z.string(), z.unknown());
 
 export const waitForParams = z.object({
   clientId: z.string().optional(),

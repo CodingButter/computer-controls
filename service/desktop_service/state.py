@@ -70,6 +70,62 @@ def snapshot_from_windows(
     return Snapshot(revision=revision, windows=facts, values=dict(values or {}))
 
 
+def _edit_shape(before: str, after: str) -> dict[str, Any]:
+    """The shape of an edit: where it happened and how much, never what it said.
+
+    "An element's value changed" is the same sentence whether a letter was typed or
+    the whole document was deleted, and a reader holding only that cannot tell which
+    happened — which is how an agent misses somebody wiping its work and carries on.
+
+    Lengths are safe to report where content is not. These strings have already been
+    through the value-egress point on the way out of the toolkit, so a redacted field
+    yields the length of its redaction and never of its secret.
+    """
+    limit = min(len(before), len(after))
+    prefix = 0
+    while prefix < limit and before[prefix] == after[prefix]:
+        prefix += 1
+    suffix = 0
+    while suffix < limit - prefix and before[-1 - suffix] == after[-1 - suffix]:
+        suffix += 1
+
+    removed = len(before) - prefix - suffix
+    added = len(after) - prefix - suffix
+    if not after:
+        shape = "cleared"
+    elif removed and added:
+        shape = "replaced"
+    elif removed:
+        shape = "deleted"
+    elif prefix == len(before):
+        shape = "appended"
+    else:
+        shape = "inserted"
+    return {
+        "shape": shape,
+        "lengthBefore": len(before),
+        "lengthAfter": len(after),
+        "charactersAdded": added,
+        "charactersRemoved": removed,
+        "unchangedPrefix": prefix,
+    }
+
+
+def _describe_edit(before: str, after: str) -> str:
+    """The same shape as a sentence, because the model reads summaries first."""
+    shape = _edit_shape(before, after)
+    added, removed = shape["charactersAdded"], shape["charactersRemoved"]
+    if shape["shape"] == "cleared":
+        return f"was cleared — {removed} characters removed"
+    if shape["shape"] == "appended":
+        return f"grew by {added} characters at the end"
+    if shape["shape"] == "inserted":
+        return f"gained {added} characters"
+    if shape["shape"] == "deleted":
+        return f"lost {removed} characters"
+    return f"was rewritten — {removed} characters removed, {added} added"
+
+
 def _describe_window(window: WindowFacts) -> str:
     title = window.title or "(untitled)"
     if window.application_name:
@@ -158,10 +214,11 @@ def diff(before: Snapshot, after: Snapshot) -> list[dict[str, Any]]:
                     "revision": after.revision,
                     "elementId": element_id,
                     "summary": model.egress_value(
-                        "an element's value changed",
+                        f"an element's value {_describe_edit(before.values[element_id], value)}",
                         field=model.SUMMARY,
                         element_id=element_id,
                     ),
+                    "detail": _edit_shape(before.values[element_id], value),
                 }
             )
 

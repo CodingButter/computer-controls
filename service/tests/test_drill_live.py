@@ -54,10 +54,18 @@ def test_content_below_the_legal_depth_is_reachable_only_by_drilling(live_window
     frontier = [element for element, depth in nodes if depth == MAX_LEGAL_DEPTH]
     assert frontier, "there must be nodes at the wall to anchor on"
 
-    def has_text(result) -> bool:
-        return any(element.value for element, _depth in flatten(result.root))
+    def text_bearing(result) -> list:
+        # Presence of a text-bearing element, not presence of text. An empty document
+        # is still a document: this test asks whether the walker can reach the buffer,
+        # and asking whether the buffer has anything in it made a human clearing the
+        # editor look identical to the drill-down being broken.
+        return [
+            element
+            for element, _depth in flatten(result.root)
+            if element.role in atspi.TEXT_VALUE_ROLES
+        ]
 
-    reachable_from_window = has_text(from_window)
+    reachable_from_window = bool(text_bearing(from_window))
     reachable_by_drilling = False
     absolute_depth = 0
     for anchor_element in frontier:
@@ -65,11 +73,14 @@ def test_content_below_the_legal_depth_is_reachable_only_by_drilling(live_window
         if anchor_obj is None:
             continue
         drilled = walk_from(anchor_obj, depth=MAX_LEGAL_DEPTH, max_nodes=300)
-        below = flatten(drilled.root)
-        with_text = [(element, depth) for element, depth in below if element.value]
-        if with_text:
+        below = [
+            (element, depth)
+            for element, depth in flatten(drilled.root)
+            if element.role in atspi.TEXT_VALUE_ROLES
+        ]
+        if below:
             reachable_by_drilling = True
-            absolute_depth = MAX_LEGAL_DEPTH + with_text[0][1]
+            absolute_depth = MAX_LEGAL_DEPTH + below[0][1]
             break
 
     if reachable_from_window:

@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: ab6162fb626960de
+// Protocol version: 1.0   schema sha256: 8667ac699a620c5c
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "ab6162fb626960de" as const;
+export const SCHEMA_DIGEST = "8667ac699a620c5c" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -43,6 +43,8 @@ export interface ActionResult {
   fallbacksUsed: string[];
   observedEffects?: ObservedEffects;
   ok: boolean;
+  /** How far an action that takes real time actually got, present whether or not it succeeded. An action interrupted partway has still changed the desktop, so a deadline or a stalled application is reported here rather than raised: the caller reads how much landed, decides whether waiting is still reasonable, and acts on the state instead of on the absence of an answer. */
+  progress?: Record<string, unknown>;
 }
 
 /** Screen rectangle in pixels. Reported for orientation and for the user's benefit; it is not an addressing mechanism and no method in this protocol accepts coordinates. */
@@ -163,6 +165,23 @@ export interface CaptureWindowResult {
   width: number;
   windowId: string;
 }
+
+/** Replace or remove part of an editable element's text, addressed by the text itself rather than by character offsets. Editing at this layer is a splice — a range is removed and something is put in its place in one operation — because there is no keyboard here and nothing to press backspace on. An offset computed from a field somebody has since typed into points at the wrong characters; text that has moved is simply not found, which is a refusal instead of a wrong edit. (operation class: edit) */
+export interface EditTextParams {
+  clientId?: string;
+  confirm?: boolean;
+  elementId: string;
+  /** The existing text to replace. Must appear exactly once: two matches mean the caller does not know which one it meant, and the edit is refused rather than guessed. */
+  find: string;
+  /** What to put in its place. Omit to delete the range outright. */
+  replaceWith?: string;
+  settleMs?: number;
+  /** Highlight the range before removing it, so a watching human sees what changed. Presentation only: the edit does not need it. */
+  showSelection?: boolean;
+  /** When present the replacement is typed at this speed rather than inserted at once, for an edit a person is watching. */
+  wordsPerMinute?: number;
+}
+export type EditTextResult = ActionResult;
 
 /** Raise and focus a window by id. Addressed semantically; no coordinates on either path. (operation class: activate) */
 export interface FocusWindowParams {
@@ -474,6 +493,21 @@ export interface SetObservationModeResult {
   revision: number;
 }
 
+/** Put text into an editable element the way a person would: a word at a time, at a typist's speed, through the same editable-text interface dictation software uses. Prefer setElementValue for a form field nobody is watching; prefer this for anything a human will read as it arrives, and for applications that listen for edits rather than for their field being replaced. (operation class: edit) */
+export interface TypeTextParams {
+  clientId?: string;
+  confirm?: boolean;
+  elementId: string;
+  /** Clear the field first. Defaults to false, which appends: extending a field is what typing does, and it leaves anything already there alone. */
+  replace?: boolean;
+  settleMs?: number;
+  /** What to type. Bounded because the call is held open for as long as the typing takes, and a caller cannot wait forever. */
+  text: string;
+  /** Typing speed. Defaults to a competent typist. Faster than a person can type is available and is a choice the caller makes knowingly. */
+  wordsPerMinute?: number;
+}
+export type TypeTextResult = ActionResult;
+
 /** Wait for a semantic condition. Replaces sleeping in the model's context: the waiting happens in the service and returns the moment the condition holds. (operation class: observe) */
 export interface WaitForParams {
   clientId?: string;
@@ -499,10 +533,11 @@ export interface WaitForResult {
   waitedMs: number;
 }
 
-export type MethodName = "captureWindow" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "setElementValue" | "setObservationMode" | "waitFor";
+export type MethodName = "captureWindow" | "editText" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "setElementValue" | "setObservationMode" | "typeText" | "waitFor";
 
 export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   captureWindow: "observe",
+  editText: "edit",
   focusWindow: "activate",
   getDeltaSince: "observe",
   getDesktopCapabilities: "observe",
@@ -521,11 +556,13 @@ export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   queryElements: "observe",
   setElementValue: "edit",
   setObservationMode: "observe",
+  typeText: "edit",
   waitFor: "observe",
 };
 
 export interface MethodMap {
   captureWindow: { params: CaptureWindowParams; result: CaptureWindowResult };
+  editText: { params: EditTextParams; result: EditTextResult };
   focusWindow: { params: FocusWindowParams; result: FocusWindowResult };
   getDeltaSince: { params: GetDeltaSinceParams; result: GetDeltaSinceResult };
   getDesktopCapabilities: { params: GetDesktopCapabilitiesParams; result: GetDesktopCapabilitiesResult };
@@ -544,5 +581,6 @@ export interface MethodMap {
   queryElements: { params: QueryElementsParams; result: QueryElementsResult };
   setElementValue: { params: SetElementValueParams; result: SetElementValueResult };
   setObservationMode: { params: SetObservationModeParams; result: SetObservationModeResult };
+  typeText: { params: TypeTextParams; result: TypeTextResult };
   waitFor: { params: WaitForParams; result: WaitForResult };
 }

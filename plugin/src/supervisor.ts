@@ -196,9 +196,10 @@ export class DesktopSupervisor {
   async request<T = unknown>(
     method: string,
     params: Record<string, unknown> = {},
+    timeoutMs?: number,
   ): Promise<T> {
     const client = await this.client();
-    return await client.request<T>(method, params);
+    return await client.request<T>(method, params, timeoutMs);
   }
 
   /**

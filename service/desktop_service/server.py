@@ -17,7 +17,7 @@ import threading
 import time
 from typing import Any
 
-from . import actions, capabilities, deltas, inspect as inspection, policy, state, waitfor, watch
+from . import actions, cadence, capabilities, deltas, inspect as inspection, policy, state, waitfor, watch
 from .backends import atspi, capture, launcher, loop, session_env, x11
 from .errors import DesktopError, ErrorCode, InvalidParams
 from .registry import ElementRegistry
@@ -499,10 +499,208 @@ def _method_set_element_value(params: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _method_type_text(params: dict[str, Any]) -> dict[str, Any]:
+    """Type into an element at human speed, a word at a time.
+
+    Everything about this method is `setElementValue` with the timing put back
+    in. It goes through the same editable-text interface, synthesizes no
+    keystrokes, and needs no focus — which is what makes the pace a presentation
+    choice rather than a trick. Text that appears all at once is text nobody
+    typed, and a surprising number of applications only notice input that
+    arrives the way dictation delivers it.
+
+    Success is the field reading back what it was supposed to say. Not "the
+    inserts returned true", which several toolkits will happily do while
+    dropping the text on the floor, and not "the call finished in time", which
+    is a statement about the clock rather than about the desktop.
+
+    Each insert is its own short trip onto the toolkit thread and the waiting
+    happens off it. A word takes under a millisecond to insert; the second it
+    takes to wait belongs to nobody, and holding the one thread every client
+    shares for the length of a sentence would stall the whole desktop to make
+    one field look human.
+
+    A stalled toolkit ends the typing but does not end the call. Raising there
+    would throw away the part that already happened and leave half a sentence on
+    somebody's screen with no record of it — so the deadline produces a report
+    instead: how far it got, what the field says now, and whether waiting is
+    still reasonable. The decision about what to do next is not the service's to
+    make.
+    """
+    element_id = _str_param(params, "elementId", required=True)
+    text = _str_param(params, "text", required=True)
+    wpm = int(params.get("wordsPerMinute") or cadence.DEFAULT_WPM)
+    replace = bool(params.get("replace", False))
+    plan = cadence.plan(text, wpm=wpm)
+    progress: dict[str, Any] = {
+        "wordsPlanned": len(plan),
+        "wordsTyped": 0,
+        "estimatedMs": cadence.estimate_ms(text, wpm=wpm),
+    }
+
+    def on_loop(work):
+        return loop.call_on_loop(work, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
+
+    def run() -> bool:
+        def begin() -> bool:
+            obj = _resolve_element(element_id)
+            if not atspi.is_editable(obj):
+                return False
+            return atspi.set_text_value(obj, "") if replace else True
+
+        if not on_loop(begin):
+            progress["stoppedBecause"] = "the element does not accept text"
+            return False
+
+        for stroke in plan:
+            if stroke.delay_ms:
+                time.sleep(stroke.delay_ms / 1000.0)
+            try:
+                landed = on_loop(lambda: atspi.insert_text(_resolve_element(element_id), stroke.text))
+            except DesktopError as stalled:
+                # The toolkit stopped answering. Everything typed so far is still
+                # on screen, so this is a state to report rather than an
+                # exception to throw.
+                progress["stoppedBecause"] = f"the application stopped answering: {stalled.message}"
+                break
+            if not landed:
+                progress["stoppedBecause"] = "the application refused an insertion"
+                break
+            progress["wordsTyped"] += 1
+
+        # The one assertion that matters, made against the raw text inside the
+        # backend so that a redacted field can still be confirmed.
+        try:
+            verified = bool(
+                on_loop(lambda: atspi.text_matches(_resolve_element(element_id), text, exact=replace))
+            )
+        except DesktopError as unreachable:
+            progress["verified"] = "unknown"
+            progress["stoppedBecause"] = progress.get("stoppedBecause") or unreachable.message
+            return False
+        progress["verified"] = verified
+        return verified
+
+    result = actions.perform(
+        "typeText",
+        element_id,
+        [actions.Attempt("accessibility", run)],
+        _snapshot,
+        _action_log,
+        client_id=_client_id(params),
+        scope=_element_scope(element_id),
+        **_settle_bounds(params),
+    )
+    # Carried whether it worked or not: a caller that reads only the failures
+    # learns nothing about how far a successful call had to go, and a caller
+    # that reads only `ok` cannot tell a refusal from an interruption.
+    result["progress"] = progress
+    return result
+
+
+#: How long a highlight is left up before the text under it goes. Long enough for
+#: an eye to land on it, short enough that nobody is waiting on the theatre.
+SELECTION_DWELL_SECONDS = 0.4
+
+
+def _method_edit_text(params: dict[str, Any]) -> dict[str, Any]:
+    """Replace part of a field's text, addressed by the text rather than by offsets.
+
+    Editing at this layer is a splice: a range is removed and something is put in
+    its place. There is no keyboard here, so there is nothing to press backspace
+    on, and imitating one would mean forty separate edits where the application
+    should see one.
+
+    The range is found by content on purpose. Offsets are an index into a field
+    somebody may have typed into since the caller last looked, and an index that
+    has moved silently addresses the wrong characters — the same failure that
+    made every action in this service addressed by name. Text that has moved is
+    simply not found, and two matches are refused rather than guessed between.
+
+    `showSelection` and `wordsPerMinute` are presentation. They change what a
+    watching human sees and nothing about whether the edit succeeded, which is
+    still only ever the field reading back what was asked for.
+    """
+    element_id = _str_param(params, "elementId", required=True)
+    needle = _str_param(params, "find", required=True)
+    replacement = params.get("replaceWith") or ""
+    wpm = params.get("wordsPerMinute")
+    show_selection = bool(params.get("showSelection", False))
+    progress: dict[str, Any] = {"found": False}
+
+    def on_loop(work):
+        return loop.call_on_loop(work, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
+
+    def run() -> bool:
+        found = on_loop(lambda: atspi.find_range(_resolve_element(element_id), needle))
+        if found is None:
+            progress["stoppedBecause"] = (
+                "that text does not appear exactly once in the field: it may have changed, "
+                "or the same text may appear more than once"
+            )
+            return False
+        start, end = found
+        progress.update({"found": True, "start": start, "end": end, "removed": end - start})
+
+        if show_selection:
+            on_loop(lambda: atspi.select_text(_resolve_element(element_id), start, end))
+            time.sleep(SELECTION_DWELL_SECONDS)
+
+        if not on_loop(lambda: atspi.delete_text(_resolve_element(element_id), start, end)):
+            progress["stoppedBecause"] = "the application refused the deletion"
+            return False
+
+        if not replacement:
+            gone = not on_loop(lambda: atspi.text_contains(_resolve_element(element_id), needle))
+            progress["verified"] = gone
+            return gone
+
+        plan = cadence.plan(replacement, wpm=int(wpm)) if wpm else [cadence.Keystroke(replacement, 0)]
+        progress["wordsPlanned"] = len(plan)
+        progress["wordsTyped"] = 0
+        offset = start
+        for stroke in plan:
+            if stroke.delay_ms:
+                time.sleep(stroke.delay_ms / 1000.0)
+            try:
+                landed = on_loop(
+                    lambda: atspi.insert_text(_resolve_element(element_id), stroke.text, offset)
+                )
+            except DesktopError as stalled:
+                progress["stoppedBecause"] = f"the application stopped answering: {stalled.message}"
+                break
+            if not landed:
+                progress["stoppedBecause"] = "the application refused an insertion"
+                break
+            progress["wordsTyped"] += 1
+            offset += len(stroke.text)
+
+        # An edit lands in the middle of a field, so the question is whether the
+        # replacement is in there — not whether the field ends with it.
+        verified = bool(on_loop(lambda: atspi.text_contains(_resolve_element(element_id), replacement)))
+        progress["verified"] = verified
+        return verified
+
+    result = actions.perform(
+        "editText",
+        element_id,
+        [actions.Attempt("accessibility", run)],
+        _snapshot,
+        _action_log,
+        client_id=_client_id(params),
+        scope=_element_scope(element_id),
+        **_settle_bounds(params),
+    )
+    result["progress"] = progress
+    return result
+
+
 _BATCH_METHODS = {
     "focusWindow": _method_focus_window,
     "invokeElement": _method_invoke_element,
     "setElementValue": _method_set_element_value,
+    "typeText": _method_type_text,
+    "editText": _method_edit_text,
 }
 
 
@@ -887,6 +1085,8 @@ def build_server(socket_path: str) -> JsonRpcServer:
     server.register("focusWindow", _method_focus_window)
     server.register("invokeElement", _method_invoke_element)
     server.register("setElementValue", _method_set_element_value)
+    server.register("typeText", _method_type_text)
+    server.register("editText", _method_edit_text)
     server.register("performActions", _method_perform_actions)
     server.register("waitFor", _method_wait_for)
     server.register("getDeltaSince", _method_get_delta_since)

@@ -175,8 +175,11 @@ function zodType(node, indent) {
     return `z.union([${parts.join(", ")}])`;
   }
   switch (node.type) {
-    case "string":
-      return `z.string()${node.pattern ? `.regex(${new RegExp(node.pattern)})` : ""}`;
+    case "string": {
+      const pattern = node.pattern ? `.regex(${new RegExp(node.pattern)})` : "";
+      const longest = node.maxLength !== undefined ? `.max(${node.maxLength})` : "";
+      return `z.string()${pattern}${longest}`;
+    }
     case "integer":
       return `z.number().int()${bounds(node)}`;
     case "number":

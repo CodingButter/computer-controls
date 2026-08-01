@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: ab6162fb626960de
+# Protocol version: 1.0   schema sha256: 8667ac699a620c5c
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "ab6162fb626960de"
+SCHEMA_DIGEST: Final = "8667ac699a620c5c"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -35,6 +35,7 @@ ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUN
 #: Every method mapped to the operation class it belongs to.
 OPERATION_CLASS: Final[dict[str, str]] = {
     "captureWindow": "observe",
+    "editText": "edit",
     "focusWindow": "activate",
     "getDeltaSince": "observe",
     "getDesktopCapabilities": "observe",
@@ -53,6 +54,7 @@ OPERATION_CLASS: Final[dict[str, str]] = {
     "queryElements": "observe",
     "setElementValue": "edit",
     "setObservationMode": "observe",
+    "typeText": "edit",
     "waitFor": "observe",
 }
 
@@ -80,6 +82,50 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         },
         "required": [
             "windowId",
+        ],
+        "type": "object",
+    },
+    "editText": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+            "find": {
+                "description": "The existing text to replace. Must appear exactly once: two matches mean the caller does not know which one it meant, and the edit is refused rather than guessed.",
+                "maxLength": 4000,
+                "type": "string",
+            },
+            "replaceWith": {
+                "description": "What to put in its place. Omit to delete the range outright.",
+                "maxLength": 4000,
+                "type": "string",
+            },
+            "settleMs": {
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer",
+            },
+            "showSelection": {
+                "description": "Highlight the range before removing it, so a watching human sees what changed. Presentation only: the edit does not need it.",
+                "type": "boolean",
+            },
+            "wordsPerMinute": {
+                "description": "When present the replacement is typed at this speed rather than inserted at once, for an edit a person is watching.",
+                "maximum": 220,
+                "minimum": 10,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "elementId",
+            "find",
         ],
         "type": "object",
     },
@@ -558,6 +604,45 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "typeText": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+            "replace": {
+                "description": "Clear the field first. Defaults to false, which appends: extending a field is what typing does, and it leaves anything already there alone.",
+                "type": "boolean",
+            },
+            "settleMs": {
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer",
+            },
+            "text": {
+                "description": "What to type. Bounded because the call is held open for as long as the typing takes, and a caller cannot wait forever.",
+                "maxLength": 4000,
+                "type": "string",
+            },
+            "wordsPerMinute": {
+                "description": "Typing speed. Defaults to a competent typist. Faster than a person can type is available and is a choice the caller makes knowingly.",
+                "maximum": 220,
+                "minimum": 10,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "elementId",
+            "text",
+        ],
+        "type": "object",
+    },
     "waitFor": {
         "additionalProperties": False,
         "properties": {
@@ -665,6 +750,9 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             "revision",
         ],
         "type": "object",
+    },
+    "editText": {
+        "$ref": "#/$defs/actionResult",
     },
     "focusWindow": {
         "$ref": "#/$defs/actionResult",
@@ -1224,6 +1312,9 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "typeText": {
+        "$ref": "#/$defs/actionResult",
+    },
     "waitFor": {
         "additionalProperties": False,
         "properties": {
@@ -1286,6 +1377,11 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
             },
             "ok": {
                 "type": "boolean",
+            },
+            "progress": {
+                "additionalProperties": True,
+                "description": "How far an action that takes real time actually got, present whether or not it succeeded. An action interrupted partway has still changed the desktop, so a deadline or a stalled application is reported here rather than raised: the caller reads how much landed, decides whether waiting is still reasonable, and acts on the state instead of on the absence of an answer.",
+                "type": "object",
             },
         },
         "required": [

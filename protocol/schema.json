@@ -237,6 +237,7 @@
         "fallbacksUsed": { "type": "array", "items": { "type": "string" } },
         "durationMs": { "type": "integer", "minimum": 0 },
         "observedEffects": { "$ref": "#/$defs/observedEffects" },
+        "progress": { "type": "object", "additionalProperties": true, "description": "How far an action that takes real time actually got, present whether or not it succeeded. An action interrupted partway has still changed the desktop, so a deadline or a stalled application is reported here rather than raised: the caller reads how much landed, decides whether waiting is still reasonable, and acts on the state instead of on the absence of an answer." },
         "error": { "$ref": "#/$defs/errorData" }
       },
       "required": ["actionId", "ok", "backend", "fallbacksUsed", "durationMs"],
@@ -574,6 +575,47 @@
           "clientId": { "type": "string" }
         },
         "required": ["elementId", "value"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/actionResult" }
+    },
+
+    "typeText": {
+      "operationClass": "edit",
+      "summary": "Put text into an editable element the way a person would: a word at a time, at a typist's speed, through the same editable-text interface dictation software uses. Prefer setElementValue for a form field nobody is watching; prefer this for anything a human will read as it arrives, and for applications that listen for edits rather than for their field being replaced.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "elementId": { "type": "string" },
+          "text": { "type": "string", "maxLength": 4000, "description": "What to type. Bounded because the call is held open for as long as the typing takes, and a caller cannot wait forever." },
+          "wordsPerMinute": { "type": "integer", "minimum": 10, "maximum": 220, "description": "Typing speed. Defaults to a competent typist. Faster than a person can type is available and is a choice the caller makes knowingly." },
+          "replace": { "type": "boolean", "description": "Clear the field first. Defaults to false, which appends: extending a field is what typing does, and it leaves anything already there alone." },
+          "settleMs": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "confirm": { "type": "boolean" },
+          "clientId": { "type": "string" }
+        },
+        "required": ["elementId", "text"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/actionResult" }
+    },
+
+    "editText": {
+      "operationClass": "edit",
+      "summary": "Replace or remove part of an editable element's text, addressed by the text itself rather than by character offsets. Editing at this layer is a splice — a range is removed and something is put in its place in one operation — because there is no keyboard here and nothing to press backspace on. An offset computed from a field somebody has since typed into points at the wrong characters; text that has moved is simply not found, which is a refusal instead of a wrong edit.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "elementId": { "type": "string" },
+          "find": { "type": "string", "maxLength": 4000, "description": "The existing text to replace. Must appear exactly once: two matches mean the caller does not know which one it meant, and the edit is refused rather than guessed." },
+          "replaceWith": { "type": "string", "maxLength": 4000, "description": "What to put in its place. Omit to delete the range outright." },
+          "wordsPerMinute": { "type": "integer", "minimum": 10, "maximum": 220, "description": "When present the replacement is typed at this speed rather than inserted at once, for an edit a person is watching." },
+          "showSelection": { "type": "boolean", "description": "Highlight the range before removing it, so a watching human sees what changed. Presentation only: the edit does not need it." },
+          "settleMs": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "confirm": { "type": "boolean" },
+          "clientId": { "type": "string" }
+        },
+        "required": ["elementId", "find"],
         "additionalProperties": false
       },
       "result": { "$ref": "#/$defs/actionResult" }

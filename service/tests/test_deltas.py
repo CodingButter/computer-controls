@@ -218,6 +218,52 @@ def test_a_written_field_is_a_change() -> None:
     assert changes[0]["elementId"] == "el-1"
 
 
+def test_deleting_reads_differently_from_typing() -> None:
+    """The catch that prompted this: a wipe and a keystroke produced one sentence.
+
+    Four anonymous pulses arrived while a human emptied the field and typed into it,
+    and nothing in the record said which was which — so the agent read the end state
+    and narrated it as though it had watched.
+    """
+    engine = deltas.DeltaEngine(actions.ActionLog(), advance=lambda: 1)
+    engine.observe(with_values(0, {"el-1": "a paragraph somebody wrote"}))
+
+    wiped = engine.observe(with_values(0, {"el-1": ""}))[0]
+    engine.observe(with_values(0, {"el-1": "hi"}))
+    typed = engine.observe(with_values(0, {"el-1": "hi there"}))[0]
+
+    assert wiped["detail"]["shape"] == "cleared"
+    assert wiped["detail"]["charactersRemoved"] == 26
+    assert "cleared" in wiped["summary"]
+
+    assert typed["detail"]["shape"] == "appended"
+    assert typed["detail"]["charactersAdded"] == 6
+    assert typed["detail"]["charactersRemoved"] == 0
+    assert wiped["summary"] != typed["summary"]
+
+
+def test_an_edit_in_the_middle_is_not_reported_as_an_append() -> None:
+    engine = deltas.DeltaEngine(actions.ActionLog(), advance=lambda: 1)
+    engine.observe(with_values(0, {"el-1": "the start and the end"}))
+
+    change = engine.observe(with_values(0, {"el-1": "the start, then more, and the end"}))[0]
+
+    assert change["detail"]["shape"] == "inserted"
+    assert change["detail"]["unchangedPrefix"] == 9
+
+
+def test_the_shape_of_an_edit_never_carries_its_content() -> None:
+    """Lengths are safe where text is not, and this is the assertion that keeps it so."""
+    engine = deltas.DeltaEngine(actions.ActionLog(), advance=lambda: 1)
+    engine.observe(with_values(0, {"el-1": "hunter2"}))
+
+    change = engine.observe(with_values(0, {"el-1": "hunter2 and a secret"}))[0]
+
+    rendered = repr(change)
+    assert "secret" not in rendered
+    assert "hunter2" not in rendered
+
+
 def test_a_field_that_did_not_move_is_not_a_change() -> None:
     engine = deltas.DeltaEngine(actions.ActionLog(), advance=lambda: 1)
     engine.observe(with_values(0, {"el-1": "same"}))
