@@ -297,7 +297,14 @@ def _text_value(obj: Atspi.Accessible, role: str) -> str:
     count = _safe(obj.get_character_count, 0) or 0
     if count <= 0:
         return ""
-    return _safe(lambda: obj.get_text(0, min(count, MAX_VALUE_CHARS)), "") or ""
+    # Read through the Text interface explicitly. Atspi.Accessible.get_text is a
+    # different function that takes no range and returns the interface itself —
+    # calling it with a range raises TypeError, which _safe would swallow into an
+    # empty string. Every text value in this backend was empty for that reason.
+    return (
+        _safe(lambda: Atspi.Text.get_text(obj, 0, min(count, MAX_VALUE_CHARS)), "")
+        or ""
+    )
 
 
 def _parent_digest(obj: Atspi.Accessible) -> str:
