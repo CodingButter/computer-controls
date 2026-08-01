@@ -748,16 +748,16 @@ def find_range(obj: Atspi.Accessible, needle: str) -> tuple[int, int] | None:
     return at, at + len(needle)
 
 
-def text_contains(obj: Atspi.Accessible, needle: str) -> bool:
+def text_contains(obj: Atspi.Accessible, needle: str) -> str:
     """Whether a field holds this text anywhere in it — the verdict, not the text.
 
     An edit lands in the middle of a field, so confirming one is a containment
-    question rather than an equality question. Same discipline as `text_matches`:
-    the comparison happens against the raw contents in here, and only a boolean
-    comes back out, so a redacted field can still be verified.
+    question rather than an equality question. Same discipline as `text_matches`,
+    including its third answer: a field that masks its own contents cannot
+    confirm or deny, and saying so is more use than a confident no.
     """
     role = _safe(obj.get_role_name, "") or ""
-    return needle in _text_value(obj, role)
+    return verdict_for(_text_value(obj, role), needle, contains=True)
 
 
 def is_editable(obj: Atspi.Accessible) -> bool:
@@ -765,18 +765,53 @@ def is_editable(obj: Atspi.Accessible) -> bool:
     return bool(_safe(lambda: obj.get_editable_text_iface()))
 
 
-def text_matches(obj: Atspi.Accessible, expected: str, exact: bool) -> bool:
+def text_matches(obj: Atspi.Accessible, expected: str, exact: bool) -> str:
     """Does the field now say what it was supposed to say?
 
-    The comparison happens here, against the raw text, and only the verdict
-    leaves. Asking the caller to compare would mean handing it the field's
-    contents to compare against — and a field whose contents are redacted on the
-    way out could never be verified at all. A boolean is not text, so a password
-    field can be confirmed without being disclosed.
+    Three answers, not two. The comparison happens here, against the raw text,
+    and only the verdict leaves: asking the caller to compare would mean handing
+    it the field's contents to compare against, and a field redacted on the way
+    out could never be verified at all.
+
+    The third answer exists because a password entry does not hand its contents
+    even to us. GTK returns a row of bullets to the accessibility layer itself,
+    so the text we would compare against is the mask. Reporting that as a
+    mismatch would be a lie in the most alarming direction — telling a caller
+    its password did not go in when it did, and inviting it to type the thing
+    again. `unverifiable` says what is actually true: the words were delivered
+    and nothing on this desktop can confirm the result.
     """
     role = _safe(obj.get_role_name, "") or ""
-    actual = _text_value(obj, role)
-    return actual == expected if exact else actual.endswith(expected)
+    return verdict_for(_text_value(obj, role), expected, exact=exact)
+
+
+#: Characters toolkits substitute for a password's real contents. A field made
+#: entirely of one of these, where we asked for something else, is masked rather
+#: than wrong.
+_MASK_CHARACTERS = frozenset("•*●·⬤∙")
+
+
+def _is_masked(actual: str, expected: str) -> bool:
+    if not actual or actual == expected:
+        return False
+    return set(actual) <= _MASK_CHARACTERS
+
+
+def verdict_for(actual: str, expected: str, *, exact: bool = True, contains: bool = False) -> str:
+    """The three-way answer, decided in one place.
+
+    Split out from the two functions above so that the rule lives once. The
+    version of this that mattered was written twice — once here and once in a
+    test's stub — and the copy in the stub kept saying `True` for a masked
+    field long after this one had learned better.
+    """
+    if _is_masked(actual, expected):
+        return "unverifiable"
+    if contains:
+        matched = expected in actual
+    else:
+        matched = actual == expected if exact else actual.endswith(expected)
+    return "verified" if matched else "mismatch"
 
 
 def set_numeric_value(obj: Atspi.Accessible, amount: float) -> bool:

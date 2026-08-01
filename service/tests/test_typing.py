@@ -50,7 +50,7 @@ def typing(monkeypatch):
     monkeypatch.setattr(
         server.atspi,
         "text_matches",
-        lambda obj, expected, exact: obj.text == expected if exact else obj.text.endswith(expected),
+        lambda obj, expected, exact: server.atspi.verdict_for(obj.text, expected, exact=exact),
     )
     monkeypatch.setattr(server.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(server, "_snapshot", lambda: server.state.Snapshot(revision=1, windows={}, values={}))
@@ -106,7 +106,7 @@ def test_success_is_the_readback_not_the_inserts(monkeypatch, typing):
     monkeypatch.setattr(server.atspi, "insert_text", lambda obj, chunk: True)
     result = type_text(text="into the void")
     assert result["ok"] is False
-    assert result["progress"]["verified"] is False
+    assert result["progress"]["verified"] == "mismatch"
     assert result["progress"]["wordsTyped"] == 3  # every insert claimed to work
 
 
@@ -156,7 +156,7 @@ def editing(typing, monkeypatch):
     monkeypatch.setattr(server.atspi, "find_range", find_range)
     monkeypatch.setattr(server.atspi, "delete_text", delete_text)
     monkeypatch.setattr(server.atspi, "insert_text", insert_at)
-    monkeypatch.setattr(server.atspi, "text_contains", lambda obj, needle: needle in obj.text)
+    monkeypatch.setattr(server.atspi, "text_contains", lambda obj, needle: server.atspi.verdict_for(obj.text, needle, contains=True))
     monkeypatch.setattr(element, "selections", [], raising=False)
     monkeypatch.setattr(
         server.atspi,
@@ -245,7 +245,7 @@ def test_an_edit_that_vanished_is_a_failure_however_willing_the_toolkit_was(edit
     result = edit_text(find="THIS", replaceWith="that")
 
     assert result["ok"] is False
-    assert result["progress"]["verified"] is False
+    assert result["progress"]["verified"] == "mismatch"
     assert "that" not in editing.text
 
 
@@ -256,7 +256,7 @@ def test_a_deletion_that_did_not_happen_is_a_failure(editing, monkeypatch):
     result = edit_text(find="refuses to leave")
 
     assert result["ok"] is False
-    assert result["progress"]["verified"] is False
+    assert result["progress"]["verified"] == "mismatch"
 
 
 def test_typing_never_follows_focus_and_has_no_raw_input_fallback():
@@ -299,3 +299,32 @@ def test_a_paced_replacement_types_into_the_gap_in_order(editing):
     assert result["ok"] is True
     assert editing.text == "before one two three after"
     assert result["progress"]["wordsTyped"] == 3
+
+
+def test_a_field_that_masks_itself_is_unverifiable_rather_than_failed(typing, monkeypatch):
+    element = typing
+    # A GTK password entry hands the accessibility layer a row of bullets
+    # instead of its contents — to us as much as to anyone. Calling that a
+    # mismatch tells a caller its password did not go in when it did, and
+    # invites it to type the thing a second time.
+    monkeypatch.setattr(element, "text", "", raising=False)
+
+    def masked_insert(obj, chunk, offset=-1):
+        obj.text = "•" * (len(obj.text) + len(chunk))
+        return True
+
+    monkeypatch.setattr(server.atspi, "insert_text", masked_insert)
+    result = type_text(text="my passphrase")
+    assert result["progress"]["verified"] == "unverifiable"
+    assert result["progress"]["wordsTyped"] == result["progress"]["wordsPlanned"]
+    assert result["ok"] is True
+    assert "masks its own contents" in result["progress"]["stoppedBecause"]
+
+
+def test_an_empty_field_is_not_mistaken_for_a_masked_one():
+    assert server.atspi.verdict_for("", "something") == "mismatch"
+
+
+def test_text_that_is_genuinely_bullets_still_verifies():
+    # Somebody typing "•••" into a notes app has to be able to confirm it.
+    assert server.atspi.verdict_for("•••", "•••") == "verified"

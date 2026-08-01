@@ -354,6 +354,56 @@ export default defineMastraCodePlugin({
       }),
     },
 
+    desktop_grant_scope: {
+      tool: createTool({
+        id: "desktop_grant_scope",
+        description:
+          "Ask for permission to act. A fresh session may look at this desktop and nothing " +
+          "else; anything that changes something needs the matching operation class first. " +
+          "Ask for what the task actually needs — observe to read, edit to type into a field, " +
+          "activate to focus a window or start an application, submit to press a button that " +
+          "sends something. The grant is bounded by the user's own configuration and cannot " +
+          "exceed it: if you are refused, the error names the setting that refused you, and " +
+          "the answer is to ask the user rather than to try again. Grants expire after being " +
+          "unused for a while, and an expired one comes back as SESSION_EXPIRED, which means " +
+          "ask again rather than give up.",
+        inputSchema: schemas.grantScopeParams,
+        outputSchema: schemas.grantScopeResult,
+        execute: async (input) => await request("grantScope", { ...input }),
+      }),
+    },
+
+    desktop_emergency_stop: {
+      tool: createTool({
+        id: "desktop_emergency_stop",
+        description:
+          "Stop acting on this desktop immediately and stay stopped. Revokes every grant on " +
+          "the service, including other clients', and refuses everything but observation until " +
+          "it is deliberately cleared with clear true. Use it the moment something is going " +
+          "wrong and you are not sure what — it is cheap to clear and expensive to have needed " +
+          "and not used. What it cannot do is undo an action already sent to an application: " +
+          "there is no un-click. It reports how many were in flight so you know what was " +
+          "already beyond recall.",
+        inputSchema: schemas.emergencyStopParams,
+        outputSchema: schemas.emergencyStopResult,
+        execute: async (input) => await request("emergencyStop", { ...input }),
+      }),
+    },
+
+    desktop_audit_tail: {
+      tool: createTool({
+        id: "desktop_audit_tail",
+        description:
+          "The service's own record of recent calls, including the ones it refused and the " +
+          "ones other clients made. Use it to answer 'what has been done to this desktop' " +
+          "without guessing from your own history — your history only has your side. Entries " +
+          "say what was done and to which application, never what was read or typed.",
+        inputSchema: schemas.auditTailParams,
+        outputSchema: schemas.auditTailResult,
+        execute: async (input) => await request("auditTail", { ...input }),
+      }),
+    },
+
     desktop_list_installable_applications: {
       tool: createTool({
         id: "desktop_list_installable_applications",

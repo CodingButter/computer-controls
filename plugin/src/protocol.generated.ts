@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 8667ac699a620c5c
+// Protocol version: 1.0   schema sha256: affc9e7886501041
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "8667ac699a620c5c" as const;
+export const SCHEMA_DIGEST = "affc9e7886501041" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -141,6 +141,21 @@ export interface SemanticElement {
 }
 
 /** Every method, its operation class, and its request and response shapes. */
+/** The most recent entries from this service's audit log, including the calls that were refused. Refusals are the half worth reading: an agent that tried to close a window and was told no is a fact about the agent, and it is invisible in a record of what succeeded. Entries carry what was done and to which application, never the contents of anything read or typed. (operation class: observe) */
+export interface AuditTailParams {
+  clientId?: string;
+  /** Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. */
+  confirm?: boolean;
+  limit?: number;
+}
+export interface AuditTailResult {
+  entries: Record<string, never>[];
+  path: string;
+  /** Records this service could not write. Non-zero means the log is incomplete, which a reader has to be told rather than left to infer from a gap. */
+  writeFailures?: number;
+  written?: number;
+}
+
 /** The pixels of one window, for content the accessibility layer cannot express — what an image shows, what a canvas drew. Takes a window id and never a screen region, so only that window is ever in frame and the addressing model gains no second, weaker form. Look at the picture; still act through element references. (operation class: observe) */
 export interface CaptureWindowParams {
   clientId?: string;
@@ -182,6 +197,21 @@ export interface EditTextParams {
   wordsPerMinute?: number;
 }
 export type EditTextResult = ActionResult;
+
+/** Revoke every grant on this service and refuse everything but observation until it is deliberately cleared. It does not time out. What it cannot do is take back an action already handed to a toolkit: there is no un-click, and a stop that implied otherwise would be worse than none, because somebody would rely on it. Classified as observe so that a client with no grant left can still pull it. (operation class: observe) */
+export interface EmergencyStopParams {
+  /** Lift a stop rather than raise one. Separate and deliberate: a stop that any subsequent call could clear as a side effect would be a suggestion. */
+  clear?: boolean;
+  clientId?: string;
+  confirm?: boolean;
+  reason?: string;
+}
+export interface EmergencyStopResult {
+  grantsRevoked: number;
+  /** Actions already dispatched when the stop landed. These are the ones nobody can call back. */
+  inFlight?: number;
+  stopped: boolean;
+}
 
 /** Raise and focus a window by id. Addressed semantically; no coordinates on either path. (operation class: activate) */
 export interface FocusWindowParams {
@@ -276,6 +306,28 @@ export interface GetRevisionParams {
 export interface GetRevisionResult {
   observationMode?: "active" | "idle";
   revision: number;
+}
+
+/** Ask for the operation classes this client may use, within the ceiling the user's configuration sets. Only ever narrows: a request above the ceiling is refused by naming the config key, because the answer to 'why can't I' should be a file the user owns rather than a shrug. Classified as observe so that a client holding nothing can still ask — refusing the request for permission is not a security boundary, it is a dead end. (operation class: observe) */
+export interface GrantScopeParams {
+  /** Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing. */
+  applications?: string[];
+  clientId?: string;
+  confirm?: boolean;
+  /** What this client intends to do. Ask for what the task needs and no more: a grant is also a description of the blast radius in the audit log. */
+  operationClasses: "observe" | "edit" | "activate" | "submit" | "destructive"[];
+  /** What this is for, in the caller's own words. Recorded in the audit log, where the useful question months later is why, not what. */
+  reason?: string;
+  /** How long the grant survives without use. Idle time, not a lifetime — a grant being used every second does not expire mid-sentence. */
+  seconds?: number;
+}
+export interface GrantScopeResult {
+  applications?: string[];
+  /** The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice. */
+  ceiling: string[];
+  expiresInSeconds?: number;
+  /** What this client now holds. Always includes observe: a client that may edit must be able to check whether its edit worked. */
+  operationClasses: string[];
 }
 
 /** Version handshake. First call on a connection. (operation class: observe) */
@@ -533,17 +585,20 @@ export interface WaitForResult {
   waitedMs: number;
 }
 
-export type MethodName = "captureWindow" | "editText" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "setElementValue" | "setObservationMode" | "typeText" | "waitFor";
+export type MethodName = "auditTail" | "captureWindow" | "editText" | "emergencyStop" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "grantScope" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "setElementValue" | "setObservationMode" | "typeText" | "waitFor";
 
 export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
+  auditTail: "observe",
   captureWindow: "observe",
   editText: "edit",
+  emergencyStop: "observe",
   focusWindow: "activate",
   getDeltaSince: "observe",
   getDesktopCapabilities: "observe",
   getDesktopState: "observe",
   getElement: "observe",
   getRevision: "observe",
+  grantScope: "observe",
   hello: "observe",
   inspectElement: "observe",
   inspectWindow: "observe",
@@ -561,14 +616,17 @@ export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
 };
 
 export interface MethodMap {
+  auditTail: { params: AuditTailParams; result: AuditTailResult };
   captureWindow: { params: CaptureWindowParams; result: CaptureWindowResult };
   editText: { params: EditTextParams; result: EditTextResult };
+  emergencyStop: { params: EmergencyStopParams; result: EmergencyStopResult };
   focusWindow: { params: FocusWindowParams; result: FocusWindowResult };
   getDeltaSince: { params: GetDeltaSinceParams; result: GetDeltaSinceResult };
   getDesktopCapabilities: { params: GetDesktopCapabilitiesParams; result: GetDesktopCapabilitiesResult };
   getDesktopState: { params: GetDesktopStateParams; result: GetDesktopStateResult };
   getElement: { params: GetElementParams; result: GetElementResult };
   getRevision: { params: GetRevisionParams; result: GetRevisionResult };
+  grantScope: { params: GrantScopeParams; result: GrantScopeResult };
   hello: { params: HelloParams; result: HelloResult };
   inspectElement: { params: InspectElementParams; result: InspectElementResult };
   inspectWindow: { params: InspectWindowParams; result: InspectWindowResult };

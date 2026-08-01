@@ -119,6 +119,18 @@ def in_flight() -> bool:
         return _in_flight > 0
 
 
+def in_flight_count() -> int:
+    """How many actions are dispatched and still settling.
+
+    The emergency stop reports this rather than acting on it: an action already
+    handed to a toolkit is on its way to an application that has never heard of
+    this service. Counting them honestly is more use to whoever is reading than
+    a claim to have called them back.
+    """
+    with _in_flight_lock:
+        return _in_flight
+
+
 @contextmanager
 def _dispatching():
     global _in_flight

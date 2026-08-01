@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: 8667ac699a620c5c
+# Protocol version: 1.0   schema sha256: affc9e7886501041
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "8667ac699a620c5c"
+SCHEMA_DIGEST: Final = "affc9e7886501041"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -34,14 +34,17 @@ ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUN
 
 #: Every method mapped to the operation class it belongs to.
 OPERATION_CLASS: Final[dict[str, str]] = {
+    "auditTail": "observe",
     "captureWindow": "observe",
     "editText": "edit",
+    "emergencyStop": "observe",
     "focusWindow": "activate",
     "getDeltaSince": "observe",
     "getDesktopCapabilities": "observe",
     "getDesktopState": "observe",
     "getElement": "observe",
     "getRevision": "observe",
+    "grantScope": "observe",
     "hello": "observe",
     "inspectElement": "observe",
     "inspectWindow": "observe",
@@ -60,6 +63,24 @@ OPERATION_CLASS: Final[dict[str, str]] = {
 
 #: Request schema per method, used to reject malformed calls at the boundary.
 PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
+    "auditTail": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+            "limit": {
+                "maximum": 200,
+                "minimum": 1,
+                "type": "integer",
+            },
+        },
+        "type": "object",
+    },
     "captureWindow": {
         "additionalProperties": False,
         "properties": {
@@ -127,6 +148,26 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             "elementId",
             "find",
         ],
+        "type": "object",
+    },
+    "emergencyStop": {
+        "additionalProperties": False,
+        "properties": {
+            "clear": {
+                "description": "Lift a stop rather than raise one. Separate and deliberate: a stop that any subsequent call could clear as a side effect would be a suggestion.",
+                "type": "boolean",
+            },
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "reason": {
+                "maxLength": 400,
+                "type": "string",
+            },
+        },
         "type": "object",
     },
     "focusWindow": {
@@ -232,6 +273,57 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 "type": "boolean",
             },
         },
+        "type": "object",
+    },
+    "grantScope": {
+        "additionalProperties": False,
+        "properties": {
+            "applications": {
+                "description": "Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing.",
+                "items": {
+                    "maxLength": 200,
+                    "type": "string",
+                },
+                "maxItems": 50,
+                "type": "array",
+            },
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "operationClasses": {
+                "description": "What this client intends to do. Ask for what the task needs and no more: a grant is also a description of the blast radius in the audit log.",
+                "items": {
+                    "enum": [
+                        "observe",
+                        "edit",
+                        "activate",
+                        "submit",
+                        "destructive",
+                    ],
+                    "type": "string",
+                },
+                "maxItems": 5,
+                "minItems": 1,
+                "type": "array",
+            },
+            "reason": {
+                "description": "What this is for, in the caller's own words. Recorded in the audit log, where the useful question months later is why, not what.",
+                "maxLength": 400,
+                "type": "string",
+            },
+            "seconds": {
+                "description": "How long the grant survives without use. Idle time, not a lifetime — a grant being used every second does not expire mid-sentence.",
+                "maximum": 86400,
+                "minimum": 30,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "operationClasses",
+        ],
         "type": "object",
     },
     "hello": {
@@ -698,6 +790,32 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
 }
 
 RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
+    "auditTail": {
+        "additionalProperties": False,
+        "properties": {
+            "entries": {
+                "items": {
+                    "type": "object",
+                },
+                "type": "array",
+            },
+            "path": {
+                "type": "string",
+            },
+            "writeFailures": {
+                "description": "Records this service could not write. Non-zero means the log is incomplete, which a reader has to be told rather than left to infer from a gap.",
+                "type": "integer",
+            },
+            "written": {
+                "type": "integer",
+            },
+        },
+        "required": [
+            "entries",
+            "path",
+        ],
+        "type": "object",
+    },
     "captureWindow": {
         "additionalProperties": False,
         "properties": {
@@ -753,6 +871,26 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
     },
     "editText": {
         "$ref": "#/$defs/actionResult",
+    },
+    "emergencyStop": {
+        "additionalProperties": False,
+        "properties": {
+            "grantsRevoked": {
+                "type": "integer",
+            },
+            "inFlight": {
+                "description": "Actions already dispatched when the stop landed. These are the ones nobody can call back.",
+                "type": "integer",
+            },
+            "stopped": {
+                "type": "boolean",
+            },
+        },
+        "required": [
+            "stopped",
+            "grantsRevoked",
+        ],
+        "type": "object",
     },
     "focusWindow": {
         "$ref": "#/$defs/actionResult",
@@ -944,6 +1082,39 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         },
         "required": [
             "revision",
+        ],
+        "type": "object",
+    },
+    "grantScope": {
+        "additionalProperties": False,
+        "properties": {
+            "applications": {
+                "items": {
+                    "type": "string",
+                },
+                "type": "array",
+            },
+            "ceiling": {
+                "description": "The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice.",
+                "items": {
+                    "type": "string",
+                },
+                "type": "array",
+            },
+            "expiresInSeconds": {
+                "type": "integer",
+            },
+            "operationClasses": {
+                "description": "What this client now holds. Always includes observe: a client that may edit must be able to check whether its edit worked.",
+                "items": {
+                    "type": "string",
+                },
+                "type": "array",
+            },
+        },
+        "required": [
+            "operationClasses",
+            "ceiling",
         ],
         "type": "object",
     },

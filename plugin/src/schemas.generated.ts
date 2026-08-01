@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 8667ac699a620c5c
+// Protocol version: 1.0   schema sha256: affc9e7886501041
 
 import { z } from "mastracode/plugin";
 
@@ -71,6 +71,18 @@ export const semanticElementSchema: z.ZodType<unknown> = z.lazy(() =>
   }),
 );
 
+export const auditTailParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+  limit: z.number().int().min(1).max(200).optional(),
+});
+export const auditTailResult = z.object({
+  entries: z.array(z.record(z.string(), z.unknown())),
+  path: z.string(),
+  writeFailures: z.number().int().describe("Records this service could not write. Non-zero means the log is incomplete, which a reader has to be told rather than left to infer from a gap.").optional(),
+  written: z.number().int().optional(),
+});
+
 export const captureWindowParams = z.object({
   clientId: z.string().optional(),
   confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
@@ -102,6 +114,18 @@ export const editTextParams = z.object({
   wordsPerMinute: z.number().int().min(10).max(220).describe("When present the replacement is typed at this speed rather than inserted at once, for an edit a person is watching.").optional(),
 });
 export const editTextResult = z.record(z.string(), z.unknown());
+
+export const emergencyStopParams = z.object({
+  clear: z.boolean().describe("Lift a stop rather than raise one. Separate and deliberate: a stop that any subsequent call could clear as a side effect would be a suggestion.").optional(),
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  reason: z.string().max(400).optional(),
+});
+export const emergencyStopResult = z.object({
+  grantsRevoked: z.number().int(),
+  inFlight: z.number().int().describe("Actions already dispatched when the stop landed. These are the ones nobody can call back.").optional(),
+  stopped: z.boolean(),
+});
 
 export const focusWindowParams = z.object({
   clientId: z.string().optional(),
@@ -178,6 +202,21 @@ export const getRevisionParams = z.object({
 export const getRevisionResult = z.object({
   observationMode: z.enum(["active", "idle"]).optional(),
   revision: z.number().int(),
+});
+
+export const grantScopeParams = z.object({
+  applications: z.array(z.string().max(200)).describe("Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing.").optional(),
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  operationClasses: z.array(z.enum(["observe", "edit", "activate", "submit", "destructive"])).describe("What this client intends to do. Ask for what the task needs and no more: a grant is also a description of the blast radius in the audit log."),
+  reason: z.string().max(400).describe("What this is for, in the caller's own words. Recorded in the audit log, where the useful question months later is why, not what.").optional(),
+  seconds: z.number().int().min(30).max(86400).describe("How long the grant survives without use. Idle time, not a lifetime — a grant being used every second does not expire mid-sentence.").optional(),
+});
+export const grantScopeResult = z.object({
+  applications: z.array(z.string()).optional(),
+  ceiling: z.array(z.string()).describe("The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice."),
+  expiresInSeconds: z.number().int().optional(),
+  operationClasses: z.array(z.string()).describe("What this client now holds. Always includes observe: a client that may edit must be able to check whether its edit worked."),
 });
 
 export const helloParams = z.object({

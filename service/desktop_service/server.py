@@ -17,7 +17,22 @@ import threading
 import time
 from typing import Any
 
-from . import actions, cadence, capabilities, deltas, inspect as inspection, policy, state, waitfor, watch
+from . import (
+    actions,
+    audit,
+    cadence,
+    capabilities,
+    config,
+    deltas,
+    inspect as inspection,
+    policy,
+    protocol_generated,
+    redaction,
+    security,
+    state,
+    waitfor,
+    watch,
+)
 from .backends import atspi, capture, launcher, loop, session_env, x11
 from .errors import DesktopError, ErrorCode, InvalidParams
 from .registry import ElementRegistry
@@ -246,6 +261,35 @@ def _method_inspect_element(params: dict[str, Any]) -> dict[str, Any]:
         "revision": revision,
         "backend": atspi.BACKEND_NAME,
     }
+
+
+#: Consent and the audit log are process-wide for the same reason the registry
+#: is: several clients share this service, and a permission that differed from
+#: the thing it protects would be worse than no permission at all. Both are
+#: replaced at startup from configuration; the defaults here are the safe ones,
+#: so a service that somehow started without reading its config observes and
+#: does nothing else.
+_consent = security.Consent()
+_audit = audit.AuditLog()
+
+
+def configure(settings: dict[str, Any] | None, config_path: str = "") -> None:
+    """Install the user's ceiling, redaction list and audit path.
+
+    Called once, at startup, from the process entry point. Deliberately not
+    reachable over the socket: the ceiling exists precisely because a client
+    cannot be the one who decides what a client may do.
+    """
+    global _consent, _audit
+    settings = settings or {}
+    _consent = security.Consent(
+        security.Ceiling.from_config(settings.get("scopes"), str(config_path or ""))
+    )
+    _audit = audit.AuditLog(
+        settings.get("auditPath") or None,
+        enabled=bool(settings.get("audit", True)),
+    )
+    redaction.install(settings.get("sensitiveApplications", ()))
 
 
 _action_log = actions.ActionLog()
@@ -571,15 +615,25 @@ def _method_type_text(params: dict[str, Any]) -> dict[str, Any]:
         # The one assertion that matters, made against the raw text inside the
         # backend so that a redacted field can still be confirmed.
         try:
-            verified = bool(
-                on_loop(lambda: atspi.text_matches(_resolve_element(element_id), text, exact=replace))
+            verdict = on_loop(
+                lambda: atspi.text_matches(_resolve_element(element_id), text, exact=replace)
             )
         except DesktopError as unreachable:
             progress["verified"] = "unknown"
             progress["stoppedBecause"] = progress.get("stoppedBecause") or unreachable.message
             return False
-        progress["verified"] = verified
-        return verified
+        progress["verified"] = verdict
+        if verdict == "unverifiable":
+            # A password entry hands the accessibility layer a row of bullets
+            # instead of its contents, so there is nothing to compare against.
+            # Every word was delivered and accepted; calling that a failure
+            # would invite the caller to type the password a second time.
+            progress["stoppedBecause"] = progress.get("stoppedBecause") or (
+                "the field masks its own contents, so what was typed cannot be read back — "
+                "every word was accepted"
+            )
+            return not progress.get("wordsTyped", 0) < progress["wordsPlanned"]
+        return verdict == "verified"
 
     result = actions.perform(
         "typeText",
@@ -651,9 +705,16 @@ def _method_edit_text(params: dict[str, Any]) -> dict[str, Any]:
             return False
 
         if not replacement:
-            gone = not on_loop(lambda: atspi.text_contains(_resolve_element(element_id), needle))
-            progress["verified"] = gone
-            return gone
+            verdict = on_loop(lambda: atspi.text_contains(_resolve_element(element_id), needle))
+            if verdict == "unverifiable":
+                progress["verified"] = verdict
+                progress["stoppedBecause"] = (
+                    "the field masks its own contents, so the deletion cannot be read back — "
+                    "the range was removed"
+                )
+                return True
+            progress["verified"] = "verified" if verdict == "mismatch" else "mismatch"
+            return verdict == "mismatch"
 
         plan = cadence.plan(replacement, wpm=int(wpm)) if wpm else [cadence.Keystroke(replacement, 0)]
         progress["wordsPlanned"] = len(plan)
@@ -677,9 +738,15 @@ def _method_edit_text(params: dict[str, Any]) -> dict[str, Any]:
 
         # An edit lands in the middle of a field, so the question is whether the
         # replacement is in there — not whether the field ends with it.
-        verified = bool(on_loop(lambda: atspi.text_contains(_resolve_element(element_id), replacement)))
-        progress["verified"] = verified
-        return verified
+        verdict = on_loop(lambda: atspi.text_contains(_resolve_element(element_id), replacement))
+        progress["verified"] = verdict
+        if verdict == "unverifiable":
+            progress["stoppedBecause"] = progress.get("stoppedBecause") or (
+                "the field masks its own contents, so what was written cannot be read back — "
+                "every word was accepted"
+            )
+            return progress["wordsTyped"] == progress["wordsPlanned"]
+        return verdict == "verified"
 
     result = actions.perform(
         "editText",
@@ -894,6 +961,57 @@ def _method_capture_window(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _method_grant_scope(params: dict[str, Any]) -> dict[str, Any]:
+    """Move the hand, never the ceiling.
+
+    The ceiling comes back on every answer, including the successful ones. A
+    client that asked for edit and got it still benefits from knowing whether
+    submit was ever going to be available, because the alternative is finding
+    out one method call before it mattered.
+    """
+    classes = params.get("operationClasses") or []
+    grant = _consent.grant(
+        params.get("clientId") or "",
+        classes=classes,
+        applications=params.get("applications") or (),
+        seconds=params.get("seconds"),
+        reason=params.get("reason") or "",
+    )
+    return {
+        "operationClasses": sorted(grant.classes),
+        "applications": sorted(grant.applications),
+        "expiresInSeconds": int(grant.idle_seconds),
+        "ceiling": sorted(_consent.ceiling.classes),
+    }
+
+
+def _method_emergency_stop(params: dict[str, Any]) -> dict[str, Any]:
+    """Stop meaning everything from here on, which is all a stop can mean.
+
+    `inFlight` is reported rather than acted on. An action already dispatched to
+    a toolkit is on its way to an application that has never heard of this
+    service, and counting them honestly is more use to whoever is reading than
+    a claim to have cancelled them.
+    """
+    if params.get("clear"):
+        _consent.clear_stop()
+        return {"stopped": False, "grantsRevoked": 0, "inFlight": actions.in_flight_count()}
+    in_flight = actions.in_flight_count()
+    revoked = _consent.emergency_stop(params.get("reason") or "")
+    return {"stopped": True, "grantsRevoked": revoked, "inFlight": in_flight}
+
+
+def _method_audit_tail(params: dict[str, Any]) -> dict[str, Any]:
+    limit = params.get("limit") or 20
+    health = _audit.health()
+    return {
+        "entries": _audit.tail(int(limit)),
+        "path": health["path"],
+        "written": health["written"],
+        "writeFailures": health["writeFailures"],
+    }
+
+
 def _method_list_installable_applications(_params: dict[str, Any]) -> dict[str, Any]:
     applications = loop.call_on_loop(launcher.list_installable)
     return {
@@ -1059,6 +1177,140 @@ def _validated(method: str, handler):
     return call
 
 
+def _text(value: Any, limit: int = 200) -> str:
+    """A string, or nothing, from a value the schema has not vetted yet.
+
+    Bounded because these go into the audit log: a caller that sent a megabyte
+    where an id belongs would otherwise write a megabyte to disk per call, and
+    do it through the component whose job is to be trustworthy.
+    """
+    return value[:limit] if isinstance(value, str) else ""
+
+
+def _application_of(params: dict[str, Any]) -> str:
+    """Which application this call is aimed at, if the rules need to know.
+
+    Resolved lazily and only when a rule actually depends on it. A per-call
+    window lookup on the toolkit thread to satisfy an allowlist nobody
+    configured would be a tax every call pays for a question nobody asked.
+    """
+    window_id = params.get("windowId")
+    element_id = params.get("elementId")
+    target = window_id if isinstance(window_id, str) and window_id else element_id
+    if not isinstance(target, str) or not target:
+        return ""
+
+    def resolve() -> str:
+        obj = atspi.find_window(target) if target == window_id else atspi.lookup(target)
+        return atspi.application_name_of(obj) if obj is not None else ""
+
+    try:
+        return loop.call_on_loop(resolve, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
+    except Exception:
+        # A window that has gone away is not a permission question. Let the
+        # handler produce the real error rather than answering it here — but
+        # never fall through to "allowed" on a target we could not identify
+        # while a list is in force.
+        return _UNIDENTIFIED
+
+
+#: What an application resolves to when the desktop could not say. Treated as a
+#: name so that an allowlist refuses it: a call whose target cannot be
+#: identified while the user has restricted which applications may be touched
+#: is exactly the call that should not proceed.
+_UNIDENTIFIED = "\x00unidentified"
+
+
+def _needs_application(operation_class: str) -> bool:
+    ceiling = _consent.ceiling
+    if ceiling.blocked_applications or ceiling.applications:
+        return True
+    return False
+
+
+def _guarded(method: str, handler):
+    """Consent, then the call, then the record — including when it is refused.
+
+    This wraps registration for the same reason validation does: enforcement a
+    handler has to remember to ask for is enforcement that will eventually be
+    forgotten in exactly one handler, and that handler will be the interesting
+    one. The model is never the thing standing between a request and a
+    sensitive application.
+    """
+    operation_class = protocol_generated.OPERATION_CLASS.get(method, "submit")
+
+    def call(params: dict[str, Any]) -> dict[str, Any]:
+        # Every read here is defensive: this runs before the schema check, so a
+        # field may be missing, of the wrong type, or hostile. Anything that is
+        # not the shape we expect is treated as absent, which fails towards
+        # refusing rather than towards allowing.
+        client_id = _text(params.get("clientId"))
+        application = _application_of(params) if _needs_application(operation_class) else ""
+        record = audit.Record(
+            method=method,
+            operation_class=operation_class,
+            client_id=client_id,
+            decision="allowed",
+            application=application,
+            window_id=_text(params.get("windowId")),
+            element_id=_text(params.get("elementId")),
+        )
+        started = time.monotonic()
+        try:
+            _consent.enforce(
+                method=method,
+                operation_class=operation_class,
+                client_id=client_id,
+                application=application,
+                confirmed=bool(params.get("confirm")),
+            )
+        except DesktopError as denial:
+            record.decision = "denied"
+            record.reason = denial.message
+            record.error_code = denial.code
+            _audit.write(record)
+            raise
+
+        try:
+            result = handler(params)
+        except DesktopError as failure:
+            record.decision = "failed"
+            record.error_code = failure.code
+            record.reason = failure.message
+            record.duration_ms = int((time.monotonic() - started) * 1000)
+            _audit.write(record)
+            raise
+        record.duration_ms = int((time.monotonic() - started) * 1000)
+        _absorb_result(record, result)
+        _audit.write(record)
+        return result
+
+    return call
+
+
+def _absorb_result(record: audit.Record, result: dict[str, Any]) -> None:
+    """Copy the facts of an outcome onto its record, and none of its contents.
+
+    Explicitly a whitelist. Handing the whole result to the log would put the
+    text of every field an agent ever read onto somebody's disk, which is the
+    one sink the redaction policy cannot reach after the fact.
+    """
+    if not isinstance(result, dict):
+        return
+    backend = result.get("backend")
+    if isinstance(backend, str):
+        record.backend = backend
+    fallbacks = result.get("fallbacksUsed")
+    if isinstance(fallbacks, list):
+        record.fallbacks = tuple(str(item) for item in fallbacks)
+    effects = result.get("observedEffects")
+    if isinstance(effects, dict):
+        record.from_revision = int(effects.get("fromRevision") or 0)
+        record.to_revision = int(effects.get("toRevision") or 0)
+    elif isinstance(result.get("revision"), int):
+        record.to_revision = result["revision"]
+
+
 def build_server(socket_path: str) -> JsonRpcServer:
     base = JsonRpcServer(socket_path)
 
@@ -1069,7 +1321,13 @@ def build_server(socket_path: str) -> JsonRpcServer:
             self.target = target
 
         def register(self, method: str, handler) -> None:
-            self.target.register(method, _validated(method, handler))
+            # Consent outside validation, deliberately. A client that may not do
+            # this at all should not be told to fix its parameters first and
+            # denied on the second attempt; the answer to both requests is the
+            # same, and the schema it would be correcting against is public
+            # anyway. The guard therefore reads parameters that have not been
+            # checked yet, and treats anything of the wrong shape as absent.
+            self.target.register(method, _guarded(method, _validated(method, handler)))
 
     server = _ValidatingServer(base)
     server.register("hello", _session.hello)
@@ -1094,6 +1352,9 @@ def build_server(socket_path: str) -> JsonRpcServer:
     server.register("listInstallableApplications", _method_list_installable_applications)
     server.register("launchApplication", _method_launch_application)
     server.register("captureWindow", _method_capture_window)
+    server.register("grantScope", _method_grant_scope)
+    server.register("emergencyStop", _method_emergency_stop)
+    server.register("auditTail", _method_audit_tail)
     return base
 
 
@@ -1122,7 +1383,21 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Listen on the shared daemon socket and outlive the process that started it",
     )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Path to the consent configuration. Defaults to $XDG_CONFIG_HOME/mastracode-desktop/config.json",
+    )
     args = parser.parse_args(argv)
+
+    # Before anything is listening. A window between the socket opening and the
+    # ceiling being installed is a window in which the defaults are wrong in
+    # the permissive direction, and it would be a rare one, which is worse.
+    try:
+        configure(config.load(args.config), str(args.config or config.default_path()))
+    except ValueError as error:
+        print(f"desktop_service: {error}", file=sys.stderr)
+        return 2
 
     if args.daemon:
         socket_path = args.socket or transport.daemon_socket_path()

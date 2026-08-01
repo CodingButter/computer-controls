@@ -928,6 +928,131 @@
         ],
         "additionalProperties": false
       }
+    },
+    "grantScope": {
+      "operationClass": "observe",
+      "summary": "Ask for the operation classes this client may use, within the ceiling the user's configuration sets. Only ever narrows: a request above the ceiling is refused by naming the config key, because the answer to 'why can't I' should be a file the user owns rather than a shrug. Classified as observe so that a client holding nothing can still ask — refusing the request for permission is not a security boundary, it is a dead end.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "operationClasses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["observe", "edit", "activate", "submit", "destructive"]
+            },
+            "minItems": 1,
+            "maxItems": 5,
+            "description": "What this client intends to do. Ask for what the task needs and no more: a grant is also a description of the blast radius in the audit log."
+          },
+          "applications": {
+            "type": "array",
+            "items": { "type": "string", "maxLength": 200 },
+            "maxItems": 50,
+            "description": "Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing."
+          },
+          "seconds": {
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 86400,
+            "description": "How long the grant survives without use. Idle time, not a lifetime — a grant being used every second does not expire mid-sentence."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 400,
+            "description": "What this is for, in the caller's own words. Recorded in the audit log, where the useful question months later is why, not what."
+          },
+          "confirm": { "type": "boolean" },
+          "clientId": { "type": "string" }
+        },
+        "required": ["operationClasses"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "operationClasses": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "What this client now holds. Always includes observe: a client that may edit must be able to check whether its edit worked."
+          },
+          "applications": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "expiresInSeconds": { "type": "integer" },
+          "ceiling": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice."
+          }
+        },
+        "required": ["operationClasses", "ceiling"],
+        "additionalProperties": false
+      }
+    },
+    "emergencyStop": {
+      "operationClass": "observe",
+      "summary": "Revoke every grant on this service and refuse everything but observation until it is deliberately cleared. It does not time out. What it cannot do is take back an action already handed to a toolkit: there is no un-click, and a stop that implied otherwise would be worse than none, because somebody would rely on it. Classified as observe so that a client with no grant left can still pull it.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "reason": { "type": "string", "maxLength": 400 },
+          "clear": {
+            "type": "boolean",
+            "description": "Lift a stop rather than raise one. Separate and deliberate: a stop that any subsequent call could clear as a side effect would be a suggestion."
+          },
+          "confirm": { "type": "boolean" },
+          "clientId": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "stopped": { "type": "boolean" },
+          "grantsRevoked": { "type": "integer" },
+          "inFlight": {
+            "type": "integer",
+            "description": "Actions already dispatched when the stop landed. These are the ones nobody can call back."
+          }
+        },
+        "required": ["stopped", "grantsRevoked"],
+        "additionalProperties": false
+      }
+    },
+    "auditTail": {
+      "operationClass": "observe",
+      "summary": "The most recent entries from this service's audit log, including the calls that were refused. Refusals are the half worth reading: an agent that tried to close a window and was told no is a fact about the agent, and it is invisible in a record of what succeeded. Entries carry what was done and to which application, never the contents of anything read or typed.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "clientId": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": { "type": "object" }
+          },
+          "path": { "type": "string" },
+          "written": { "type": "integer" },
+          "writeFailures": {
+            "type": "integer",
+            "description": "Records this service could not write. Non-zero means the log is incomplete, which a reader has to be told rather than left to infer from a gap."
+          }
+        },
+        "required": ["entries", "path"],
+        "additionalProperties": false
+      }
     }
   }
 }

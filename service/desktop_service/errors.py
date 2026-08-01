@@ -26,6 +26,10 @@ class ErrorCode:
     BACKEND_UNAVAILABLE = "BACKEND_UNAVAILABLE"
     ACTION_NOT_SUPPORTED = "ACTION_NOT_SUPPORTED"
     PERMISSION_DENIED = "PERMISSION_DENIED"
+    #: Separate from PERMISSION_DENIED on purpose. "You may not do this" and
+    #: "you may, but ask again" call for different behaviour from a caller: one
+    #: is a wall and the other is a door that closed on a timer.
+    SESSION_EXPIRED = "SESSION_EXPIRED"
     TIMEOUT = "TIMEOUT"
     METHOD_NOT_FOUND = "METHOD_NOT_FOUND"
     INVALID_PARAMS = "INVALID_PARAMS"
@@ -101,6 +105,50 @@ class TimeoutError_(DesktopError):
             f"{what} did not complete within {seconds}s",
             {"operation": what, "timeoutSeconds": seconds},
         )
+
+
+class PermissionDenied(DesktopError):
+    """Refused, with the reason and the way to change the answer.
+
+    A denial that only says no leaves the caller to guess between "never
+    allowed", "not allowed yet" and "not allowed here", and a model that has to
+    guess will try all three. The detail names which operation class was
+    required and what the session actually holds, so a client can either ask
+    for the grant it is missing or stop asking.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        method: str = "",
+        required: str = "",
+        granted: tuple[str, ...] | list[str] = (),
+        application: str = "",
+        remedy: str = "",
+    ) -> None:
+        detail: dict[str, Any] = {}
+        if method:
+            detail["method"] = method
+        if required:
+            detail["requiredOperationClass"] = required
+        if granted:
+            detail["grantedOperationClasses"] = list(granted)
+        if application:
+            detail["application"] = application
+        if remedy:
+            detail["remedy"] = remedy
+        super().__init__(ErrorCode.PERMISSION_DENIED, message, detail)
+
+
+class SessionExpired(DesktopError):
+    def __init__(self, message: str, *, idle_seconds: float = 0.0, remedy: str = "") -> None:
+        detail: dict[str, Any] = {}
+        if idle_seconds:
+            detail["idleSeconds"] = round(idle_seconds, 1)
+        if remedy:
+            detail["remedy"] = remedy
+        super().__init__(ErrorCode.SESSION_EXPIRED, message, detail)
 
 
 class ApplicationNotFound(DesktopError):
