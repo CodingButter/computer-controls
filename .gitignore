@@ -1,0 +1,9 @@
+node_modules/
+.venv/
+dist/
+__pycache__/
+*.pyc
+
+# Session artifacts — plans, progress, proofs, and the machine-local plugin registry
+.mastracode/plans/
+.mastracode/plugins/
