@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { DesktopClient, DesktopServiceError } from "./client.ts";
+import { PROTOCOL_VERSION } from "./protocol.generated.ts";
 
 /**
  * Gets this plugin a desktop service to talk to, by one of two routes.
@@ -42,6 +43,7 @@ export class DesktopSupervisor {
   #starting: Promise<DesktopClient> | undefined;
   #exitCleanupArmed = false;
   #attached = false;
+  #schemaDigest: string | undefined;
   readonly #sessionName: string;
 
   constructor(sessionName = `mc-${process.pid}`) {
@@ -197,6 +199,25 @@ export class DesktopSupervisor {
   ): Promise<T> {
     const client = await this.client();
     return await client.request<T>(method, params);
+  }
+
+  /**
+   * The schema version the service on the other end was built from.
+   *
+   * Asked lazily and remembered, because the answer cannot change without the
+   * connection dropping: one process, one build. `undefined` means the service
+   * is old enough to predate the field, which is itself the answer a caller
+   * wants when a method it expected is missing.
+   */
+  async schemaDigest(): Promise<string | undefined> {
+    if (this.#schemaDigest === undefined) {
+      const hello = await this.request<{ schemaDigest?: string }>("hello", {
+        clientId: this.#sessionName,
+        protocolVersion: PROTOCOL_VERSION,
+      });
+      this.#schemaDigest = hello.schemaDigest ?? "";
+    }
+    return this.#schemaDigest || undefined;
   }
 
   /**

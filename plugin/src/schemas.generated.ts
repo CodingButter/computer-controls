@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 61030c8f60707395
+// Protocol version: 1.0   schema sha256: ab6162fb626960de
 
 import { z } from "mastracode/plugin";
 
@@ -177,6 +177,7 @@ export const helloResult = z.object({
   compatible: z.boolean(),
   observationMode: z.enum(["active", "idle"]).optional(),
   protocolVersion: z.string(),
+  schemaDigest: z.string().describe("The schema digest the running service was built from. Clients share one service instance with whoever attached first, so a client whose generated protocol is newer than the running daemon's would otherwise meet the difference as an unexplained METHOD_NOT_FOUND on a method its own types promise exists. Comparing this against its own digest lets a client say the daemon is older than it is, which is the actual problem. Optional so that an older service which never sends it stays compatible.").optional(),
   sessionToken: z.string(),
   versionDifference: z.enum(["none", "minor"]).describe("A minor difference is reported and allowed. A major mismatch fails the call instead of appearing here."),
 });

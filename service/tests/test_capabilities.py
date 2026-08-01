@@ -29,6 +29,79 @@ def tier(report, tier_id):
     return next(t for t in report["tiers"] if t["id"] == tier_id)
 
 
+def test_a_shell_session_describes_the_desktop_it_drives_not_itself(monkeypatch):
+    """A daemon started from a terminal must not report a terminal.
+
+    This service is started from an SSH shell, a tmux pane or a systemd unit as
+    a matter of course, and every one of those inherits `XDG_SESSION_TYPE=tty`
+    with no desktop named at all. The display was already discovered rather than
+    inherited; the session description now follows it, or the report would
+    describe a machine with no desktop while successfully driving one.
+    """
+
+    for name in ("XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "DISPLAY", "WAYLAND_DISPLAY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("XDG_SESSION_TYPE", "tty")
+
+    report = capabilities.build_report(
+        working_probe,
+        no_capture,
+        session_token="tok12345",
+        observation_mode="active",
+        discover_session=lambda: {
+            "XDG_CURRENT_DESKTOP": "ubuntu:GNOME",
+            "XDG_SESSION_TYPE": "x11",
+            "DISPLAY": ":1",
+        },
+    )
+
+    session = report["session"]
+    assert session["desktopEnvironment"] == "ubuntu:GNOME"
+    assert session["displayServer"] == "x11"
+    assert session["compositor"] == "mutter"
+    assert session["display"] == ":1"
+    # Said out loud, because a borrowed answer and an inherited one are not
+    # equally trustworthy and the caller is entitled to tell them apart.
+    assert "borrowed" in session["compositorSource"]
+
+
+def test_our_own_environment_outranks_the_discovered_one(monkeypatch):
+    """A caller who set DISPLAY deliberately is not to be second-guessed."""
+
+    monkeypatch.setenv("DISPLAY", ":7")
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "KDE")
+
+    report = capabilities.build_report(
+        working_probe,
+        no_capture,
+        session_token="tok12345",
+        observation_mode="active",
+        discover_session=lambda: {"XDG_CURRENT_DESKTOP": "ubuntu:GNOME", "DISPLAY": ":1"},
+    )
+
+    assert report["session"]["display"] == ":7"
+    assert report["session"]["compositor"] == "kwin"
+
+
+def test_no_graphical_session_is_an_answer_not_a_guess(monkeypatch):
+    """An empty discovery leaves the report honest about knowing nothing."""
+
+    for name in ("XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "DISPLAY", "WAYLAND_DISPLAY"):
+        monkeypatch.delenv(name, raising=False)
+
+    report = capabilities.build_report(
+        working_probe,
+        no_capture,
+        session_token="tok12345",
+        observation_mode="active",
+        discover_session=dict,
+    )
+
+    assert report["session"]["desktopEnvironment"] == "unknown"
+    assert report["session"]["displayServer"] == "unknown"
+    assert "borrowed" not in report["session"]["compositorSource"]
+
+
 def test_report_names_the_display_server():
     report = build(working_probe)
     assert report["session"]["displayServer"] in {"x11", "wayland", "unknown"}

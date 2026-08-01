@@ -18,7 +18,7 @@ import time
 from typing import Any
 
 from . import actions, capabilities, deltas, inspect as inspection, policy, state, waitfor, watch
-from .backends import atspi, capture, launcher, loop, x11
+from .backends import atspi, capture, launcher, loop, session_env, x11
 from .errors import DesktopError, ErrorCode, InvalidParams
 from .registry import ElementRegistry
 from .session import Session
@@ -87,6 +87,7 @@ def _method_capabilities(_params: dict[str, Any]) -> dict[str, Any]:
         capture.unavailable_reason,
         session_token=_session.token,
         observation_mode=_session.mode,
+        discover_session=session_env.discover,
     )
 
 

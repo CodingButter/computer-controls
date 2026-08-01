@@ -1,6 +1,7 @@
 import { createTool, defineMastraCodePlugin, z } from "mastracode/plugin";
 
 import { DesktopServiceError } from "./client.ts";
+import { SCHEMA_DIGEST } from "./protocol.generated.ts";
 import * as schemas from "./schemas.generated.ts";
 import { buildPushLane } from "./signals/index.ts";
 import { DesktopSupervisor } from "./supervisor.ts";
@@ -71,10 +72,47 @@ function diagnosisFrom(stderr: string): string {
     .join("\n");
 }
 
+/**
+ * What an attaching client should say when the service does not know a method
+ * this client's own generated protocol declares.
+ *
+ * Clients do not start the service, they attach to whichever instance is already
+ * listening — deliberately, so that a long-lived daemon survives any one client.
+ * The consequence is that the daemon serves the code it booted with, and a
+ * daemon started before a method existed answers `METHOD_NOT_FOUND` for a method
+ * these types promise is there. That cost forty minutes once: the capture
+ * backend was on disk and the running daemon had never heard of it.
+ *
+ * Returns the sentence to append, or nothing when the digests agree and the
+ * missing method is a genuine mystery rather than a stale process.
+ */
+export function staleDaemonHint(
+  serviceDigest: string | undefined,
+  clientDigest: string,
+): string {
+  if (!serviceDigest) {
+    return (
+      "\nThe running service predates the handshake field that reports its schema version, " +
+      "so it is certainly older than this client. Restart the desktop daemon."
+    );
+  }
+  if (serviceDigest !== clientDigest) {
+    return (
+      `\nThe running service was built from schema ${serviceDigest} and this client from ` +
+      `${clientDigest}. The daemon is serving older code than this client expects — restart it.`
+    );
+  }
+  return "";
+}
+
 async function request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
   try {
     return await supervisor.request<T>(method, params);
   } catch (error) {
+    if (error instanceof DesktopServiceError && error.code === "METHOD_NOT_FOUND") {
+      const hint = staleDaemonHint(await supervisor.schemaDigest(), SCHEMA_DIGEST);
+      if (hint) throw new Error(`[${error.code}] ${error.message}${hint}`);
+    }
     return describeFailure(error);
   }
 }

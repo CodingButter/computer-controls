@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 61030c8f60707395
+// Protocol version: 1.0   schema sha256: ab6162fb626960de
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "61030c8f60707395" as const;
+export const SCHEMA_DIGEST = "ab6162fb626960de" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -271,6 +271,8 @@ export interface HelloResult {
   compatible: boolean;
   observationMode?: "active" | "idle";
   protocolVersion: string;
+  /** The schema digest the running service was built from. Clients share one service instance with whoever attached first, so a client whose generated protocol is newer than the running daemon's would otherwise meet the difference as an unexplained METHOD_NOT_FOUND on a method its own types promise exists. Comparing this against its own digest lets a client say the daemon is older than it is, which is the actual problem. Optional so that an older service which never sends it stays compatible. */
+  schemaDigest?: string;
   sessionToken: string;
   /** A minor difference is reported and allowed. A major mismatch fails the call instead of appearing here. */
   versionDifference: "none" | "minor";

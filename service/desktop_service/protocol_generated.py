@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: 61030c8f60707395
+# Protocol version: 1.0   schema sha256: ab6162fb626960de
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "61030c8f60707395"
+SCHEMA_DIGEST: Final = "ab6162fb626960de"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -873,6 +873,10 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 "type": "string",
             },
             "protocolVersion": {
+                "type": "string",
+            },
+            "schemaDigest": {
+                "description": "The schema digest the running service was built from. Clients share one service instance with whoever attached first, so a client whose generated protocol is newer than the running daemon's would otherwise meet the difference as an unexplained METHOD_NOT_FOUND on a method its own types promise exists. Comparing this against its own digest lets a client say the daemon is older than it is, which is the actual problem. Optional so that an older service which never sends it stays compatible.",
                 "type": "string",
             },
             "sessionToken": {

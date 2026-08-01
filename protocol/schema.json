@@ -268,7 +268,11 @@
             "description": "A minor difference is reported and allowed. A major mismatch fails the call instead of appearing here."
           },
           "sessionToken": { "type": "string" },
-          "observationMode": { "type": "string", "enum": ["active", "idle"] }
+          "observationMode": { "type": "string", "enum": ["active", "idle"] },
+          "schemaDigest": {
+            "type": "string",
+            "description": "The schema digest the running service was built from. Clients share one service instance with whoever attached first, so a client whose generated protocol is newer than the running daemon's would otherwise meet the difference as an unexplained METHOD_NOT_FOUND on a method its own types promise exists. Comparing this against its own digest lets a client say the daemon is older than it is, which is the actual problem. Optional so that an older service which never sends it stays compatible."
+          }
         },
         "required": ["protocolVersion", "compatible", "versionDifference", "sessionToken"],
         "additionalProperties": false

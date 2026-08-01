@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .errors import DesktopError, ErrorCode
-from .protocol_generated import PROTOCOL_VERSION
+from .protocol_generated import PROTOCOL_VERSION, SCHEMA_DIGEST
 
 #: Active-mode defaults. These are the values segment 2's delta engine starts
 #: from; idle backs off from them. Named here rather than inline so the protocol
@@ -64,6 +64,12 @@ class Session:
             "versionDifference": "none" if requested == PROTOCOL_VERSION else "minor",
             "sessionToken": self.token,
             "observationMode": self.mode,
+            # The version the running process was built from, not the version on
+            # disk. Clients attach to whichever service instance is already
+            # listening, so a client generated against a newer schema meets the
+            # difference as METHOD_NOT_FOUND on a method its own types promise
+            # exists. This turns that into a comparison it can make itself.
+            "schemaDigest": SCHEMA_DIGEST,
         }
 
     def set_observation_mode(self, params: dict[str, Any]) -> dict[str, Any]:

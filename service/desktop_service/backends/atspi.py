@@ -608,6 +608,57 @@ def actions_of(obj: Atspi.Accessible) -> list[str]:
     return _actions_of(obj)
 
 
+def interfaces_of(obj: Atspi.Accessible) -> list[str]:
+    """Which AT-SPI interfaces this object advertises.
+
+    A claim, not a guarantee — `collection_answers` is the test of it.
+    """
+    return _safe(obj.get_interfaces, []) or []
+
+
+def role_of(obj: Atspi.Accessible) -> str:
+    return _safe(obj.get_role_name, "") or ""
+
+
+def toolkit_of(app: Atspi.Accessible) -> tuple[str, str]:
+    """The toolkit name and version an application reports for itself."""
+    return (
+        _safe(app.get_toolkit_name, "") or "",
+        _safe(app.get_toolkit_version, "") or "",
+    )
+
+
+def collection_answers(app: Atspi.Accessible) -> bool:
+    """Whether a `Collection` query returns, rather than whether one is offered.
+
+    Applications advertise this interface and then decline to serve it. The
+    interface list is a claim; this is the test, and the gap between the two is
+    the entire reason the manual walk exists.
+    """
+
+    def query() -> bool:
+        rule = Atspi.MatchRule.new(
+            Atspi.StateSet.new([]),
+            Atspi.CollectionMatchType.ANY,
+            {},
+            Atspi.CollectionMatchType.ANY,
+            [],
+            Atspi.CollectionMatchType.ANY,
+            [],
+            Atspi.CollectionMatchType.ANY,
+            False,
+        )
+        return app.get_matches(rule, Atspi.CollectionSortOrder.CANONICAL, 1, False) is not None
+
+    return bool(_safe(query, False))
+
+
+def windows_of_application(app_id: str) -> list[Atspi.Accessible]:
+    """The window objects of one application, or an empty list if it is gone."""
+    app = find_application(app_id)
+    return _windows_of(app) if app is not None else []
+
+
 def do_action(obj: Atspi.Accessible, action_name: str) -> bool:
     """Invoke a named action. Returns False when the toolkit declines it.
 
