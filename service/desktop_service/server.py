@@ -19,11 +19,17 @@ from . import capabilities, inspect as inspection
 from .backends import atspi, loop
 from .errors import DesktopError, ErrorCode, InvalidParams
 from .registry import ElementRegistry
+from .session import Session
 from .transport import JsonRpcServer, default_socket_path
+from .validate import validate_params
 
 # One registry per service process: element ids and the revision counter are
 # session-scoped, and the session is the process.
 _registry = ElementRegistry(prober=atspi.fingerprint_of)
+
+# Likewise one session: several clients share this service instance, so they
+# share its element namespace, its revision counter and its observation mode.
+_session = Session()
 
 
 def _require_window(window_id: str):
@@ -178,7 +184,11 @@ def _method_get_element(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _method_get_revision(_params: dict[str, Any]) -> dict[str, Any]:
-    return {"revision": _registry.revision}
+    return {"revision": _registry.revision, "observationMode": _session.mode}
+
+
+def _method_set_observation_mode(params: dict[str, Any]) -> dict[str, Any]:
+    return {**_session.set_observation_mode(params), "revision": _registry.revision}
 
 
 _PR_SET_PDEATHSIG = 1
@@ -203,8 +213,34 @@ def _die_with_parent() -> None:
         os.kill(os.getpid(), signal.SIGTERM)
 
 
+def _validated(method: str, handler):
+    """Enforce the frozen request schema before a handler ever runs.
+
+    Applied once at registration rather than inside each handler, so a new method
+    cannot be added without validation by forgetting a line.
+    """
+
+    def call(params: dict[str, Any]) -> dict[str, Any]:
+        return handler(validate_params(method, params))
+
+    return call
+
+
 def build_server(socket_path: str) -> JsonRpcServer:
-    server = JsonRpcServer(socket_path)
+    base = JsonRpcServer(socket_path)
+
+    class _ValidatingServer:
+        """Registers every handler behind its schema check."""
+
+        def __init__(self, target: JsonRpcServer) -> None:
+            self.target = target
+
+        def register(self, method: str, handler) -> None:
+            self.target.register(method, _validated(method, handler))
+
+    server = _ValidatingServer(base)
+    server.register("hello", _session.hello)
+    server.register("setObservationMode", _method_set_observation_mode)
     server.register("getDesktopCapabilities", _method_capabilities)
     server.register("listApplications", _method_list_applications)
     server.register("listWindows", _method_list_windows)
@@ -212,7 +248,7 @@ def build_server(socket_path: str) -> JsonRpcServer:
     server.register("queryElements", _method_query_elements)
     server.register("getElement", _method_get_element)
     server.register("getRevision", _method_get_revision)
-    return server
+    return base
 
 
 def main(argv: list[str] | None = None) -> int:
