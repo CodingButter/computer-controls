@@ -38,6 +38,27 @@ const tierSchema = z.object({
   detail: z.record(z.string(), z.unknown()).nullish(),
 });
 
+/**
+ * An element as the model sees it. Declared lazily because the shape is
+ * recursive: a tree node contains nodes.
+ */
+const elementSchema: z.ZodType<unknown> = z.lazy(() =>
+  z.object({
+    id: z.string(),
+    backend: z.string(),
+    role: z.string(),
+    name: z.string(),
+    value: z.string().optional(),
+    states: z.array(z.string()),
+    actions: z.array(z.string()),
+    bounds: z
+      .object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
+      .optional(),
+    children: z.array(elementSchema).optional(),
+    truncated: z.boolean().optional(),
+  }),
+);
+
 const applicationSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -123,6 +144,89 @@ export default defineMastraCodePlugin({
           await request("listWindows", {
             ...(input?.applicationId ? { applicationId: input.applicationId } : {}),
           }),
+      }),
+    },
+
+    desktop_inspect_window: {
+      tool: createTool({
+        id: "desktop_inspect_window",
+        description:
+          "Look inside a window and get back a compact semantic tree: roles, names, states, " +
+          "available actions and stable element ids. Always bounded — prefer a shallow depth " +
+          "and a role filter over a large tree, and use desktop_query_elements instead when " +
+          "you are looking for something specific. Note that the window's own action list is " +
+          "often the most capable surface: GTK4 applications expose their entire command set " +
+          "there while their element tree is nearly empty.",
+        inputSchema: z.object({
+          windowId: z.string().describe("A window id from desktop_list_windows."),
+          depth: z
+            .number()
+            .int()
+            .min(1)
+            .max(12)
+            .optional()
+            .describe("How many levels below the window to descend. Defaults to 3."),
+          maxNodes: z
+            .number()
+            .int()
+            .min(1)
+            .max(1000)
+            .optional()
+            .describe("Hard budget on nodes returned. Defaults to 200."),
+          includeRoles: z
+            .array(z.string())
+            .optional()
+            .describe("Only include elements with these roles, e.g. ['push button', 'entry']."),
+          excludeRoles: z
+            .array(z.string())
+            .optional()
+            .describe("Drop these roles from the result, e.g. ['filler', 'panel']."),
+        }),
+        outputSchema: z.object({
+          window: elementSchema,
+          nodeCount: z.number(),
+          truncated: z.boolean(),
+          revision: z.number(),
+          backend: z.string(),
+        }),
+        execute: async (input) =>
+          await request("inspectWindow", { ...input }),
+      }),
+    },
+
+    desktop_query_elements: {
+      tool: createTool({
+        id: "desktop_query_elements",
+        description:
+          "Find specific elements inside a window by role, name or state — the preferred way " +
+          "to locate something, because it returns a short flat list instead of a tree. " +
+          "At least one filter is required. Returned element ids are stable and revision-" +
+          "stamped: if the element changes before you use one, the service tells you it is " +
+          "stale rather than acting on something else.",
+        inputSchema: z.object({
+          windowId: z.string().describe("A window id from desktop_list_windows."),
+          role: z
+            .string()
+            .optional()
+            .describe("Exact AT-SPI role, e.g. 'push button', 'entry', 'check box', 'menu item'."),
+          name: z
+            .string()
+            .optional()
+            .describe("Case-insensitive substring of the element's accessible name."),
+          states: z
+            .array(z.string())
+            .optional()
+            .describe("Only elements holding all of these states, e.g. ['enabled', 'showing']."),
+          limit: z.number().int().min(1).max(200).optional().describe("Defaults to 50."),
+        }),
+        outputSchema: z.object({
+          elements: z.array(elementSchema),
+          matchCount: z.number(),
+          searchTruncated: z.boolean(),
+          revision: z.number(),
+          backend: z.string(),
+        }),
+        execute: async (input) => await request("queryElements", { ...input }),
       }),
     },
   },
