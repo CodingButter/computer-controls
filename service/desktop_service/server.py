@@ -28,6 +28,7 @@ from . import (
     identity,
     inspect as inspection,
     policy,
+    presence,
     protocol_generated,
     redaction,
     security,
@@ -412,6 +413,41 @@ _watcher = watch.Watcher(
 )
 
 
+#: Who has the keyboard. Both probes go to the display server rather than the
+#: toolkit: the idle timer costs a property read and no trip onto the shared loop
+#: thread, which is what makes it affordable to ask between every two words of a
+#: paced write.
+_presence = presence.Watch(
+    x11.idle_ms,
+    lambda: str(x11.active_xid() or ""),
+)
+
+
+def _display_window_of(element_id: str) -> str:
+    """The display server's id for the window this element sits in.
+
+    Resolved once, before a write begins, because the per-word check has to be
+    cheap: comparing two X ids costs a property read, while asking the
+    accessibility layer which window is active would put a full desktop
+    enumeration between every two words.
+
+    Empty when the window cannot be identified — which reads, correctly, as "no
+    takeover can be detected here" rather than as a takeover.
+    """
+    window_id, _ = _element_scope(element_id)
+    if not window_id:
+        return ""
+
+    def resolve() -> int | None:
+        window = atspi.find_window(window_id)
+        return atspi.xid_of(window) if window is not None else None
+
+    try:
+        return str(loop.call_on_loop(resolve, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS) or "")
+    except Exception:
+        return ""
+
+
 def _resolve_element(element_id: str):
     """Registry check first, then the live object. Stale beats not-found."""
     _registry.resolve(element_id)
@@ -594,6 +630,27 @@ def _method_set_element_value(params: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _yielded(progress: dict[str, Any], element_id: str, window: str, client_id: str) -> bool:
+    """Whether a person just took this field, checked between two words.
+
+    Between, never during: an insert that has left for the toolkit thread cannot
+    be recalled, so the finest granularity honestly available is one word. That
+    is the whole cost of yielding — a person who reaches for the field mid-word
+    gets one more word than they asked for, and then silence.
+
+    The write stops and the field is withheld in the same breath, so the client
+    that lost it cannot simply call again and win the race.
+    """
+    if not _presence.took(window):
+        return False
+    _presence.withhold(element_id, window, taken_from=client_id)
+    progress["yieldedTo"] = "user"
+    progress["stoppedBecause"] = (
+        "the person at this desktop started working in that window, so the writing stopped"
+    )
+    return True
+
+
 def _method_type_text(params: dict[str, Any]) -> dict[str, Any]:
     """Type into an element at human speed, a word at a time.
 
@@ -647,9 +704,12 @@ def _method_type_text(params: dict[str, Any]) -> dict[str, Any]:
             progress["stoppedBecause"] = "the element does not accept text"
             return False
 
+        held_window = _display_window_of(element_id)
         for stroke in plan:
             if stroke.delay_ms:
                 time.sleep(stroke.delay_ms / 1000.0)
+            if _yielded(progress, element_id, held_window, _client_id(params)):
+                break
             try:
                 landed = on_loop(lambda: atspi.insert_text(_resolve_element(element_id), stroke.text))
             except DesktopError as stalled:
@@ -771,9 +831,12 @@ def _method_edit_text(params: dict[str, Any]) -> dict[str, Any]:
         progress["wordsPlanned"] = len(plan)
         progress["wordsTyped"] = 0
         offset = start
+        held_window = _display_window_of(element_id)
         for stroke in plan:
             if stroke.delay_ms:
                 time.sleep(stroke.delay_ms / 1000.0)
+            if _yielded(progress, element_id, held_window, _client_id(params)):
+                break
             try:
                 landed = on_loop(
                     lambda: atspi.insert_text(_resolve_element(element_id), stroke.text, offset)
@@ -1036,10 +1099,15 @@ def _method_grant_scope(params: dict[str, Any]) -> dict[str, Any]:
     client that asked for edit and got it still benefits from knowing whether
     submit was ever going to be available, because the alternative is finding
     out one method call before it mattered.
+
+    The grant is filed under the same identity the guard will ask about — the
+    one the connection was issued, not the one the caller wrote down. Filing it
+    under a claimed name was the whole hole A12 closed, and it would reappear
+    here as a grant that is real, recorded, and consulted for nobody.
     """
     classes = params.get("operationClasses") or []
     grant = _consent.grant(
-        params.get("clientId") or "",
+        _client_id(params),
         classes=classes,
         applications=params.get("applications") or (),
         seconds=params.get("seconds"),
@@ -1347,6 +1415,49 @@ def _enforce_nested(method: str, params: dict[str, Any], client_id: str) -> None
             # would make a confirmed batch impossible to express.
             confirmed=bool(params.get("confirm")),
         )
+        if isinstance(inner_params, dict):
+            _enforce_presence(inner_class, inner_params)
+
+
+#: Operation classes that put something into an element rather than reading it.
+#: Observation is never refused on presence grounds: a person taking a field is a
+#: reason to stop writing in it, not a reason to go blind.
+_WRITING_CLASSES = frozenset({"edit", "submit", "destructive"})
+
+
+def _enforce_presence(operation_class: str, params: dict[str, Any]) -> None:
+    """Refuse to write into an element the person at the keyboard has taken.
+
+    The withdrawal is the point. An agent that could be *asked* to stop would be
+    an agent that could decline, or fail to check, or check between the wrong two
+    words — so it is not asked. Its next action fails, and the failure names who
+    has the field.
+
+    The claim is on the element, not the client that lost it: a second agent
+    picking up where the first left off is the same intrusion wearing a different
+    name.
+    """
+    if operation_class not in _WRITING_CLASSES:
+        return
+    element_id = params.get("elementId")
+    if not isinstance(element_id, str) or not element_id:
+        return
+    held = _presence.holder_of(element_id)
+    if held is None:
+        return
+    raise DesktopError(
+        ErrorCode.PERMISSION_DENIED,
+        "The person at this desktop is using that field. It is theirs until they leave it.",
+        {
+            "elementId": element_id,
+            "windowId": held.window_id,
+            "takenFrom": held.taken_from,
+            "remedy": (
+                "Nothing over this socket hands it back. Wait, observe, and try again "
+                "once they have moved on."
+            ),
+        },
+    )
 
 
 def _guarded(method: str, handler):
@@ -1386,6 +1497,7 @@ def _guarded(method: str, handler):
                 application=application,
                 confirmed=bool(params.get("confirm")),
             )
+            _enforce_presence(operation_class, params)
             _enforce_nested(method, params, client_id)
         except DesktopError as denial:
             record.decision = "denied"

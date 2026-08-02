@@ -120,6 +120,47 @@ def test_a_label_is_not_an_identity(served, socket_path):
         assert identity.current_label() == "pretending-to-be-someone"
 
 
+def test_a_grant_is_filed_under_the_identity_the_guard_asks_about(tmp_path, monkeypatch):
+    """The two halves of consent have to agree on who the client is.
+
+    This one only fails over a real socket. Called in-process there is no issued
+    identity, both halves fall through to the caller's claim, and a grant filed
+    under a name nobody consults looks exactly like a grant that works.
+    """
+    from desktop_service import audit, security, server
+
+    consent = security.Consent(security.Ceiling(classes=frozenset(security.OPERATION_CLASSES)))
+    monkeypatch.setattr(server, "_consent", consent)
+    monkeypatch.setattr(server, "_audit", audit.AuditLog(tmp_path / "audit.jsonl"))
+    path = str(tmp_path / "granted.sock")
+    srv = server.build_server(path)
+    srv.start()
+    try:
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.connect(path)
+        with conn.makefile("rwb") as stream:
+
+            def call(method: str, params: dict) -> dict:
+                stream.write(
+                    (json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}) + "\n").encode()
+                )
+                stream.flush()
+                return json.loads(stream.readline().decode())
+
+            call("hello", {"protocolVersion": "1.0", "clientId": "a-name-it-chose"})
+            call("grantScope", {"operationClasses": ["edit"], "clientId": "a-name-it-chose"})
+            answer = call("focusWindow", {"windowId": "win-nothing", "clientId": "a-name-it-chose"})
+        conn.close()
+    finally:
+        srv.stop()
+
+    # focusWindow is 'activate', which was never granted, so a refusal is right.
+    # What must not happen is a refusal saying the client holds only observe:
+    # that is the grant it was just given, filed under a name nobody reads.
+    detail = answer.get("error", {}).get("data", {}).get("detail", {})
+    assert "edit" in detail.get("grantedOperationClasses", ["edit"])
+
+
 def test_identity_is_per_thread_not_per_process():
     """Connections are served on their own threads and must not bleed."""
     seen: dict[str, str] = {}
