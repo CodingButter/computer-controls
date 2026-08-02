@@ -12,13 +12,29 @@ Run it directly:
 It prints `listening <socket path>` once it is ready, which is the line the
 plugin's supervisor waits for before sending its first request.
 
-The virtualenv **must** be created with system site packages, or `gi` is
-invisible inside it and the failure looks like a missing dependency:
+## Getting a checkout to the point where the tests run
+
+Two system packages come first, and they are not optional even for the tests
+that need no desktop. `backends/atspi.py` imports `gi` at module scope, so
+without them `pytest --no-live` does not fail a few tests — it fails to collect
+any, with `ModuleNotFoundError: No module named 'gi'` against every file:
+
+```
+sudo apt-get install -y python3-gi gir1.2-atspi-2.0 libx11-6
+```
+
+Then the virtualenv, which **must** be created with system site packages, or
+`gi` is invisible inside it and the failure looks the same as not having
+installed it at all:
 
 ```
 python3 -m venv --system-site-packages .venv
 .venv/bin/pip install pytest
 ```
+
+This is the whole setup. It is also, verbatim, what a sandboxed worktree needs
+to run before an agent starts in it — a checkout that skips this can write code
+and open a pull request without ever having been able to run one test.
 
 ## The threading contract
 
