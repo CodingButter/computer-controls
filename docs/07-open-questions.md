@@ -74,9 +74,10 @@ its own unanswered question.
 `entry`, its sidebar, its direct-message list and 40-plus named controls — an
 Electron window is drivable. Reaching them means drilling with `inspectElement`
 from an anchor rather than reading a window and believing the result, which the
-protocol already supports and which nothing in the tool descriptions tells a
-model to expect. A ceiling that hides 97% of an application without saying so is
-worse than a ceiling that refuses: silence reads as absence.
+`desktop_inspect_element` tool description says to do explicitly. A ceiling that
+hides 97% of an application without saying so is worse than a ceiling that
+refuses: silence reads as absence. The depth cutoff now sets `truncated` and
+marks where to drill from, so the ceiling does say so.
 
 **Tier that picks it up** — none. The Chromium DevTools Protocol tier remains the
 answer for a page's DOM semantics; it is not needed to reach anything measured
