@@ -26,7 +26,14 @@ def forget_connection():
     x11._xlib, x11._unavailable_reason, x11._attached_display = saved
 
 
+@pytest.mark.live
 def test_it_attaches_with_no_display_in_the_environment(forget_connection, monkeypatch):
+    """Marked live because it asserts discovery *succeeds*.
+
+    The `/tmp/.X11-unix` check is not enough on its own: a host can carry sockets
+    for displays it holds no authority over, and then discovery correctly finds
+    nothing and this test correctly fails at proving something it cannot reach.
+    """
     monkeypatch.delenv("DISPLAY", raising=False)
     monkeypatch.delenv("XAUTHORITY", raising=False)
 

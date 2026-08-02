@@ -10,45 +10,77 @@ feels better about it.
 
 ---
 
-## Electron applications expose a frame and almost nothing under it
+## Electron is not opaque; our depth ceiling is
 
-**Applications** — vesktop (Discord), and Electron generally. Measured in
-`05-compatibility-matrix.md`.
+**Applications** — Discord 1.0.151, Visual Studio Code 1.131.0, Google Chrome,
+gnome-text-editor as the control. Measured in `05-compatibility-matrix.md`.
 
-**Symptom** — the application appears on the accessibility bus, answers as a
-`frame`, advertises the `Collection` interface, and then yields about thirty
-nodes for an entire chat client. Its two frame actions are the Chromium
-defaults, `doDefault` and `showContextMenu`, so nothing in the window is
-addressable by meaning. Depth is not the limit: the walk reaches its ceiling on
-a tree that is genuinely that small.
+**The measurement.** The same walk, run against the same live applications,
+varying only the depth it is allowed to reach:
 
-**Reproduce** — `service/tests/probe_lazy_tree.py`, run from `service/` with
-`PYTHONPATH=.`. It counts a window's nodes, waits three seconds with an
-assistive client attached, and counts again.
+| depth limit | Discord | code | gnome-text-editor |
+| --- | --- | --- | --- |
+| 6 | 7 | 12 | 9 |
+| 12 *(our ceiling)* | 29 | 30 | 39 |
+| 18 | 137 | 141 | 143 |
+| 24 | 742 | 312 | 146 |
+| unbounded | 952 | 621 | 146 |
 
-**Hypothesis, tested and rejected** — that Chromium builds its accessibility
-tree lazily once an assistive client announces itself, so the first read is
-early rather than wrong. It does not: vesktop reads 8 nodes at t0 and 8 nodes
-three seconds later, Chrome reads 98 and 98. Whatever the tree is going to be,
-it already is by the time we look.
+Discord's deepest node sits at depth 29, VS Code's at 34. An unbounded walk of
+either costs a tenth of a second.
 
-**Hypothesis, current** — this is the embedder's choice, not the engine's.
-Google Chrome and vesktop run the same Chromium and give completely different
-answers: Chrome exposes 277 nodes across its windows with a working `Collection`
-interface, vesktop exposes 30. Chromium's accessibility is opt-in per embedding
-application, and an Electron app that never turns it on presents the empty shell
-of one that did. Visual Studio Code is the sharper version of the same result —
-launched normally, and again with `--force-renderer-accessibility`, it never
-joins the accessibility bus at all. It is not a shallow tree; there is no
-application there to walk.
+**What that costs us, stated as a fraction.** Elements carrying at least one
+action, within our depth ceiling versus in the whole tree:
 
-**Tier that picks it up** — the Chromium DevTools Protocol, per the layered
-backend design: for a Chromium-family application the CDP tier addresses the DOM
-directly and does not care what the accessibility bridge was willing to publish.
-That tier is not in this build. Until it is, an Electron window is honestly
-reported as a shallow tree rather than being made to look driveable, which is
-why the compatibility matrix counts ten frame actions before it will use the
-words "frame actions".
+| Application | actionable within depth 12 | actionable in full | named within 12 | named in full |
+| --- | --- | --- | --- | --- |
+| Discord | 29 | 952 | 3 | 417 |
+| code | 30 | 621 | 8 | 313 |
+| Google Chrome | 271 | 662 | 92 | 377 |
+| gnome-text-editor | 4 | 30 | 5 | 32 |
+
+An agent inspecting Discord from the window root sees three named things out of
+four hundred and seventeen. This is not an Electron finding. GTK loses the same
+way, in the same direction, at a smaller magnitude.
+
+**Two retractions, both of them mine.** This section previously said an Electron
+frame "advertises a child and declines to hand it over". Then it said the tree
+"is built while you walk it", from readings of 1, 34, 62 and 137 nodes across
+successive walks. The first was a single bounded walk mistaken for the shape of
+the tree. The second was worse: those four numbers came from four ad-hoc scripts
+with four different depth limits, and 137 is exactly what depth 18 returns today,
+every time. I read my own instrument's setting as the application's behaviour,
+and wrote it down as a discovery. A walk repeated at a fixed depth returns the
+same count on every round, which is the check neither version ran.
+
+**What is still real from those rounds.** These applications did report a single
+node this morning and report a full tree now, and no depth limit explains that:
+`probe.py` has run at depth 12 throughout, and it moved from 1 node to 30. The
+surviving candidate is that a real assistive client attached in between. Setting
+`org.a11y.Status ScreenReaderEnabled` moved nothing on its own — but it started
+Orca, which is an actual AT walking the tree, and Chromium's documentation is
+explicit that full accessibility support is enabled once assistive technology is
+detected, and that once enabled it is not turned back off. That fits every
+reading we have, and it is still a hypothesis: it was not the experiment, because
+the flag and the client were flipped in the same motion.
+
+**The experiment that would settle it** — a cold Electron process, walked at a
+fixed depth before and after Orca is started, with the bus flag left alone
+throughout. The obstacle to run it today: a throwaway instance launched with its
+own `--user-data-dir` never appeared on the accessibility bus at all, which is
+its own unanswered question.
+
+**What this changes for an agent.** Discord exposes its message composer as an
+`entry`, its sidebar, its direct-message list and 40-plus named controls — an
+Electron window is drivable. Reaching them means drilling with `inspectElement`
+from an anchor rather than reading a window and believing the result, which the
+protocol already supports and which nothing in the tool descriptions tells a
+model to expect. A ceiling that hides 97% of an application without saying so is
+worse than a ceiling that refuses: silence reads as absence.
+
+**Tier that picks it up** — none. The Chromium DevTools Protocol tier remains the
+answer for a page's DOM semantics; it is not needed to reach anything measured
+here.
 
 ---
 
