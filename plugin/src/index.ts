@@ -160,6 +160,24 @@ export default defineMastraCodePlugin({
       }),
     },
 
+    desktop_set_attention: {
+      tool: createTool({
+        id: "desktop_set_attention",
+        description:
+          "Narrow what you are shown to the applications you are actually working in. " +
+          "Listings, desktop state and the change feed all stop mentioning anything else, " +
+          "so focus moving elsewhere no longer interrupts you. Naming applications also " +
+          "lifts the inspection depth ceiling — the walk starts inside one application " +
+          "instead of at the desktop — which is what makes deeply nested content, such as " +
+          "an editor's document text, reachable without drilling. This narrows your view " +
+          "only: it is not permission, and it can never reveal an application the user has " +
+          "walled off. Call it with no applications to go back to watching the whole desktop.",
+        inputSchema: schemas.setAttentionParams,
+        outputSchema: schemas.setAttentionResult,
+        execute: async (input) => await request("setAttention", { ...input }),
+      }),
+    },
+
     desktop_list_applications: {
       tool: createTool({
         id: "desktop_list_applications",

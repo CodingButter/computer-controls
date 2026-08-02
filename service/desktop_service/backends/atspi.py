@@ -866,6 +866,38 @@ def sample_values(element_ids: Sequence[str]) -> dict[str, str]:
     return sampled
 
 
+def owners_of(element_ids: Sequence[str]) -> dict[str, tuple[str, str]]:
+    """Which application each held element belongs to, as (id, name).
+
+    A value change is the one change the diff engine can see without ever having
+    looked at a window, and until now it said so anonymously. That was fine while
+    the only reader was a client watching the whole desktop; it is wrong for one
+    watching a single application, which would either be told about typing
+    somewhere it is not looking or — if the filter guessed — never told at all.
+
+    Asked alongside the sample rather than derived from it: the answer comes from
+    the live object, and the live object is only reliably there while the element
+    is still reachable.
+    """
+    owners: dict[str, tuple[str, str]] = {}
+    for element_id in element_ids:
+        obj = _objects.get(element_id)
+        if obj is None:
+            continue
+        app = _safe(obj.get_application)
+        if app is None:
+            continue
+        owners[element_id] = (
+            application_id(app),
+            model.egress_value(
+                _safe(app.get_name, "") or "",
+                field=model.APPLICATION_NAME,
+                role="application",
+            ),
+        )
+    return owners
+
+
 def read_back(obj: Atspi.Accessible, element_id: str = "") -> str:
     """Whatever the element now says its value is, through the egress point.
 

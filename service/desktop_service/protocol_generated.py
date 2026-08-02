@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: 5a3d6826220ff80d
+# Protocol version: 1.0   schema sha256: ceb3bbe1b961ee36
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "5a3d6826220ff80d"
+SCHEMA_DIGEST: Final = "ceb3bbe1b961ee36"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -19,6 +19,9 @@ CAPABILITY_TIERS: Final[tuple[str, ...]] = ("app-native", "accessibility", "comp
 
 #: How hard the service watches the desktop. Set by the client; the service reports which mode it is in. See A2 in the amendments: the runtime owns cadence because most events that justify going fast are invisible to the desktop service.
 OBSERVATION_MODES: Final[tuple[str, ...]] = ("active", "idle")
+
+#: How far into what it is watching a client wants to see. Attention is not permission: it narrows what one connection is shown, inside whatever the consent ceiling already allows. See A11 in the amendments.
+ATTENTION_DEPTHS: Final[tuple[str, ...]] = ("surface", "tree")
 
 #: The complete vocabulary of semantic changes. One engine produces these for both an action's observedEffects and a pushed delta, so a reader learns one vocabulary rather than two.
 CHANGE_KINDS: Final[tuple[str, ...]] = ("window-opened", "window-closed", "focus-changed", "element-appeared", "element-disappeared", "element-state-changed", "element-value-changed", "element-stale")
@@ -55,6 +58,7 @@ OPERATION_CLASS: Final[dict[str, str]] = {
     "listWindows": "observe",
     "performActions": "submit",
     "queryElements": "observe",
+    "setAttention": "observe",
     "setElementValue": "edit",
     "setObservationMode": "observe",
     "typeText": "edit",
@@ -360,8 +364,8 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 "type": "boolean",
             },
             "depth": {
-                "description": "How far below the anchor to walk. The same bound window inspection uses — drilling changes where a walk starts, never how far it may go.",
-                "maximum": 12,
+                "description": "How far below the anchor to walk. The same bound window inspection uses, and the same dependence on attention — drilling changes where a walk starts, never how far it may go.",
+                "maximum": 64,
                 "minimum": 1,
                 "type": "integer",
             },
@@ -403,7 +407,8 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 "type": "boolean",
             },
             "depth": {
-                "maximum": 12,
+                "description": "How far below the window's frame to walk. What the service grants depends on the caller's attention: a connection watching the whole desktop is held to the shallow ceiling, one that has named applications may go as deep as it asks. Over-asking is clamped rather than refused, and the truncation marker says so.",
+                "maximum": 64,
                 "minimum": 1,
                 "type": "integer",
             },
@@ -628,6 +633,36 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         "required": [
             "windowId",
         ],
+        "type": "object",
+    },
+    "setAttention": {
+        "additionalProperties": False,
+        "properties": {
+            "applications": {
+                "description": "Applications this connection cares about, by id or by name. Empty means the whole desktop, which is what an undeclared connection gets.",
+                "items": {
+                    "maxLength": 128,
+                    "type": "string",
+                },
+                "maxItems": 32,
+                "type": "array",
+            },
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+            "depth": {
+                "description": "How far in to look. 'tree' lifts the depth ceiling on inspection, and only means anything once applications are named: the budget is affordable because the walk starts inside one application rather than at the desktop.",
+                "enum": [
+                    "surface",
+                    "tree",
+                ],
+                "type": "string",
+            },
+        },
         "type": "object",
     },
     "setElementValue": {
@@ -1452,6 +1487,38 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             "searchTruncated",
             "revision",
             "backend",
+        ],
+        "type": "object",
+    },
+    "setAttention": {
+        "additionalProperties": False,
+        "properties": {
+            "applications": {
+                "items": {
+                    "type": "string",
+                },
+                "type": "array",
+            },
+            "depth": {
+                "enum": [
+                    "surface",
+                    "tree",
+                ],
+                "type": "string",
+            },
+            "maxDepth": {
+                "description": "The depth ceiling now in force for this connection, so a client learns what its declaration bought rather than discovering it by truncation.",
+                "type": "integer",
+            },
+            "revision": {
+                "type": "integer",
+            },
+        },
+        "required": [
+            "applications",
+            "depth",
+            "maxDepth",
+            "revision",
         ],
         "type": "object",
     },

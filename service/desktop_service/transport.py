@@ -63,8 +63,14 @@ def daemon_socket_path() -> str:
 
 
 class JsonRpcServer:
-    def __init__(self, socket_path: str) -> None:
+    def __init__(
+        self, socket_path: str, on_disconnect: Callable[[str], None] | None = None
+    ) -> None:
         self.socket_path = socket_path
+        # Told when a connection ends, because per-connection state has to be
+        # able to end with it. The transport does not know what that state is —
+        # it knows when the identity it minted stops meaning anything.
+        self._on_disconnect = on_disconnect
         self._handlers: dict[str, Handler] = {}
         self._server: socket.socket | None = None
         self._thread: threading.Thread | None = None
@@ -170,6 +176,11 @@ class JsonRpcServer:
                 conn.close()
             except OSError:
                 pass
+            if self._on_disconnect is not None:
+                try:
+                    self._on_disconnect(client_id)
+                except Exception:  # pragma: no cover - cleanup must not raise
+                    pass
 
     def handle_line(self, line: str) -> dict[str, Any] | None:
         try:

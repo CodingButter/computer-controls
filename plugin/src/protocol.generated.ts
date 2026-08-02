@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 5a3d6826220ff80d
+// Protocol version: 1.0   schema sha256: ceb3bbe1b961ee36
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "5a3d6826220ff80d" as const;
+export const SCHEMA_DIGEST = "ceb3bbe1b961ee36" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -16,6 +16,10 @@ export const CAPABILITY_TIER_VALUES: readonly CapabilityTier[] = ["app-native", 
 /** How hard the service watches the desktop. Set by the client; the service reports which mode it is in. See A2 in the amendments: the runtime owns cadence because most events that justify going fast are invisible to the desktop service. */
 export type ObservationMode = "active" | "idle";
 export const OBSERVATION_MODE_VALUES: readonly ObservationMode[] = ["active", "idle"];
+
+/** How far into what it is watching a client wants to see. Attention is not permission: it narrows what one connection is shown, inside whatever the consent ceiling already allows. See A11 in the amendments. */
+export type AttentionDepth = "surface" | "tree";
+export const ATTENTION_DEPTH_VALUES: readonly AttentionDepth[] = ["surface", "tree"];
 
 /** The complete vocabulary of semantic changes. One engine produces these for both an action's observedEffects and a pushed delta, so a reader learns one vocabulary rather than two. */
 export type ChangeKind = "window-opened" | "window-closed" | "focus-changed" | "element-appeared" | "element-disappeared" | "element-state-changed" | "element-value-changed" | "element-stale";
@@ -358,7 +362,7 @@ export interface InspectElementParams {
   clientId?: string;
   /** Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. */
   confirm?: boolean;
-  /** How far below the anchor to walk. The same bound window inspection uses — drilling changes where a walk starts, never how far it may go. */
+  /** How far below the anchor to walk. The same bound window inspection uses, and the same dependence on attention — drilling changes where a walk starts, never how far it may go. */
   depth?: number;
   /** Where the walk starts. Must come from an earlier inspection or query: there is no way to drill into something the caller has not already seen and chosen. */
   elementId: string;
@@ -379,6 +383,7 @@ export interface InspectWindowParams {
   clientId?: string;
   /** Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. */
   confirm?: boolean;
+  /** How far below the window's frame to walk. What the service grants depends on the caller's attention: a connection watching the whole desktop is held to the shallow ceiling, one that has named applications may go as deep as it asks. Over-asking is clamped rather than refused, and the truncation marker says so. */
   depth?: number;
   excludeRoles?: string[];
   includeRoles?: string[];
@@ -518,6 +523,24 @@ export interface QueryElementsResult {
   searchTruncated: boolean;
 }
 
+/** Declare what this connection is looking at. Attention is not permission: it narrows what this one client is shown and how deep it may look, always inside what the consent ceiling already allows. It is per connection, so two agents on one service can watch different things. The call declares the whole attention — a field left out takes its default, and a call with no fields returns the connection to the whole desktop. (operation class: observe) */
+export interface SetAttentionParams {
+  /** Applications this connection cares about, by id or by name. Empty means the whole desktop, which is what an undeclared connection gets. */
+  applications?: string[];
+  clientId?: string;
+  /** Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. */
+  confirm?: boolean;
+  /** How far in to look. 'tree' lifts the depth ceiling on inspection, and only means anything once applications are named: the budget is affordable because the walk starts inside one application rather than at the desktop. */
+  depth?: "surface" | "tree";
+}
+export interface SetAttentionResult {
+  applications: string[];
+  depth: "surface" | "tree";
+  /** The depth ceiling now in force for this connection, so a client learns what its declaration bought rather than discovering it by truncation. */
+  maxDepth: number;
+  revision: number;
+}
+
 /** Set an element's text through the accessibility editable-text interface, or its numeric value through the value interface. Never by synthesizing keystrokes. (operation class: edit) */
 export interface SetElementValueParams {
   clientId?: string;
@@ -590,7 +613,7 @@ export interface WaitForResult {
   waitedMs: number;
 }
 
-export type MethodName = "auditTail" | "captureWindow" | "editText" | "emergencyStop" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "grantScope" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "setElementValue" | "setObservationMode" | "typeText" | "waitFor";
+export type MethodName = "auditTail" | "captureWindow" | "editText" | "emergencyStop" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "grantScope" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "setAttention" | "setElementValue" | "setObservationMode" | "typeText" | "waitFor";
 
 export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   auditTail: "observe",
@@ -614,6 +637,7 @@ export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   listWindows: "observe",
   performActions: "submit",
   queryElements: "observe",
+  setAttention: "observe",
   setElementValue: "edit",
   setObservationMode: "observe",
   typeText: "edit",
@@ -642,6 +666,7 @@ export interface MethodMap {
   listWindows: { params: ListWindowsParams; result: ListWindowsResult };
   performActions: { params: PerformActionsParams; result: PerformActionsResult };
   queryElements: { params: QueryElementsParams; result: QueryElementsResult };
+  setAttention: { params: SetAttentionParams; result: SetAttentionResult };
   setElementValue: { params: SetElementValueParams; result: SetElementValueResult };
   setObservationMode: { params: SetObservationModeParams; result: SetObservationModeResult };
   typeText: { params: TypeTextParams; result: TypeTextResult };

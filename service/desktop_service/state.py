@@ -37,6 +37,11 @@ class Snapshot:
     revision: int
     windows: dict[str, WindowFacts] = field(default_factory=dict)
     values: dict[str, str] = field(default_factory=dict)
+    #: Element id to the (application id, application name) that owns it. Only
+    #: watched elements appear here, and only while they are still reachable —
+    #: an element whose owner could not be resolved reports a value change with
+    #: no application, exactly as it did before this field existed.
+    owners: dict[str, tuple[str, str]] = field(default_factory=dict)
 
     @property
     def active_window(self) -> str:
@@ -50,6 +55,7 @@ def snapshot_from_windows(
     revision: int,
     windows: list[dict[str, Any]],
     values: dict[str, str] | None = None,
+    owners: dict[str, tuple[str, str]] | None = None,
 ) -> Snapshot:
     """Build a snapshot from the window records the accessibility backend produces.
 
@@ -67,7 +73,12 @@ def snapshot_from_windows(
             role=window.get("role", ""),
             active=bool(window.get("active")),
         )
-    return Snapshot(revision=revision, windows=facts, values=dict(values or {}))
+    return Snapshot(
+        revision=revision,
+        windows=facts,
+        values=dict(values or {}),
+        owners=dict(owners or {}),
+    )
 
 
 def _edit_shape(before: str, after: str) -> dict[str, Any]:
@@ -211,11 +222,18 @@ def diff(before: Snapshot, after: Snapshot) -> list[dict[str, Any]]:
 
     for element_id, value in after.values.items():
         if element_id in before.values and before.values[element_id] != value:
+            # Fall back to the older snapshot's owner: an element can lose its
+            # application between two reads, and a change that names where it
+            # happened is worth more to a scoped reader than a change that goes
+            # anonymous at the moment the window is closing.
+            owner = after.owners.get(element_id) or before.owners.get(element_id) or ("", "")
             changes.append(
                 {
                     "kind": "element-value-changed",
                     "revision": after.revision,
                     "elementId": element_id,
+                    "applicationId": owner[0] or None,
+                    "applicationName": owner[1] or None,
                     "summary": model.egress_value(
                         f"an element's value {_describe_edit(before.values[element_id], value)}",
                         field=model.SUMMARY,
