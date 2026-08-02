@@ -139,11 +139,13 @@ Attention can only **subtract**. The consent ceiling filters first and produces 
 narrows further, so naming a walled-off application stores the name and shows nothing — there
 is no ordering here in which asking reveals whether the application is even running.
 
-Naming applications also lifts the inspection depth ceiling. The flat cap exists because a walk
-that starts at the desktop is unbounded in practice, not because twelve levels means anything;
-a walk that starts inside one named application is bounded by the node budget, which is the
-real cost. That is what makes content sitting below a dozen layers of scaffolding — an editor's
-document text — reachable without drilling to an anchor first.
+Naming applications also lifts the inspection depth ceiling, for walks into those applications.
+The flat cap exists because a walk that starts at the desktop is unbounded in practice, not
+because twelve levels means anything; a walk that starts inside one named application is bounded
+by the node budget, which is the real cost. That is what makes content sitting below a dozen
+layers of scaffolding — an editor's document text — reachable without drilling to an anchor
+first. Inspect something outside the declaration and the flat cap applies again, because the
+argument for the deeper budget was about where the walk starts, not about who was asking.
 
 ## Errors
 

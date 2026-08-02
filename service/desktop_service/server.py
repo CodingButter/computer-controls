@@ -201,7 +201,8 @@ MAX_DEPTH = 12
 #: below is unchanged, so the real cost bound still holds while the arbitrary
 #: one gets out of the way. This is what makes a text editor's document buffer —
 #: which sits below twelve levels of scaffolding when counted from the frame —
-#: reachable without drilling.
+#: reachable without drilling. A scoped connection inspecting something it did
+#: not name is outside that argument and gets the flat cap.
 SCOPED_MAX_DEPTH = 64
 MAX_NODES = 1000
 MAX_QUERY_LIMIT = 200
