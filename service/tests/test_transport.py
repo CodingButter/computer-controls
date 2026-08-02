@@ -191,12 +191,17 @@ def test_loop_shutdown_is_prompt():
     assert elapsed < 1.0, f"loop shutdown took {elapsed:.2f}s — the quit source did not run"
 
 
+@pytest.mark.live
 def test_concurrent_requests_on_the_glib_thread_do_not_deadlock():
     """Several clients calling the desktop at once must all be answered.
 
     This is the contract from `service/README.md`: connection threads marshal onto
     one GLib loop thread. A serialization bug here shows up as a hang, so the test
     joins with a timeout and fails on a thread that never finished.
+
+    Marked live because the last assertion is about a desktop: six probes that all
+    come back saying *no accessibility bus here* would satisfy every other line in
+    this test while proving nothing about serialization.
     """
     from desktop_service.backends import atspi, loop
 
