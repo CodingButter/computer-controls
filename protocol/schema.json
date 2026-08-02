@@ -83,6 +83,7 @@
         "PERMISSION_DENIED": "The caller's granted scope does not include this operation class, or the target application is blocked.",
         "SESSION_EXPIRED": "The client session's grant has expired and must be renewed. Distinct from PERMISSION_DENIED so a caller can tell 'never allowed' from 'allowed, ask again'.",
         "ELEMENT_HELD": "Another client is writing this element and owns it until that write finishes. Carries the holder's identity, what it is doing and how long it has been at it. Not a permission answer and not a queue: the request is refused, not deferred.",
+        "CLAIM_EXPIRED": "The claim covering this write ran out before the write finished. A lease is sized from the work it was taken for, so this says the work outran its own estimate rather than that time merely passed. The element is free and nothing was rolled back: a half-written field is a real state of the world, and hiding it would be the more expensive lie.",
         "TIMEOUT": "The desktop did not answer within the allotted time.",
         "METHOD_NOT_FOUND": "No such method in this protocol version.",
         "INVALID_PARAMS": "The request did not satisfy this schema.",
@@ -233,6 +234,22 @@
         "settledMs": { "type": "integer", "minimum": 0, "description": "How long the service waited for the desktop to go quiet." }
       },
       "required": ["fromRevision", "toRevision", "changes"],
+      "additionalProperties": false
+    },
+
+    "elementClaim": {
+      "type": "object",
+      "description": "One client's exclusive right to write one element, for a bounded time. A claim is not permission — permission is a separate question, already answered by the consent ceiling — and it is not a queue. It answers only 'who is allowed to be mid-sentence in this field right now'.",
+      "properties": {
+        "elementId": { "type": "string" },
+        "clientId": { "type": "string", "description": "The issued identity holding the claim, never a name a client chose for itself." },
+        "clientLabel": { "type": "string", "description": "The holder's readable label, for telling a person who is in their field." },
+        "expiresInMs": { "type": "integer", "minimum": 0, "description": "Time left on the lease, as of this answer." },
+        "leaseMs": { "type": "integer", "minimum": 0, "description": "The lease as granted, so a caller can tell a long claim from an old one." },
+        "heldForMs": { "type": "integer", "minimum": 0 },
+        "reason": { "type": "string", "description": "What the holder said it was doing. Present when it said." }
+      },
+      "required": ["elementId", "clientId", "expiresInMs", "leaseMs", "heldForMs"],
       "additionalProperties": false
     },
 
@@ -615,6 +632,58 @@
         "additionalProperties": false
       },
       "result": { "$ref": "#/$defs/actionResult" }
+    },
+
+    "claimElement": {
+      "operationClass": "edit",
+      "summary": "Take exclusive write ownership of one element for a bounded time, across as many calls as the work takes. No write is ever unowned — a write with no claim behind it takes one for its own duration and gives it back — so this is not a step to be added before every typeText. It is what closes the gap between two calls a caller thinks of as one piece of work: read the field, decide, type, check, type again. A claimed element cannot be taken by anyone else until it is released or its lease runs out — there is no preemption by a second agent, because the thing being protected is a sentence that is only half typed. The lease is sized by the work rather than by a house number: give estimatedWorkMs, or give the text about to be typed and let the service compute it with the same cadence arithmetic the typing itself uses, so the estimate and the work cannot drift apart. A lease is capped at ten minutes however long the work is, so work longer than that is claimed again as it goes; and a lease never ends in the middle of a write it is covering, because it exists to bound how long an element is held between calls rather than to interrupt one. A claim that has run out by the time the next write arrives is the caller having estimated badly, which it is told once, by name, rather than discovering later as somebody else's refusal. The person at the keyboard is not a client and holds no claim; their arrival still ends any write in the field they touch, and no claim outranks that.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "elementId": { "type": "string" },
+          "estimatedWorkMs": { "type": "integer", "minimum": 1, "maximum": 600000, "description": "How long the caller believes its work will take. The lease is this plus a settling margin. Bounded, because a lease nobody can outlive is ownership wearing a lease's name." },
+          "forText": { "type": "string", "maxLength": 4000, "description": "Instead of an estimate: the text about to be typed. The service sizes the lease from it at the words-per-minute given, using the arithmetic the typing will use." },
+          "wordsPerMinute": { "type": "integer", "minimum": 10, "maximum": 220 },
+          "reason": { "type": "string", "maxLength": 200, "description": "What this claim is for, in the caller's words. Shown to whoever is refused, and recorded in the audit log." },
+          "clientId": { "type": "string" },
+          "confirm": { "type": "boolean" }
+        },
+        "required": ["elementId"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "claim": { "$ref": "#/$defs/elementClaim" },
+          "revision": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["claim", "revision"],
+        "additionalProperties": false
+      }
+    },
+
+    "releaseElement": {
+      "operationClass": "edit",
+      "summary": "Give a claimed element back before its lease runs out. Releasing what you do not hold is not an error: the desired state is that this client owns nothing here, and it is already true. A client that disconnects releases everything it held, because an element owned by a process that no longer exists is owned forever.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "elementId": { "type": "string" },
+          "clientId": { "type": "string" }
+        },
+        "required": ["elementId"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "released": { "type": "boolean", "description": "True when this call gave up a claim, false when there was nothing of this client's to give up." },
+          "heldForMs": { "type": "integer", "minimum": 0 },
+          "revision": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["released", "revision"],
+        "additionalProperties": false
+      }
     },
 
     "setElementValue": {
