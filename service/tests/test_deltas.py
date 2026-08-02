@@ -252,6 +252,43 @@ def test_an_edit_in_the_middle_is_not_reported_as_an_append() -> None:
     assert change["detail"]["unchangedPrefix"] == 9
 
 
+def test_a_partial_deletion_is_reported_as_a_deletion() -> None:
+    """The shape the whole record was built for, and the one nothing asserted.
+
+    `cleared`, `appended` and `inserted` each had a test; `deleted` did not, which
+    left the one case the reader most needs to notice resting on inspection alone.
+    Both flavours belong here — a run taken out of the middle and a run taken off
+    the end — because they reach the same verdict by different arithmetic.
+
+    The wipe at the end is the boundary, not a repetition: emptying a field is
+    `cleared`, so anything that reads "somebody deleted text" off the shape alone
+    has to accept two answers, and anything proving a deletion has to remove a
+    part rather than the whole.
+    """
+    engine = deltas.DeltaEngine(actions.ActionLog(), advance=lambda: 1)
+    engine.observe(with_values(0, {"el-1": "the quick brown fox jumps"}))
+
+    excised = engine.observe(with_values(0, {"el-1": "the quick fox jumps"}))[0]
+
+    assert excised["detail"]["shape"] == "deleted"
+    assert excised["detail"]["charactersRemoved"] == 6
+    assert excised["detail"]["charactersAdded"] == 0
+    assert excised["detail"]["lengthBefore"] == 25
+    assert excised["detail"]["lengthAfter"] == 19
+    assert excised["detail"]["unchangedPrefix"] == 10
+    assert "lost 6 characters" in excised["summary"]
+
+    truncated = engine.observe(with_values(0, {"el-1": "the quick"}))[0]
+
+    assert truncated["detail"]["shape"] == "deleted"
+    assert truncated["detail"]["charactersRemoved"] == 10
+    assert truncated["detail"]["lengthAfter"] == 9
+
+    emptied = engine.observe(with_values(0, {"el-1": ""}))[0]
+
+    assert emptied["detail"]["shape"] == "cleared"
+
+
 def test_the_shape_of_an_edit_never_carries_its_content() -> None:
     """Lengths are safe where text is not, and this is the assertion that keeps it so."""
     engine = deltas.DeltaEngine(actions.ActionLog(), advance=lambda: 1)
