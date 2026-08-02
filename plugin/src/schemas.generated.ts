@@ -2,7 +2,7 @@
 // Run: node scripts/generate-protocol.mjs
 // Protocol version: 1.0   schema sha256: bfa45250563894d0
 
-import { z } from "mastracode/plugin";
+import { z } from "@mastra/code-sdk/plugin";
 
 export const changeSchema = z.object({
   applicationId: z.string().optional(),

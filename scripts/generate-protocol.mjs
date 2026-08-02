@@ -225,7 +225,7 @@ function zodObject(node, indent) {
 }
 
 function generateZod() {
-  const out = [banner("//"), "", 'import { z } from "mastracode/plugin";', ""];
+  const out = [banner("//"), "", 'import { z } from "@mastra/code-sdk/plugin";', ""];
 
   // Order matters: a schema referenced by another must be declared first, since
   // these are plain const initialisers. The one exception is the recursive

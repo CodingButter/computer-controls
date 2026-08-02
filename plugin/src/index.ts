@@ -1,4 +1,4 @@
-import { createTool, defineMastraCodePlugin, z } from "mastracode/plugin";
+import { createTool, defineMastraCodePlugin, z } from "@mastra/code-sdk/plugin";
 
 import { DesktopServiceError } from "./client.ts";
 import { SCHEMA_DIGEST } from "./protocol.generated.ts";

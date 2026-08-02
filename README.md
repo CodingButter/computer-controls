@@ -49,24 +49,12 @@ pnpm -C plugin install
 ### Registering the plugin
 
 The plugin runs from a **project-scoped local plugin registry** under `.mastracode/plugins/`,
-which is git-ignored. A fresh clone has neither the registry record nor the symlinks, so both
-must be recreated:
+which is git-ignored. A fresh clone has no registry record, so it must be recreated:
 
 ```sh
-# Point this at the mastracode package inside a Mastra Code development checkout.
-MASTRACODE_DEV=/path/to/mastra-plugin-processors/mastracode
-
-mkdir -p .mastracode/plugins/sources/local plugin/node_modules
+mkdir -p .mastracode/plugins/sources/local
 ln -sfn ../../../../plugin .mastracode/plugins/sources/local/desktop-control
-ln -sfn "$MASTRACODE_DEV/tui" plugin/node_modules/mastracode
 ```
-
-A development checkout is required rather than a published install because
-`plugin/src/signals/` imports `InputProcessor` from `mastracode/plugin`, and the published
-package does not export it: `mastracode`'s `dist/plugin.d.ts` re-exports
-`@mastra/code-sdk/plugin`, which offers `createTool`, `defineMastraCodePlugin` and `z`, but no
-input-processor type. (`SignalProvider`, by contrast, comes from the published
-`@mastra/core/signals` and needs no checkout.)
 
 Then write `.mastracode/plugins/plugins.json`:
 
@@ -128,7 +116,23 @@ needs a desktop carries the marker itself. A machine with no reachable desktop d
 and says so, rather than failing in a way that reads like a regression — and the desktop is
 probed by connecting to it, never by reading `DISPLAY`.
 
-The plugin's own lanes are `pnpm -C plugin test` and `pnpm -C plugin typecheck`. Both need the
-`mastracode` symlink above on the resolution path; without it they cannot resolve
-`mastracode/plugin`. Note that `plugin/package.json` currently declares neither `mastracode` nor
-`@mastra/core`, so a clone that has only run `pnpm -C plugin install` cannot yet run them.
+The plugin's own lanes are `pnpm -C plugin test` and `pnpm -C plugin typecheck`, and
+`pnpm -C plugin install` is the only thing either one needs.
+
+They can be run from a clone because the plugin declares the framework packages it imports:
+`@mastra/core` supplies `InputProcessor` from `@mastra/core/processors` and `SignalProvider`
+from `@mastra/core/signals`, and `@mastra/code-sdk` supplies `createTool`,
+`defineMastraCodePlugin` and `z`. Both are also declared as peer dependencies, because at
+runtime it is the **host** that owns them — a plugin is loaded into a running Mastra Code, not
+run on its own, and a signal provider built from a second copy of `@mastra/core` is not the same
+class as the one the host checks against. The local copies exist so the lanes can compile and
+run; the host's copies are what the plugin is actually loaded with. Keep the two versions in
+step, which is why they are pinned exactly rather than caret-ranged.
+
+`plugin/src/dependencies.test.ts` enforces the property that made this section true: every
+package imported anywhere under `plugin/src` must appear in `plugin/package.json`. An import
+that resolves only because of something a developer arranged by hand fails that test.
+
+There is also a third lane, `pnpm -C plugin test:gate`, holding tests that pin behaviour the
+plugin depends on but does not own. Per [CONTRIBUTING.md](CONTRIBUTING.md), a failure there is a
+signal to investigate, not a reason to block a PR.

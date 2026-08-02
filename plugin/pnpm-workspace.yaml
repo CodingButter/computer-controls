@@ -1,0 +1,21 @@
+# pnpm refuses to finish an install that silently skipped a dependency's build
+# script, so every package that wants to run one has to be answered here — and
+# an unanswered package fails `pnpm install` outright, which would put the
+# fresh-clone lanes right back where they started.
+#
+# All of these arrive underneath `@mastra/core`, and every one of them belongs
+# to a feature this plugin does not touch: model providers, browser automation,
+# an ONNX runtime, protobuf codegen. Their builds compile native binaries we
+# never load. `bufferutil` is only a speedup for `ws`, which falls back to a
+# pure-JavaScript implementation without it.
+#
+# So: build nothing. If a future dependency genuinely needs its build to run,
+# flip that one entry and say why.
+allowBuilds:
+  '@google/genai': false
+  agent-browser: false
+  bufferutil: false
+  edgedriver: false
+  geckodriver: false
+  onnxruntime-node: false
+  protobufjs: false
