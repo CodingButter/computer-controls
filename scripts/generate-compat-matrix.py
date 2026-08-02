@@ -8,6 +8,13 @@ writes what it found, stamped with the environment it found it in — because th
 results are only true for that environment, and a matrix that does not say which
 one is a matrix that will eventually lie.
 
+It accumulates rather than overwrites. An application that was not running when
+this runs was not measured, and not measuring something is not a finding about
+it: its row is carried forward with the date it was last measured on. Otherwise
+every re-run would silently narrow the document to whichever applications one
+person happened to have open, and a shrunken matrix looks exactly as
+authoritative as a complete one.
+
 Usage:
     python3 scripts/generate-compat-matrix.py --out docs/05-compatibility-matrix.md
 """
@@ -68,6 +75,14 @@ def verdict(row: dict) -> str:
     # two-action frames out of a column that would imply they are driveable.
     if row["frameActionCount"] >= 10 and row["nodeCount"] <= 60:
         return "frame actions"
+    # Tested after the frame, and the order is the finding rather than a
+    # preference: a GTK4 application is driven by its frame whether or not the
+    # walk below it ran out of depth, so saying "depth-limited" there would
+    # describe the instrument and hide the surface. Where the frame is empty,
+    # the ceiling is the honest answer — the node count that follows is a
+    # property of this probe's twelve levels, not of the application.
+    if row["depthLimited"]:
+        return "depth-limited"
     if row["nodeCount"] > 60:
         return "walkable tree"
     if row["nodeCount"] > 1:
@@ -75,7 +90,135 @@ def verdict(row: dict) -> str:
     return "opaque"
 
 
-def render(rows: list[dict], env: dict[str, str]) -> str:
+#: The table's columns, in order. Named here rather than spelled inline because
+#: three functions now have to agree about them: the one that writes a freshly
+#: measured row, the one that reads rows back out of a document written by an
+#: earlier run, and the one that renders the result.
+COLUMNS = [
+    "Application",
+    "Toolkit",
+    "Windows",
+    "Interfaces",
+    "Depth",
+    "Nodes",
+    "Collection",
+    "Frame actions",
+    "Actionable elements",
+    "Editable",
+    "Verdict",
+    "Measured",
+]
+
+#: Markdown alignments, one per column above: counts read right-aligned, words left.
+ALIGNMENTS = [
+    "---", "---", "---:", "---:", "---:", "---:",
+    "---", "---:", "---:", "---:", "---", "---",
+]
+
+
+def row_cells(row: dict, measured: str) -> list[str]:
+    """One measured application as the cells it will be written as."""
+
+    collection = (
+        "works"
+        if row["collectionWorks"]
+        else ("advertised only" if row["collectionAdvertised"] else "no")
+    )
+    depth = f"{row['reachableDepth']}{'+' if row['depthLimited'] else ''}"
+    nodes = f"{row['nodeCount']}{'+' if row['nodeLimited'] else ''}"
+    toolkit = row["toolkit"] + (f" {row['toolkitVersion']}" if row["toolkitVersion"] else "")
+    return [
+        str(row["name"]),
+        toolkit or "unknown",
+        str(row["windowCount"]),
+        str(len(row["interfaces"])),
+        depth,
+        nodes,
+        collection,
+        str(row["frameActionCount"]),
+        str(row["actionableElements"]),
+        str(row["editableFields"]),
+        verdict(row),
+        measured,
+    ]
+
+
+def _cells_of(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def parse_environment(text: str) -> dict[str, str]:
+    """The environment table of a document a previous run wrote."""
+
+    env: dict[str, str] = {}
+    for line in text.splitlines():
+        if line.startswith("## Applications"):
+            break
+        if line.startswith("| ") and line.count("|") == 3:
+            key, value = _cells_of(line)
+            if key:  # the table's own headerless header row is not a fact about the session
+                env[key] = value
+    return env
+
+
+def parse_existing(text: str) -> dict[str, list[str]]:
+    """Rows a previous run wrote, keyed by application, in the order written.
+
+    Read back as cells rather than re-derived as measurements, because that is
+    what preserving a measurement means: a row recorded in March keeps March's
+    numbers and March's verdict, and this run has no standing to recompute
+    either from an application it did not look at.
+
+    A row that cannot be read raises. The whole failure this function exists to
+    end is a document losing rows without saying so, and a parser that skipped
+    what it did not understand would reintroduce it one level down.
+    """
+
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith("| Application |"):
+            header = _cells_of(line)
+            break
+    else:
+        return {}
+
+    # Rows written before the column existed carry the whole document's stamp:
+    # it is the date they were measured on, recorded once instead of per row.
+    fallback = parse_environment(text).get("Measured", "").split(" ")[0]
+
+    rows: dict[str, list[str]] = {}
+    for line in lines[index + 2 :]:
+        if not line.startswith("|"):
+            break
+        cells = _cells_of(line)
+        if len(cells) == len(header) == len(COLUMNS) - 1:
+            if not fallback:
+                raise ValueError(f"undated row with no environment stamp to inherit: {line}")
+            cells = cells + [fallback]
+        if len(cells) != len(COLUMNS):
+            raise ValueError(f"cannot read row of the existing matrix: {line}")
+        rows[cells[0]] = cells
+    return rows
+
+
+def merge(existing: dict[str, list[str]], fresh: dict[str, list[str]]) -> list[list[str]]:
+    """Everything measured before, updated by everything measured now.
+
+    Existing order is kept so that a regeneration reads as a diff of the numbers
+    that changed rather than a reshuffle, and applications seen for the first
+    time are appended. An application absent from `fresh` was not asked, and an
+    unasked application is not a finding — its row stands, with the date it was
+    taken on.
+    """
+
+    merged = {name: fresh.get(name, cells) for name, cells in existing.items()}
+    for name, cells in fresh.items():
+        if name not in merged:
+            merged[name] = cells
+    return list(merged.values())
+
+
+def render(rows: list[list[str]], env: dict[str, str]) -> str:
     lines = [
         "# Compatibility matrix",
         "",
@@ -92,24 +235,10 @@ def render(rows: list[dict], env: dict[str, str]) -> str:
         "",
         "## Applications on the accessibility bus",
         "",
-        "| Application | Toolkit | Windows | Interfaces | Depth | Nodes | Collection | Frame actions | Actionable elements | Editable | Verdict |",
-        "|---|---|---:|---:|---:|---:|---|---:|---:|---:|---|",
+        "| " + " | ".join(COLUMNS) + " |",
+        "|" + "|".join(ALIGNMENTS) + "|",
     ]
-    for row in rows:
-        collection = (
-            "works"
-            if row["collectionWorks"]
-            else ("advertised only" if row["collectionAdvertised"] else "no")
-        )
-        depth = f"{row['reachableDepth']}{'+' if row['depthLimited'] else ''}"
-        nodes = f"{row['nodeCount']}{'+' if row['nodeLimited'] else ''}"
-        toolkit = row["toolkit"] + (f" {row['toolkitVersion']}" if row["toolkitVersion"] else "")
-        lines.append(
-            f"| {row['name']} | {toolkit or 'unknown'} | {row['windowCount']} | "
-            f"{len(row['interfaces'])} | {depth} | {nodes} | {collection} | "
-            f"{row['frameActionCount']} | {row['actionableElements']} | "
-            f"{row['editableFields']} | {verdict(row)} |"
-        )
+    lines += ["| " + " | ".join(cells) + " |" for cells in rows]
 
     lines += ["", "## Column meanings", ""]
     lines += [
@@ -130,13 +259,24 @@ def render(rows: list[dict], env: dict[str, str]) -> str:
         "  one column is a statement about where they live, not about whether they exist.",
         "- **Editable** — elements an agent could type into.",
         "- **Verdict** — which of those surfaces an agent would actually drive this application by.",
+        "  `depth-limited` is not one of them: it says the walk stopped before the application did,",
+        "  and that the counts on that row are the probe's reach rather than the application's size.",
+        "",
+        "> **Every row here is measured at depth 12, the maximum a window inspection may",
+        "> ask for, and every Chromium-family row hits it.** Walked without a limit, the",
+        "> same applications reach 952 nodes (Discord), 662 (Chrome) and 621 (code), with",
+        '> their deepest content at depth 29 to 34. A "depth-limited" verdict means the',
+        "> count in this table is a property of the instrument, not of the application.",
+        "> See `07-open-questions.md`.",
         "",
         "## What this does not say",
         "",
         "AT-SPI exposes an application's *toolkit* version, never the application's own version,",
-        "so no version column is offered rather than one being invented. Applications not running",
-        "at measurement time are absent, not passing: the matrix is a photograph of a desktop, and",
-        "an application nobody had open was never asked.",
+        "so no version column is offered rather than one being invented. An application nobody had",
+        "open at measurement time was never asked, and is neither absent nor passing: its row stands",
+        "with the date it was last measured on, which is what the Measured column is for. Only rows",
+        "dated to the run described in the Environment table above were taken in that environment;",
+        "an older row was taken in whatever the repository's history records for its own date.",
         "",
     ]
     return "\n".join(lines)
@@ -172,8 +312,13 @@ def main() -> int:
 
     out = ROOT / args.out
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render(rows, environment()))
-    print(f"{out}: {len(rows)} applications measured")
+    existing = parse_existing(out.read_text()) if out.exists() else {}
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    fresh = {row["name"]: row_cells(row, today) for row in rows}
+    merged = merge(existing, fresh)
+    out.write_text(render(merged, environment()))
+    carried = len(merged) - len(fresh)
+    print(f"{out}: {len(fresh)} measured, {len(merged)} rows ({carried} carried forward)")
     return 0
 
 
