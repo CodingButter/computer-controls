@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from desktop_service import holds, identity
 from desktop_service.transport import JsonRpcServer, default_socket_path
 
 
@@ -251,3 +252,62 @@ def test_the_service_gives_up_before_its_callers_do():
             "timeout — the client would abandon a request the service was about to "
             "answer, and the model would see a transport error instead of a result"
         )
+
+
+def test_a_dropped_connection_releases_the_elements_it_was_writing(tmp_path):
+    """An element owned by a process that has gone away is owned forever.
+
+    Ownership is taken on the connection's thread, so the connection ending is
+    the only moment left that can honestly give it back.
+    """
+    srv = JsonRpcServer(str(tmp_path / "drop.sock"))
+    srv.register("hold", lambda params: {"clientId": holds.acquire(
+        params["elementId"], identity.current(), "typeText"
+    ).client_id})
+    srv.start()
+    try:
+        conn, stream = rpc_client(srv.socket_path)
+        client_id = send(stream, "hold", {"elementId": "el-a"})["result"]["clientId"]
+        assert holds.holder("el-a").client_id == client_id
+
+        # Both handles: a makefile keeps the socket alive, and a connection the
+        # kernel has not seen close is not a connection the server has lost.
+        stream.close()
+        conn.close()
+
+        deadline = time.monotonic() + 5
+        while holds.holder("el-a") is not None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert holds.holder("el-a") is None, "the element stayed owned by a gone client"
+    finally:
+        for element_id in list(holds._holds):
+            holds.release(element_id)
+        srv.stop()
+
+
+def test_one_connection_ending_does_not_free_another_connection_s_element(tmp_path):
+    srv = JsonRpcServer(str(tmp_path / "drop-two.sock"))
+    srv.register("hold", lambda params: {"clientId": holds.acquire(
+        params["elementId"], identity.current(), "typeText"
+    ).client_id})
+    srv.start()
+    try:
+        first_conn, first_stream = rpc_client(srv.socket_path)
+        second_conn, second_stream = rpc_client(srv.socket_path)
+        send(first_stream, "hold", {"elementId": "el-a"})
+        send(second_stream, "hold", {"elementId": "el-b"})
+
+        first_stream.close()
+        first_conn.close()
+        deadline = time.monotonic() + 5
+        while holds.holder("el-a") is not None and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        assert holds.holder("el-a") is None
+        assert holds.holder("el-b") is not None
+        second_stream.close()
+        second_conn.close()
+    finally:
+        for element_id in list(holds._holds):
+            holds.release(element_id)
+        srv.stop()
