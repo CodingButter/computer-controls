@@ -46,13 +46,94 @@ def walk_all(result) -> list:
     return list(result.root.walk())
 
 
-def test_depth_limit_is_respected():
+def test_depth_limit_is_respected_and_admitted():
+    """Stopping on depth is still stopping, and has to read as such.
+
+    This test previously asserted the opposite — that a depth-limited walk
+    reports `truncated: false` — which made a tree cut off at the ceiling
+    indistinguishable from a tree that ended there. Measured against a live
+    Discord that silence hid 923 of 952 elements.
+    """
     result = inspection.inspect_tree(
         chain(6), describe=describe, children=children,
         bounds=inspection.Bounds(depth=2, max_nodes=100),
     )
     assert result.node_count == 3  # frame + two panels
+    assert result.truncated
+    # The marker lands on the node the caller can see and drill from, which is
+    # the deepest one returned rather than the root.
+    deepest = [e for e in walk_all(result) if e.truncated]
+    assert [e.name for e in deepest] == ["level-2"]
+
+
+def test_a_branch_that_ends_above_the_ceiling_is_not_called_truncated():
+    """`truncated` means withheld, never merely deep."""
+    result = inspection.inspect_tree(
+        chain(2), describe=describe, children=children,
+        bounds=inspection.Bounds(depth=9, max_nodes=100),
+    )
     assert not result.truncated
+    assert not any(e.truncated for e in walk_all(result))
+
+
+def test_a_leaf_sitting_exactly_on_the_ceiling_is_not_called_truncated():
+    """The boundary is where the difference is decided, so test it there.
+
+    Two branches reach the depth limit. One has more below it and one is a leaf
+    that simply ends there. Marking both would be the same lie as marking
+    neither: it would teach a caller to drill into nodes with nothing under them.
+    """
+    at_the_line = Node("frame", "Window", [
+        Node("panel", "has-more", [Node("panel", "hidden", [Node("push button", "Deeper")])]),
+        Node("panel", "ends-here", [Node("push button", "Leaf")]),
+    ])
+    result = inspection.inspect_tree(
+        at_the_line, describe=describe, children=children,
+        bounds=inspection.Bounds(depth=2, max_nodes=100),
+    )
+    marked = {e.name for e in walk_all(result) if e.truncated}
+    assert marked == {"hidden"}
+    assert result.truncated
+
+
+def test_every_branch_that_was_cut_says_so_not_just_the_first():
+    """Depth truncation must not end the walk, or later branches go unmarked.
+
+    The node budget is global, so exhausting it ends everything. The depth limit
+    is per branch. Sharing one flag between them means the first branch to reach
+    the ceiling silences every branch measured after it — and those branches are
+    already in the returned tree, so the caller sees them listed as if complete.
+    """
+    twins = Node("frame", "Window", [
+        Node("panel", "left", [Node("panel", "left-deep", [Node("push button", "L")])]),
+        Node("panel", "right", [Node("panel", "right-deep", [Node("push button", "R")])]),
+    ])
+    result = inspection.inspect_tree(
+        twins, describe=describe, children=children,
+        bounds=inspection.Bounds(depth=2, max_nodes=100),
+    )
+    marked = {e.name for e in walk_all(result) if e.truncated}
+    assert marked == {"left-deep", "right-deep"}
+
+
+def test_one_deep_branch_does_not_end_the_walk_for_its_siblings():
+    """Depth is per branch; the node budget is global. Only one of them stops us.
+
+    A frame with one deep branch and two shallow ones: the deep branch is cut
+    and says so, and both siblings are still returned in full.
+    """
+    lopsided = Node("frame", "Window", [
+        chain(8),
+        Node("push button", "Shallow one"),
+        Node("push button", "Shallow two"),
+    ])
+    result = inspection.inspect_tree(
+        lopsided, describe=describe, children=children,
+        bounds=inspection.Bounds(depth=3, max_nodes=500),
+    )
+    names = {e.name for e in walk_all(result)}
+    assert {"Shallow one", "Shallow two"} <= names
+    assert result.truncated
 
 
 def test_node_budget_truncates_and_says_so():

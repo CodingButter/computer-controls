@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: ceb3bbe1b961ee36
+// Protocol version: 1.0   schema sha256: a4e567b96347c643
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "ceb3bbe1b961ee36" as const;
+export const SCHEMA_DIGEST = "a4e567b96347c643" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -140,7 +140,7 @@ export interface SemanticElement {
   /** What kind of thing it is, in the backend's vocabulary. */
   role: string;
   states: string[];
-  /** Present and true when children were withheld by a node budget. Never silently omitted. */
+  /** Present and true when this element has children the walk did not return, whether because the node budget ran out or because the depth limit was reached. Never silently omitted: a subtree that was cut off must never be indistinguishable from one that ended. Drill from this element with inspectElement to see what is below it. */
   truncated?: boolean;
   /** Current value, for elements that hold one. Passed through the value-egress point. */
   value?: string;
@@ -375,6 +375,7 @@ export interface InspectElementResult {
   element: SemanticElement;
   nodeCount: number;
   revision: number;
+  /** True when the walk returned less than the subtree contains, whether it ran out of node budget or reached its depth limit. The elements it stopped at are marked, and are where inspectElement picks up. */
   truncated: boolean;
 }
 
@@ -394,6 +395,7 @@ export interface InspectWindowResult {
   backend: string;
   nodeCount: number;
   revision: number;
+  /** True when the walk returned less than the subtree contains, whether it ran out of node budget or reached its depth limit. The elements it stopped at are marked, and are where inspectElement picks up. */
   truncated: boolean;
   window: SemanticElement;
 }
