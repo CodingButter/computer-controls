@@ -10,94 +10,77 @@ feels better about it.
 
 ---
 
-## Electron applications announce a child and then decline to hand it over
+## Electron is not opaque; our depth ceiling is
 
-**Applications** — Discord 1.0.151, Visual Studio Code 1.131.0, and Electron
-generally. Measured in `05-compatibility-matrix.md`.
+**Applications** — Discord 1.0.151, Visual Studio Code 1.131.0, Google Chrome,
+gnome-text-editor as the control. Measured in `05-compatibility-matrix.md`.
 
-**Symptom, stated precisely** — the application appears on the accessibility
-bus and answers as a `frame`. The frame reports `child_count = 1`. Asking for
-that child returns nothing:
+**The measurement.** The same walk, run against the same live applications,
+varying only the depth it is allowed to reach:
 
-```
-Discord: app advertises 1 children, handed over 1
-   frame advertises 1 handed over 0
-code:    app advertises 1 children, handed over 1
-   frame advertises 1 handed over 0
-gnome-text-editor: app advertises 1 children, handed over 1
-   frame advertises 1 handed over 1
-```
+| depth limit | Discord | code | gnome-text-editor |
+| --- | --- | --- | --- |
+| 6 | 7 | 12 | 9 |
+| 12 *(our ceiling)* | 29 | 30 | 39 |
+| 18 | 137 | 141 | 143 |
+| 24 | 742 | 312 | 146 |
+| unbounded | 952 | 621 | 146 |
 
-This is the whole finding, and it is not the one previously recorded here. The
-tree is not small and it is not absent. The window knows it contains exactly one
-thing — its web contents — and will not produce it. A GTK application asked the
-same question in the same breath hands its child over.
+Discord's deepest node sits at depth 29, VS Code's at 34. An unbounded walk of
+either costs a tenth of a second.
 
-**What that rules out.** "Electron never turns accessibility on" does not
-survive it: an application that had turned nothing on would report zero children,
-not one. Something published the count. Whatever holds the page's nodes is not
-answering on the same bus as the thing that counted them.
+**What that costs us, stated as a fraction.** Elements carrying at least one
+action, within our depth ceiling versus in the whole tree:
 
-**Correction to the previous entry.** It claimed Visual Studio Code "never joins
-the accessibility bus at all — there is no application there to walk." That is
-wrong. VS Code is on the bus, as an application with a frame, behaving
-identically to Discord. Withholding a child is not the same as being absent, and
-the difference is the entire question.
+| Application | actionable within depth 12 | actionable in full | named within 12 | named in full |
+| --- | --- | --- | --- | --- |
+| Discord | 29 | 952 | 3 | 417 |
+| code | 30 | 621 | 8 | 313 |
+| Google Chrome | 271 | 662 | 92 | 377 |
+| gnome-text-editor | 4 | 30 | 5 | 32 |
 
-**Hypothesis, tested and rejected (1) — lazy construction.** That Chromium
-builds its tree once an assistive client announces itself, so the first read is
-early rather than wrong. Waiting three seconds and walking again grows the tree
-by zero nodes, on both Electron and Chrome
-(`service/tests/probe_lazy_tree.py`).
+An agent inspecting Discord from the window root sees three named things out of
+four hundred and seventeen. This is not an Electron finding. GTK loses the same
+way, in the same direction, at a smaller magnitude.
 
-**Hypothesis, tested and rejected (2) — the session accessibility flag.**
-That Chromium waits for the signal a screen reader sets, and our session has it
-off. Setting `org.a11y.Status` `ScreenReaderEnabled` to true — the exact signal,
-verified to flip both `IsEnabled` and `ScreenReaderEnabled`, and to start Orca —
-and re-walking after thirty seconds moves nothing:
+**Two retractions, both of them mine.** This section previously said an Electron
+frame "advertises a child and declines to hand it over". Then it said the tree
+"is built while you walk it", from readings of 1, 34, 62 and 137 nodes across
+successive walks. The first was a single bounded walk mistaken for the shape of
+the tree. The second was worse: those four numbers came from four ad-hoc scripts
+with four different depth limits, and 137 is exactly what depth 18 returns today,
+every time. I read my own instrument's setting as the application's behaviour,
+and wrote it down as a discovery. A walk repeated at a fixed depth returns the
+same count on every round, which is the check neither version ran.
 
-| Application | flag off | flag on, +30s |
-| --- | --- | --- |
-| Google Chrome | 281 nodes | 281 nodes |
-| vesktop 1.6.5 | 30 nodes | 30 nodes |
-| code 1.131.0 | 1 node | 1 node |
+**What is still real from those rounds.** These applications did report a single
+node this morning and report a full tree now, and no depth limit explains that:
+`probe.py` has run at depth 12 throughout, and it moved from 1 node to 30. The
+surviving candidate is that a real assistive client attached in between. Setting
+`org.a11y.Status ScreenReaderEnabled` moved nothing on its own — but it started
+Orca, which is an actual AT walking the tree, and Chromium's documentation is
+explicit that full accessibility support is enabled once assistive technology is
+detected, and that once enabled it is not turned back off. That fits every
+reading we have, and it is still a hypothesis: it was not the experiment, because
+the flag and the client were flipped in the same motion.
 
-Chrome is fully exposed with the flag *off*, which is the load-bearing half:
-whatever Chrome is doing, it is not doing it because an assistive technology
-announced itself.
+**The experiment that would settle it** — a cold Electron process, walked at a
+fixed depth before and after Orca is started, with the bus flag left alone
+throughout. The obstacle to run it today: a throwaway instance launched with its
+own `--user-data-dir` never appeared on the accessibility bus at all, which is
+its own unanswered question.
 
-**Hypothesis, tested and rejected (3) — a launch flag the user can set.**
-`--force-renderer-accessibility` is a declared command-line option in VS Code's
-main bundle, and on Linux it is additionally re-read from user settings. Running
-a throwaway instance with it produces the same two nodes and the same withheld
-child. In Discord's and vesktop's bundles the string does not appear at all,
-alongside no `setAccessibilitySupportEnabled` call — for those two there is no
-switch to fail to find.
+**What this changes for an agent.** Discord exposes its message composer as an
+`entry`, its sidebar, its direct-message list and 40-plus named controls — an
+Electron window is drivable. Reaching them means drilling with `inspectElement`
+from an anchor rather than reading a window and believing the result, which the
+protocol already supports and which nothing in the tool descriptions tells a
+model to expect. A ceiling that hides 97% of an application without saying so is
+worse than a ceiling that refuses: silence reads as absence.
 
-**What Chrome does instead** — the same walk on Chrome reaches a `document web`
-node that hands over its child, and 398 nodes of page content below it. Chrome's
-frames are not special; its renderer answers. Two of its three frames yield 5 and
-7 nodes, because they have no page in them.
-
-**Not settled** — why the count is published when the subtree is not. The
-candidate worth measuring next is Electron version and bundled Chromium version:
-vesktop 1.6.5 yielded 30 nodes where official Discord 1.0.151 yields 1, which is
-a 30× difference between two builds of the same product, and is the only variable
-so far that has moved this number at all.
-
-**Tier that picks it up** — the Chromium DevTools Protocol, per the layered
-backend design: for a Chromium-family application the CDP tier addresses the DOM
-directly and does not care what the accessibility bridge was willing to publish.
-That tier is not in this build. Until it is, an Electron window is honestly
-reported as a shallow tree rather than being made to look driveable.
-
-**Tier that picks it up** — the Chromium DevTools Protocol, per the layered
-backend design: for a Chromium-family application the CDP tier addresses the DOM
-directly and does not care what the accessibility bridge was willing to publish.
-That tier is not in this build. Until it is, an Electron window is honestly
-reported as a shallow tree rather than being made to look driveable, which is
-why the compatibility matrix counts ten frame actions before it will use the
-words "frame actions".
+**Tier that picks it up** — none. The Chromium DevTools Protocol tier remains the
+answer for a page's DOM semantics; it is not needed to reach anything measured
+here.
 
 ---
 
