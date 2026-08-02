@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: a4e567b96347c643
+# Protocol version: 1.0   schema sha256: 95f1232b013c51b0
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "a4e567b96347c643"
+SCHEMA_DIGEST: Final = "95f1232b013c51b0"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -33,12 +33,13 @@ ATTRIBUTIONS: Final[tuple[str, ...]] = ("self", "external", "unattributed")
 WAIT_CONDITIONS: Final[tuple[str, ...]] = ("window-opened", "window-closed", "element-appeared", "element-state-changed", "revision-advanced")
 
 #: The complete domain error vocabulary. Carried in the JSON-RPC error object under data.code.
-ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR")
+ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "CLAIM_EXPIRED", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR")
 
 #: Every method mapped to the operation class it belongs to.
 OPERATION_CLASS: Final[dict[str, str]] = {
     "auditTail": "observe",
     "captureWindow": "observe",
+    "claimElement": "edit",
     "editText": "edit",
     "emergencyStop": "observe",
     "focusWindow": "activate",
@@ -58,6 +59,7 @@ OPERATION_CLASS: Final[dict[str, str]] = {
     "listWindows": "observe",
     "performActions": "submit",
     "queryElements": "observe",
+    "releaseElement": "edit",
     "setAttention": "observe",
     "setElementValue": "edit",
     "setObservationMode": "observe",
@@ -107,6 +109,45 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         },
         "required": [
             "windowId",
+        ],
+        "type": "object",
+    },
+    "claimElement": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+            "estimatedWorkMs": {
+                "description": "How long the caller believes its work will take. The lease is this plus a settling margin. Bounded, because a lease nobody can outlive is ownership wearing a lease's name.",
+                "maximum": 600000,
+                "minimum": 1,
+                "type": "integer",
+            },
+            "forText": {
+                "description": "Instead of an estimate: the text about to be typed. The service sizes the lease from it at the words-per-minute given, using the arithmetic the typing will use.",
+                "maxLength": 4000,
+                "type": "string",
+            },
+            "reason": {
+                "description": "What this claim is for, in the caller's words. Shown to whoever is refused, and recorded in the audit log.",
+                "maxLength": 200,
+                "type": "string",
+            },
+            "wordsPerMinute": {
+                "maximum": 220,
+                "minimum": 10,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "elementId",
         ],
         "type": "object",
     },
@@ -635,6 +676,25 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "releaseElement": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+        },
+        "required": [
+            "elementId",
+        ],
+        "type": "object",
+    },
     "setAttention": {
         "additionalProperties": False,
         "properties": {
@@ -903,6 +963,23 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             "width",
             "height",
             "backend",
+            "revision",
+        ],
+        "type": "object",
+    },
+    "claimElement": {
+        "additionalProperties": False,
+        "properties": {
+            "claim": {
+                "$ref": "#/$defs/elementClaim",
+            },
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "claim",
             "revision",
         ],
         "type": "object",
@@ -1492,6 +1569,28 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "releaseElement": {
+        "additionalProperties": False,
+        "properties": {
+            "heldForMs": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "released": {
+                "description": "True when this call gave up a claim, false when there was nothing of this client's to give up.",
+                "type": "boolean",
+            },
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "released",
+            "revision",
+        ],
+        "type": "object",
+    },
     "setAttention": {
         "additionalProperties": False,
         "properties": {
@@ -1761,6 +1860,49 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
             "kind",
             "revision",
             "summary",
+        ],
+        "type": "object",
+    },
+    "elementClaim": {
+        "additionalProperties": False,
+        "description": "One client's exclusive right to write one element, for a bounded time. A claim is not permission — permission is a separate question, already answered by the consent ceiling — and it is not a queue. It answers only 'who is allowed to be mid-sentence in this field right now'.",
+        "properties": {
+            "clientId": {
+                "description": "The issued identity holding the claim, never a name a client chose for itself.",
+                "type": "string",
+            },
+            "clientLabel": {
+                "description": "The holder's readable label, for telling a person who is in their field.",
+                "type": "string",
+            },
+            "elementId": {
+                "type": "string",
+            },
+            "expiresInMs": {
+                "description": "Time left on the lease, as of this answer.",
+                "minimum": 0,
+                "type": "integer",
+            },
+            "heldForMs": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "leaseMs": {
+                "description": "The lease as granted, so a caller can tell a long claim from an old one.",
+                "minimum": 0,
+                "type": "integer",
+            },
+            "reason": {
+                "description": "What the holder said it was doing. Present when it said.",
+                "type": "string",
+            },
+        },
+        "required": [
+            "elementId",
+            "clientId",
+            "expiresInMs",
+            "leaseMs",
+            "heldForMs",
         ],
         "type": "object",
     },

@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: a4e567b96347c643
+// Protocol version: 1.0   schema sha256: 95f1232b013c51b0
 
 import { z } from "mastracode/plugin";
 
@@ -56,6 +56,16 @@ export const capabilityTierReportSchema = z.object({
   reason: z.union([z.string(), z.null()]).describe("Why it is unavailable. Required reading when available is false.").optional(),
 });
 
+export const elementClaimSchema = z.object({
+  clientId: z.string().describe("The issued identity holding the claim, never a name a client chose for itself."),
+  clientLabel: z.string().describe("The holder's readable label, for telling a person who is in their field.").optional(),
+  elementId: z.string(),
+  expiresInMs: z.number().int().min(0).describe("Time left on the lease, as of this answer."),
+  heldForMs: z.number().int().min(0),
+  leaseMs: z.number().int().min(0).describe("The lease as granted, so a caller can tell a long claim from an old one."),
+  reason: z.string().describe("What the holder said it was doing. Present when it said.").optional(),
+});
+
 export const semanticElementSchema: z.ZodType<unknown> = z.lazy(() =>
   z.object({
     actions: z.array(z.string()).describe("Action names invokable on this element. For a window this is often the application's whole command set."),
@@ -102,6 +112,20 @@ export const captureWindowResult = z.object({
   scaled: z.boolean().optional(),
   width: z.number().int(),
   windowId: z.string(),
+});
+
+export const claimElementParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  elementId: z.string(),
+  estimatedWorkMs: z.number().int().min(1).max(600000).describe("How long the caller believes its work will take. The lease is this plus a settling margin. Bounded, because a lease nobody can outlive is ownership wearing a lease's name.").optional(),
+  forText: z.string().max(4000).describe("Instead of an estimate: the text about to be typed. The service sizes the lease from it at the words-per-minute given, using the arithmetic the typing will use.").optional(),
+  reason: z.string().max(200).describe("What this claim is for, in the caller's words. Shown to whoever is refused, and recorded in the audit log.").optional(),
+  wordsPerMinute: z.number().int().min(10).max(220).optional(),
+});
+export const claimElementResult = z.object({
+  claim: elementClaimSchema,
+  revision: z.number().int().min(0),
 });
 
 export const editTextParams = z.object({
@@ -372,6 +396,17 @@ export const queryElementsResult = z.object({
   moreResults: z.boolean().describe("More matches exist than were returned — either the search was cut short or the answer hit its limit with tree left unwalked. A caller seeing this should narrow its filter rather than assume it has seen everything.").optional(),
   revision: z.number().int(),
   searchTruncated: z.boolean().describe("The search gave up before covering the window."),
+});
+
+export const releaseElementParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+  elementId: z.string(),
+});
+export const releaseElementResult = z.object({
+  heldForMs: z.number().int().min(0).optional(),
+  released: z.boolean().describe("True when this call gave up a claim, false when there was nothing of this client's to give up."),
+  revision: z.number().int().min(0),
 });
 
 export const setAttentionParams = z.object({

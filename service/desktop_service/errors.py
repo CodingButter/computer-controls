@@ -34,6 +34,10 @@ class ErrorCode:
     #: permission answer: the caller may write here, just not while the text of
     #: another writer is still going in.
     ELEMENT_HELD = "ELEMENT_HELD"
+    #: The caller's own claim ran out before it finished the work it took the
+    #: claim for. Nothing is in the way — the element is free — so this is a
+    #: report about an estimate rather than a refusal about a conflict.
+    CLAIM_EXPIRED = "CLAIM_EXPIRED"
     TIMEOUT = "TIMEOUT"
     METHOD_NOT_FOUND = "METHOD_NOT_FOUND"
     INVALID_PARAMS = "INVALID_PARAMS"
@@ -194,6 +198,34 @@ class ElementHeld(DesktopError):
         super().__init__(
             ErrorCode.ELEMENT_HELD,
             f"Element {element_id!r} is being written by {who}{doing}",
+            detail,
+        )
+
+
+class ClaimExpired(DesktopError):
+    """The claim this write was meant to happen under ran out before it arrived.
+
+    Distinct from ELEMENT_HELD because nothing is in the way: the element is
+    free, and the caller could take it again this second. What it must not do is
+    carry on believing the lease it asked for covered the work it is doing.
+    Reported once, to the client whose claim lapsed, and then forgotten — a
+    stream of errors about a lease that ended a minute ago tells nobody
+    anything.
+    """
+
+    def __init__(self, element_id: str, *, lease_ms: int = 0) -> None:
+        detail: dict[str, Any] = {
+            "elementId": element_id,
+            "leaseMs": lease_ms,
+            "remedy": (
+                "claim the element again with an estimate that covers the work, "
+                "then read the field before writing — it may not say what it "
+                "said when the claim was taken"
+            ),
+        }
+        super().__init__(
+            ErrorCode.CLAIM_EXPIRED,
+            f"The claim on {element_id!r} expired before this write",
             detail,
         )
 

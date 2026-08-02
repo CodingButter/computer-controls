@@ -205,3 +205,82 @@ def test_reading_a_field_somebody_is_writing_is_not_refused(desktop):
     holds.acquire("el-a", "agent-one", "typeText")
 
     assert call(built, "getRevision", clientId="agent-two")["revision"] >= 0
+
+
+# --- claims through the handlers, which is where a client takes one
+
+
+def test_a_claim_holds_a_field_across_two_separate_calls(desktop):
+    """Jamie's rule, at the seam a client uses: claim, work, release.
+
+    Nothing is being written when the second agent is refused — the first is
+    between calls, which is exactly the gap an implicit hold leaves open and a
+    claim closes.
+    """
+    built, fields, _ = desktop
+    taken = call(built, "claimElement", elementId="el-a", clientId="agent-one",
+                 estimatedWorkMs=5_000, reason="drafting a reply")
+
+    assert taken["claim"]["clientId"] == "agent-one"
+    assert taken["claim"]["reason"] == "drafting a reply"
+    assert 0 < taken["claim"]["expiresInMs"] <= taken["claim"]["leaseMs"]
+
+    call(built, "typeText", elementId="el-a", text="half a thought", clientId="agent-one")
+
+    with pytest.raises(DesktopError) as refused:
+        call(built, "typeText", elementId="el-a", text="mine now", clientId="agent-two")
+    assert refused.value.code == ErrorCode.ELEMENT_HELD
+    assert refused.value.detail["heldBy"] == "agent-one"
+
+    call(built, "typeText", elementId="el-a", text=" and the rest", clientId="agent-one")
+    assert fields["el-a"].text == "half a thought and the rest"
+
+    given_back = call(built, "releaseElement", elementId="el-a", clientId="agent-one")
+    assert given_back["released"] is True
+    assert holds.holder("el-a") is None
+
+    call(built, "typeText", elementId="el-a", text="!", clientId="agent-two")
+
+
+def test_a_second_agent_cannot_claim_what_is_already_claimed(desktop):
+    built, _, _ = desktop
+    call(built, "claimElement", elementId="el-a", clientId="agent-one", estimatedWorkMs=5_000)
+
+    with pytest.raises(DesktopError) as refused:
+        call(built, "claimElement", elementId="el-a", clientId="agent-two", estimatedWorkMs=5_000)
+
+    assert refused.value.code == ErrorCode.ELEMENT_HELD
+
+
+def test_a_claim_sized_from_the_text_covers_typing_it(desktop):
+    """The lease and the work come from the same arithmetic, so they agree."""
+    built, _, _ = desktop
+    sentence = "a sentence long enough that a house-number lease would be wrong " * 3
+
+    taken = call(built, "claimElement", elementId="el-a", clientId="agent-one",
+                 forText=sentence, wordsPerMinute=70)
+
+    assert taken["claim"]["leaseMs"] > server.cadence.estimate_ms(sentence, 70)
+
+
+def test_releasing_something_you_do_not_hold_is_not_an_error(desktop):
+    """The desired state is 'this client owns nothing here', and it already is."""
+    built, _, _ = desktop
+    assert call(built, "releaseElement", elementId="el-a", clientId="agent-one")["released"] is False
+
+
+def test_one_agent_cannot_release_anothers_claim(desktop):
+    built, _, _ = desktop
+    call(built, "claimElement", elementId="el-a", clientId="agent-one", estimatedWorkMs=5_000)
+
+    assert call(built, "releaseElement", elementId="el-a", clientId="agent-two")["released"] is False
+    assert holds.holder("el-a").client_id == "agent-one"
+
+
+def test_claiming_an_element_that_is_not_there_is_refused_before_it_is_owned(desktop):
+    """A lease over a field that does not exist refuses everyone for nothing."""
+    built, _, _ = desktop
+    with pytest.raises(Exception):
+        call(built, "claimElement", elementId="el-nowhere", clientId="agent-one", estimatedWorkMs=1_000)
+
+    assert holds.holder("el-nowhere") is None

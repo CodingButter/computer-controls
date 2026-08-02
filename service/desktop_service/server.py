@@ -26,6 +26,7 @@ from . import (
     capabilities,
     config,
     deltas,
+    holds,
     identity,
     inspect as inspection,
     policy,
@@ -1331,6 +1332,74 @@ def _method_set_observation_mode(params: dict[str, Any]) -> dict[str, Any]:
     return {**_session.set_observation_mode(params), "revision": _registry.revision}
 
 
+def _claim_payload(hold: holds.Hold) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "elementId": hold.element_id,
+        "clientId": hold.client_id,
+        "expiresInMs": hold.expires_in_ms(),
+        "leaseMs": hold.lease_ms or 0,
+        "heldForMs": hold.held_for_ms(),
+    }
+    if hold.client_label:
+        payload["clientLabel"] = hold.client_label
+    if hold.reason:
+        payload["reason"] = hold.reason
+    return payload
+
+
+def _method_claim_element(params: dict[str, Any]) -> dict[str, Any]:
+    """Take an element for the length of a piece of work rather than one call.
+
+    The element is resolved before it is claimed. Claiming an id that names
+    nothing would hand a caller a lease over a field that does not exist and let
+    it discover the truth one call later, having meanwhile refused everybody
+    else.
+
+    The lease comes from the work: an estimate, or the text about to be typed
+    run through the same arithmetic the typing will use. Nothing here trusts the
+    caller's clock — `estimatedWorkMs` is what the caller *believes*, and the
+    ceiling is what it gets.
+    """
+    element_id = _str_param(params, "elementId", required=True) or ""
+    _resolve_element(element_id)
+
+    for_text = _str_param(params, "forText")
+    words_per_minute = params.get("wordsPerMinute")
+    estimated = params.get("estimatedWorkMs")
+    lease_ms = holds.lease_for(
+        estimated if isinstance(estimated, int) else None,
+        for_text=for_text,
+        words_per_minute=words_per_minute if isinstance(words_per_minute, int) else None,
+    )
+    hold = holds.claim(
+        element_id,
+        _client_id(params),
+        lease_ms=lease_ms,
+        reason=_str_param(params, "reason") or "",
+    )
+    return {"claim": _claim_payload(hold), "revision": _registry.revision}
+
+
+def _method_release_element(params: dict[str, Any]) -> dict[str, Any]:
+    """Give a claimed element back.
+
+    Deliberately does not resolve the element first. A claim on something that
+    has since gone away is exactly the claim most worth releasing, and refusing
+    to let go of it because the field is missing would leave the element owned
+    by a caller who cannot ever release it.
+    """
+    element_id = _str_param(params, "elementId", required=True) or ""
+    client_id = _client_id(params)
+    released = holds.release(element_id, holder_id=client_id)
+    result: dict[str, Any] = {
+        "released": released is not None,
+        "revision": _registry.revision,
+    }
+    if released is not None:
+        result["heldForMs"] = released.held_for_ms()
+    return result
+
+
 def _method_set_attention(params: dict[str, Any]) -> dict[str, Any]:
     """Record what this connection is looking at.
 
@@ -1672,6 +1741,8 @@ def build_server(socket_path: str) -> JsonRpcServer:
     server.register("inspectElement", _method_inspect_element)
     server.register("focusWindow", _method_focus_window)
     server.register("invokeElement", _method_invoke_element)
+    server.register("claimElement", _method_claim_element)
+    server.register("releaseElement", _method_release_element)
     server.register("setElementValue", _method_set_element_value)
     server.register("typeText", _method_type_text)
     server.register("editText", _method_edit_text)

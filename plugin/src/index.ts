@@ -291,6 +291,38 @@ export default defineMastraCodePlugin({
       }),
     },
 
+    desktop_claim_element: {
+      tool: createTool({
+        id: "desktop_claim_element",
+        description:
+          "Take an element for a piece of work rather than for a single call — read the " +
+          "field, decide, type, check, type again — during which no other agent can be " +
+          "mid-sentence in it. You do not need this to write once: a write owns the element " +
+          "for its own length whether you claim it or not. You need it when the work is more " +
+          "than one call and the gaps between them matter. Say how long the work will take, " +
+          "or hand over the text you are about to type and let the lease be sized from it. " +
+          "The claim ends when you release it or when the lease runs out, whichever comes " +
+          "first — so estimate the work, not your patience. The person at the keyboard holds " +
+          "no claim and needs none: they still take the field the moment they touch it.",
+        inputSchema: schemas.claimElementParams,
+        outputSchema: schemas.claimElementResult,
+        execute: async (input) => await request("claimElement", { ...input }),
+      }),
+    },
+
+    desktop_release_element: {
+      tool: createTool({
+        id: "desktop_release_element",
+        description:
+          "Give a claimed element back as soon as you are done with it, rather than letting " +
+          "the lease run out — every second you hold it is a second another agent is refused. " +
+          "Releasing something you do not hold is not an error.",
+        inputSchema: schemas.releaseElementParams,
+        outputSchema: schemas.releaseElementResult,
+        execute: async (input) => await request("releaseElement", { ...input }),
+      }),
+    },
+
     desktop_type_text: {
       tool: createTool({
         id: "desktop_type_text",
