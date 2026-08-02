@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from desktop_service.errors import DesktopError
-from desktop_service.protocol_generated import PROTOCOL_VERSION
+from desktop_service.protocol_generated import PROTOCOL_VERSION, SCHEMA_DIGEST
 from desktop_service.session import ACTIVE_DEFAULTS, IDLE_DEFAULTS, Session
 
 
@@ -32,6 +32,22 @@ def test_a_major_mismatch_fails_the_call():
         Session().hello({"protocolVersion": "2.0"})
     assert caught.value.detail["clientProtocolVersion"] == "2.0"
     assert caught.value.detail["compatible"] is False
+
+
+def test_the_handshake_says_which_schema_the_running_process_was_built_from():
+    """So an attaching client can explain a missing method instead of guessing.
+
+    Clients do not start this service, they attach to whichever instance is
+    already listening — which is deliberately a long-lived daemon. A daemon that
+    booted before a method existed answers `METHOD_NOT_FOUND` for a method the
+    client's own generated types promise is there, and nothing else in the
+    protocol accounts for the difference. This is how the client finds out.
+    """
+    result = Session().hello({"protocolVersion": PROTOCOL_VERSION})
+    assert result["schemaDigest"] == SCHEMA_DIGEST
+    # From the generated module rather than a literal: a digest a test hardcodes
+    # is a digest that stops tracking the schema the moment someone edits it.
+    assert SCHEMA_DIGEST
 
 
 def test_every_client_sees_the_same_session_token():

@@ -14,6 +14,7 @@ rather than starting threads of their own.
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any, Callable, TypeVar
 
@@ -24,6 +25,8 @@ gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi, GLib  # noqa: E402  (must follow require_version)
 
 from ..errors import DesktopError, ErrorCode, TimeoutError_
+
+log = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -54,7 +57,13 @@ class DesktopLoop:
             if self.is_running:
                 return
             self._ready.clear()
-            context = GLib.MainContext.new()
+            # The *default* context, not a private one. AT-SPI registers its D-Bus event
+            # dispatch on the default context when it initialises, so a loop running any
+            # other context receives no desktop events at all — and the failure is silent:
+            # calls keep working, subscriptions register successfully, and nothing ever
+            # arrives. This cost an hour; the events only appeared once the loop ran the
+            # context the toolkit was already talking to.
+            context = GLib.MainContext.default()
             self._loop = GLib.MainLoop.new(context, False)
             self._thread = threading.Thread(
                 target=self._run, name="desktop-glib-loop", daemon=True
@@ -67,7 +76,9 @@ class DesktopLoop:
         loop = self._loop
         assert loop is not None
         context = loop.get_context()
-        context.push_thread_default()
+        # Acquired rather than pushed as thread-default: the default context cannot be
+        # pushed, and acquiring it is what makes this thread the one allowed to run it.
+        context.acquire()
         # Atspi.init() must run on the thread that owns the loop, because that is
         # the thread every subsequent Atspi call will be marshalled onto.
         try:
@@ -77,7 +88,7 @@ class DesktopLoop:
         try:
             loop.run()
         finally:
-            context.pop_thread_default()
+            context.release()
 
     def stop(self, timeout: float = 5.0) -> None:
         with self._lock:
@@ -179,11 +190,50 @@ class DesktopLoop:
         return box["value"]
 
 
+    def after(self, delay_ms: int, fn: Callable[[], None]) -> Callable[[], None]:
+        """Run `fn` on the loop thread once, `delay_ms` from now. Returns a canceller.
+
+        Unlike `call`, nothing waits for the result: this is how the watcher's debounce
+        and its reconciliation sweep live on the same thread as every other toolkit
+        access, instead of on a timer thread that would have to marshal back anyway.
+
+        The source is attached to *this* loop's context for the same reason `stop` does
+        it: `GLib.timeout_add` targets the default context, which this loop never runs,
+        so the callback would simply never fire.
+        """
+        loop = self._loop
+        if loop is None:
+            raise DesktopError(
+                ErrorCode.BACKEND_UNAVAILABLE,
+                "The desktop loop is not running",
+                {"backend": "glib"},
+            )
+        source = GLib.timeout_source_new(delay_ms)
+
+        def fire(*_: Any) -> bool:
+            try:
+                fn()
+            except Exception:
+                # A watcher callback that raises must not take the loop down with it;
+                # every other call in the process answers on this thread.
+                log.exception("scheduled loop callback failed")
+            return GLib.SOURCE_REMOVE
+
+        source.set_callback(fire)
+        source.attach(loop.get_context())
+        loop.get_context().wakeup()
+        return source.destroy
+
+
 _loop = DesktopLoop()
 
 
 def get_loop() -> DesktopLoop:
     return _loop
+
+
+def after(delay_ms: int, fn: Callable[[], None]) -> Callable[[], None]:
+    return _loop.after(delay_ms, fn)
 
 
 def call_on_loop(

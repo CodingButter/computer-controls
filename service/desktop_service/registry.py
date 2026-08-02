@@ -187,6 +187,23 @@ class ElementRegistry:
             # Entries recorded above were stamped with the new revision.
             return self._revision
 
+    def recent(self, limit: int, roles: frozenset[str] | None = None) -> list[str]:
+        """The ids most recently shown to a caller, newest first.
+
+        For observers that must re-read something on every look and therefore
+        cannot re-read everything. Recency is the right cut because a reference
+        nobody has touched in a hundred revisions is one nobody is waiting on,
+        and the bound belongs here rather than at the call site: a session that
+        has inspected ten thousand elements must not make each observation ten
+        thousand round trips slower than the last.
+        """
+        with self._lock:
+            entries = list(self._entries.values())
+        if roles is not None:
+            entries = [e for e in entries if e.fingerprint.role in roles]
+        entries.sort(key=lambda entry: entry.observed_at, reverse=True)
+        return [entry.element_id for entry in entries[:limit]]
+
     def get(self, element_id: str) -> RegistryEntry:
         """The stored entry, without touching the desktop. Never verifies."""
         with self._lock:

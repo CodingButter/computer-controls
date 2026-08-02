@@ -28,7 +28,10 @@ _SUPPORTED_KEYWORDS = frozenset(
         "description",
         "enum",
         "items",
+        "maxItems",
         "maximum",
+        "maxLength",
+        "minItems",
         "minimum",
         "pattern",
         "properties",
@@ -100,6 +103,18 @@ def _resolve(node: dict[str, Any]) -> dict[str, Any]:
     return DEFS[ref[len("#/$defs/") :]]
 
 
+#: How much of a rejected value to quote back in the message. Enough to
+#: recognise a typo, not enough to matter: a rejection is the one place
+#: caller-supplied text reaches the audit log, and that log's whole promise is
+#: that it records what was done and never what was said.
+_QUOTE_LIMIT = 40
+
+
+def _quote(value: Any) -> str:
+    text = repr(value)
+    return text if len(text) <= _QUOTE_LIMIT else f"{text[:_QUOTE_LIMIT]}… ({len(text)} characters)"
+
+
 def _check(value: Any, node: dict[str, Any], path: str, problems: list[str]) -> None:
     node = _resolve(node)
 
@@ -125,12 +140,20 @@ def _check(value: Any, node: dict[str, Any], path: str, problems: list[str]) -> 
         return
 
     if "enum" in node and value not in node["enum"]:
-        problems.append(f"{path} must be one of {node['enum']}, got {value!r}")
+        problems.append(f"{path} must be one of {node['enum']}, got {_quote(value)}")
         return
 
     pattern = node.get("pattern")
     if pattern is not None and isinstance(value, str) and not re.search(pattern, value):
-        problems.append(f"{path} must match {pattern}, got {value!r}")
+        problems.append(f"{path} must match {pattern}, got {_quote(value)}")
+        return
+
+    longest = node.get("maxLength")
+    if longest is not None and isinstance(value, str) and len(value) > longest:
+        # A bound on text is a bound on how long a call may hold the caller, so a
+        # string over the limit is refused at the door rather than truncated
+        # into something the caller never asked to say.
+        problems.append(f"{path} allows at most {longest} character(s), got {len(value)}")
         return
 
     if isinstance(value, dict):
@@ -174,6 +197,14 @@ def _check_object(value: dict, node: dict[str, Any], path: str, problems: list[s
 
 
 def _check_array(value: list, node: dict[str, Any], path: str, problems: list[str]) -> None:
+    minimum = node.get("minItems")
+    maximum = node.get("maxItems")
+    if minimum is not None and len(value) < minimum:
+        problems.append(f"{path} needs at least {minimum} item(s), got {len(value)}")
+    if maximum is not None and len(value) > maximum:
+        # The bound on a batch is the difference between one round trip and an
+        # unbounded amount of acting behind a single approved call.
+        problems.append(f"{path} allows at most {maximum} item(s), got {len(value)}")
     items = node.get("items")
     if items is None:
         return

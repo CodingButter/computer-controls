@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: f649b92ee4ded5d1
+# Protocol version: 1.0   schema sha256: 0ce1d6e9caba87f3
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "f649b92ee4ded5d1"
+SCHEMA_DIGEST: Final = "0ce1d6e9caba87f3"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -20,29 +20,220 @@ CAPABILITY_TIERS: Final[tuple[str, ...]] = ("app-native", "accessibility", "comp
 #: How hard the service watches the desktop. Set by the client; the service reports which mode it is in. See A2 in the amendments: the runtime owns cadence because most events that justify going fast are invisible to the desktop service.
 OBSERVATION_MODES: Final[tuple[str, ...]] = ("active", "idle")
 
+#: The complete vocabulary of semantic changes. One engine produces these for both an action's observedEffects and a pushed delta, so a reader learns one vocabulary rather than two.
+CHANGE_KINDS: Final[tuple[str, ...]] = ("window-opened", "window-closed", "focus-changed", "element-appeared", "element-disappeared", "element-state-changed", "element-value-changed", "element-stale")
+
+#: Who caused a change. Three values, not two: the honest third answer exists because a revision range is a time window, and a change landing inside an action's window is not proof that the action caused it.
+ATTRIBUTIONS: Final[tuple[str, ...]] = ("self", "external", "unattributed")
+
+#: What a caller can wait for, expressed semantically. This exists so that waiting happens in the service rather than as a sleep in the model's context.
+WAIT_CONDITIONS: Final[tuple[str, ...]] = ("window-opened", "window-closed", "element-appeared", "element-state-changed", "revision-advanced")
+
 #: The complete domain error vocabulary. Carried in the JSON-RPC error object under data.code.
 ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR")
 
 #: Every method mapped to the operation class it belongs to.
 OPERATION_CLASS: Final[dict[str, str]] = {
+    "auditTail": "observe",
+    "captureWindow": "observe",
+    "editText": "edit",
+    "emergencyStop": "observe",
+    "focusWindow": "activate",
+    "getDeltaSince": "observe",
     "getDesktopCapabilities": "observe",
+    "getDesktopState": "observe",
     "getElement": "observe",
     "getRevision": "observe",
+    "grantScope": "observe",
     "hello": "observe",
+    "inspectElement": "observe",
     "inspectWindow": "observe",
+    "invokeElement": "submit",
+    "launchApplication": "activate",
     "listApplications": "observe",
+    "listInstallableApplications": "observe",
     "listWindows": "observe",
+    "performActions": "submit",
     "queryElements": "observe",
+    "setElementValue": "edit",
     "setObservationMode": "observe",
+    "typeText": "edit",
+    "waitFor": "observe",
 }
 
 #: Request schema per method, used to reject malformed calls at the boundary.
 PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
+    "auditTail": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+            "limit": {
+                "maximum": 200,
+                "minimum": 1,
+                "type": "integer",
+            },
+        },
+        "type": "object",
+    },
+    "captureWindow": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+            "maxWidth": {
+                "description": "Scale the image down to at most this width. Only ever downward: enlarging a capture invents detail that was never captured.",
+                "maximum": 4096,
+                "minimum": 64,
+                "type": "integer",
+            },
+            "windowId": {
+                "type": "string",
+            },
+        },
+        "required": [
+            "windowId",
+        ],
+        "type": "object",
+    },
+    "editText": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+            "find": {
+                "description": "The existing text to replace. Must appear exactly once: two matches mean the caller does not know which one it meant, and the edit is refused rather than guessed.",
+                "maxLength": 4000,
+                "type": "string",
+            },
+            "replaceWith": {
+                "description": "What to put in its place. Omit to delete the range outright.",
+                "maxLength": 4000,
+                "type": "string",
+            },
+            "settleMs": {
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer",
+            },
+            "showSelection": {
+                "description": "Highlight the range before removing it, so a watching human sees what changed. Presentation only: the edit does not need it.",
+                "type": "boolean",
+            },
+            "wordsPerMinute": {
+                "description": "When present the replacement is typed at this speed rather than inserted at once, for an edit a person is watching.",
+                "maximum": 220,
+                "minimum": 10,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "elementId",
+            "find",
+        ],
+        "type": "object",
+    },
+    "emergencyStop": {
+        "additionalProperties": False,
+        "properties": {
+            "clear": {
+                "description": "Lift a stop rather than raise one. Separate and deliberate: a stop that any subsequent call could clear as a side effect would be a suggestion.",
+                "type": "boolean",
+            },
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "reason": {
+                "maxLength": 400,
+                "type": "string",
+            },
+        },
+        "type": "object",
+    },
+    "focusWindow": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "settleMs": {
+                "description": "Quiet period the service waits for before reporting effects. The ceiling is protocol-visible rather than a magic number in the code.",
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer",
+            },
+            "windowId": {
+                "type": "string",
+            },
+        },
+        "required": [
+            "windowId",
+        ],
+        "type": "object",
+    },
+    "getDeltaSince": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "description": "Who is asking. Attribution is computed for this caller: the same change reads as 'self' to the client that caused it and 'external' to everyone else.",
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+            "sinceRevision": {
+                "description": "The last revision this caller has seen. Changes at or below it are not repeated.",
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "sinceRevision",
+        ],
+        "type": "object",
+    },
     "getDesktopCapabilities": {
         "additionalProperties": False,
         "properties": {
             "clientId": {
                 "description": "Which client is asking. Multiple clients share one service instance and one element namespace; this is for audit and scope, not for addressing.",
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+        },
+        "type": "object",
+    },
+    "getDesktopState": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
                 "type": "string",
             },
             "confirm": {
@@ -84,6 +275,57 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         },
         "type": "object",
     },
+    "grantScope": {
+        "additionalProperties": False,
+        "properties": {
+            "applications": {
+                "description": "Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing.",
+                "items": {
+                    "maxLength": 200,
+                    "type": "string",
+                },
+                "maxItems": 50,
+                "type": "array",
+            },
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "operationClasses": {
+                "description": "What this client intends to do. Ask for what the task needs and no more: a grant is also a description of the blast radius in the audit log.",
+                "items": {
+                    "enum": [
+                        "observe",
+                        "edit",
+                        "activate",
+                        "submit",
+                        "destructive",
+                    ],
+                    "type": "string",
+                },
+                "maxItems": 5,
+                "minItems": 1,
+                "type": "array",
+            },
+            "reason": {
+                "description": "What this is for, in the caller's own words. Recorded in the audit log, where the useful question months later is why, not what.",
+                "maxLength": 400,
+                "type": "string",
+            },
+            "seconds": {
+                "description": "How long the grant survives without use. Idle time, not a lifetime — a grant being used every second does not expire mid-sentence.",
+                "maximum": 86400,
+                "minimum": 30,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "operationClasses",
+        ],
+        "type": "object",
+    },
     "hello": {
         "additionalProperties": False,
         "properties": {
@@ -104,6 +346,49 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         },
         "required": [
             "protocolVersion",
+        ],
+        "type": "object",
+    },
+    "inspectElement": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+            "depth": {
+                "description": "How far below the anchor to walk. The same bound window inspection uses — drilling changes where a walk starts, never how far it may go.",
+                "maximum": 12,
+                "minimum": 1,
+                "type": "integer",
+            },
+            "elementId": {
+                "description": "Where the walk starts. Must come from an earlier inspection or query: there is no way to drill into something the caller has not already seen and chosen.",
+                "type": "string",
+            },
+            "excludeRoles": {
+                "items": {
+                    "type": "string",
+                },
+                "type": "array",
+            },
+            "includeRoles": {
+                "items": {
+                    "type": "string",
+                },
+                "type": "array",
+            },
+            "maxNodes": {
+                "maximum": 1000,
+                "minimum": 1,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "elementId",
         ],
         "type": "object",
     },
@@ -148,7 +433,73 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "invokeElement": {
+        "additionalProperties": False,
+        "properties": {
+            "action": {
+                "description": "The action's own name, as reported in the element's actions list. Not an index: indices move.",
+                "type": "string",
+            },
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+            "settleMs": {
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "elementId",
+            "action",
+        ],
+        "type": "object",
+    },
+    "launchApplication": {
+        "additionalProperties": False,
+        "properties": {
+            "applicationEntryId": {
+                "description": "An id from listInstallableApplications. An id absent from that list is refused rather than attempted.",
+                "type": "string",
+            },
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "settleMs": {
+                "description": "Quiet period the service waits for before reporting effects. A cold-starting application usually outlasts it; wait on window-opened rather than raising this.",
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "applicationEntryId",
+        ],
+        "type": "object",
+    },
     "listApplications": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+        },
+        "type": "object",
+    },
+    "listInstallableApplications": {
         "additionalProperties": False,
         "properties": {
             "clientId": {
@@ -175,6 +526,55 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 "type": "boolean",
             },
         },
+        "type": "object",
+    },
+    "performActions": {
+        "additionalProperties": False,
+        "properties": {
+            "actions": {
+                "items": {
+                    "additionalProperties": False,
+                    "properties": {
+                        "method": {
+                            "description": "Which call this step is. Widened when typing arrived: focus a window and then type into it is the sequence somebody writing a message actually wants, and splitting it across two calls leaves a gap in which the desktop can change underneath the second one.",
+                            "enum": [
+                                "focusWindow",
+                                "invokeElement",
+                                "setElementValue",
+                                "typeText",
+                                "editText",
+                            ],
+                            "type": "string",
+                        },
+                        "params": {
+                            "additionalProperties": True,
+                            "type": "object",
+                        },
+                    },
+                    "required": [
+                        "method",
+                        "params",
+                    ],
+                    "type": "object",
+                },
+                "maxItems": 25,
+                "minItems": 1,
+                "type": "array",
+            },
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "stopOnFailure": {
+                "description": "When true the batch halts at the first failure and reports which actions ran. Defaults to true: continuing a sequence past a step that did not happen is rarely what anyone wants.",
+                "type": "boolean",
+            },
+        },
+        "required": [
+            "actions",
+        ],
         "type": "object",
     },
     "queryElements": {
@@ -230,6 +630,37 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "setElementValue": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+            "settleMs": {
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer",
+            },
+            "value": {
+                "description": "Text for an editable-text element, a number for a value element. The element decides which applies; a mismatch is an error rather than a coercion.",
+                "type": [
+                    "string",
+                    "number",
+                ],
+            },
+        },
+        "required": [
+            "elementId",
+            "value",
+        ],
+        "type": "object",
+    },
     "setObservationMode": {
         "additionalProperties": False,
         "properties": {
@@ -268,9 +699,235 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "typeText": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+            "replace": {
+                "description": "Clear the field first. Defaults to false, which appends: extending a field is what typing does, and it leaves anything already there alone.",
+                "type": "boolean",
+            },
+            "settleMs": {
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer",
+            },
+            "text": {
+                "description": "What to type. Bounded because the call is held open for as long as the typing takes, and a caller cannot wait forever.",
+                "maxLength": 4000,
+                "type": "string",
+            },
+            "wordsPerMinute": {
+                "description": "Typing speed. Defaults to a competent typist. Faster than a person can type is available and is a choice the caller makes knowingly.",
+                "maximum": 220,
+                "minimum": 10,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "elementId",
+            "text",
+        ],
+        "type": "object",
+    },
+    "waitFor": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "condition": {
+                "enum": [
+                    "window-opened",
+                    "window-closed",
+                    "element-appeared",
+                    "element-state-changed",
+                    "revision-advanced",
+                ],
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+            "name": {
+                "description": "Matched case-insensitively as a substring, the same rule queryElements uses.",
+                "type": "string",
+            },
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "role": {
+                "type": "string",
+            },
+            "state": {
+                "type": "string",
+            },
+            "timeoutMs": {
+                "maximum": 120000,
+                "minimum": 1,
+                "type": "integer",
+            },
+            "windowId": {
+                "type": "string",
+            },
+        },
+        "required": [
+            "condition",
+            "timeoutMs",
+        ],
+        "type": "object",
+    },
 }
 
 RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
+    "auditTail": {
+        "additionalProperties": False,
+        "properties": {
+            "entries": {
+                "items": {
+                    "type": "object",
+                },
+                "type": "array",
+            },
+            "path": {
+                "type": "string",
+            },
+            "writeFailures": {
+                "description": "Records this service could not write. Non-zero means the log is incomplete, which a reader has to be told rather than left to infer from a gap.",
+                "type": "integer",
+            },
+            "written": {
+                "type": "integer",
+            },
+        },
+        "required": [
+            "entries",
+            "path",
+        ],
+        "type": "object",
+    },
+    "captureWindow": {
+        "additionalProperties": False,
+        "properties": {
+            "backend": {
+                "type": "string",
+            },
+            "capturedHeight": {
+                "type": "integer",
+            },
+            "capturedWidth": {
+                "description": "Width before the invisible client-side-decoration margin was cropped away. Differs from width on GTK windows, which reserve room for their own drop shadow.",
+                "type": "integer",
+            },
+            "format": {
+                "enum": [
+                    "png",
+                ],
+                "type": "string",
+            },
+            "frameCropped": {
+                "type": "boolean",
+            },
+            "height": {
+                "type": "integer",
+            },
+            "image": {
+                "description": "The image itself, base64-encoded, so a capture travels over any transport this protocol is carried on rather than only over one with a shared filesystem.",
+                "type": "string",
+            },
+            "revision": {
+                "type": "integer",
+            },
+            "scaled": {
+                "type": "boolean",
+            },
+            "width": {
+                "type": "integer",
+            },
+            "windowId": {
+                "type": "string",
+            },
+        },
+        "required": [
+            "windowId",
+            "format",
+            "image",
+            "width",
+            "height",
+            "backend",
+            "revision",
+        ],
+        "type": "object",
+    },
+    "editText": {
+        "$ref": "#/$defs/actionResult",
+    },
+    "emergencyStop": {
+        "additionalProperties": False,
+        "properties": {
+            "grantsRevoked": {
+                "type": "integer",
+            },
+            "inFlight": {
+                "description": "Actions already dispatched when the stop landed. These are the ones nobody can call back.",
+                "type": "integer",
+            },
+            "stopped": {
+                "type": "boolean",
+            },
+        },
+        "required": [
+            "stopped",
+            "grantsRevoked",
+        ],
+        "type": "object",
+    },
+    "focusWindow": {
+        "$ref": "#/$defs/actionResult",
+    },
+    "getDeltaSince": {
+        "additionalProperties": False,
+        "properties": {
+            "changes": {
+                "items": {
+                    "$ref": "#/$defs/change",
+                },
+                "type": "array",
+            },
+            "complete": {
+                "description": "False when the caller fell so far behind that the oldest changes it missed are no longer held. An incomplete answer that looked complete would be a lie that reads like calm: a caller told false should re-read rather than assume the quiet was real.",
+                "type": "boolean",
+            },
+            "resumeRevision": {
+                "description": "Present when complete is false: the earliest cursor that still yields everything the service holds. Pass it as sinceRevision to resume without a gap. It is a cursor, not the oldest surviving change — sinceRevision is exclusive, so returning the oldest surviving revision would make the caller skip it.",
+                "minimum": 0,
+                "type": "integer",
+            },
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "changes",
+            "revision",
+            "complete",
+        ],
+        "type": "object",
+    },
     "getDesktopCapabilities": {
         "additionalProperties": False,
         "properties": {
@@ -332,6 +989,66 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "getDesktopState": {
+        "additionalProperties": False,
+        "properties": {
+            "activeWindowId": {
+                "description": "Empty when nothing on this desktop holds focus, which is a real state and not an error.",
+                "type": "string",
+            },
+            "observationMode": {
+                "enum": [
+                    "active",
+                    "idle",
+                ],
+                "type": "string",
+            },
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "windows": {
+                "items": {
+                    "additionalProperties": False,
+                    "properties": {
+                        "active": {
+                            "type": "boolean",
+                        },
+                        "applicationId": {
+                            "type": "string",
+                        },
+                        "applicationName": {
+                            "type": "string",
+                        },
+                        "role": {
+                            "type": "string",
+                        },
+                        "title": {
+                            "type": "string",
+                        },
+                        "windowId": {
+                            "type": "string",
+                        },
+                    },
+                    "required": [
+                        "windowId",
+                        "applicationId",
+                        "title",
+                        "role",
+                        "active",
+                    ],
+                    "type": "object",
+                },
+                "type": "array",
+            },
+        },
+        "required": [
+            "windows",
+            "activeWindowId",
+            "revision",
+        ],
+        "type": "object",
+    },
     "getElement": {
         "additionalProperties": False,
         "properties": {
@@ -371,9 +1088,46 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "grantScope": {
+        "additionalProperties": False,
+        "properties": {
+            "applications": {
+                "items": {
+                    "type": "string",
+                },
+                "type": "array",
+            },
+            "ceiling": {
+                "description": "The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice.",
+                "items": {
+                    "type": "string",
+                },
+                "type": "array",
+            },
+            "expiresInSeconds": {
+                "type": "integer",
+            },
+            "operationClasses": {
+                "description": "What this client now holds. Always includes observe: a client that may edit must be able to check whether its edit worked.",
+                "items": {
+                    "type": "string",
+                },
+                "type": "array",
+            },
+        },
+        "required": [
+            "operationClasses",
+            "ceiling",
+        ],
+        "type": "object",
+    },
     "hello": {
         "additionalProperties": False,
         "properties": {
+            "clientId": {
+                "description": "The identity this connection will be known by, issued by the service when the connection was accepted rather than taken from anything the client said. Grants, audit records and change attribution all key off it, so a client that wants to recognise its own actions in a delta should remember this and stop naming itself. A `clientId` sent in any request is kept only as a label. Absent from an older service, which still trusts the caller's own name.",
+                "type": "string",
+            },
             "compatible": {
                 "type": "boolean",
             },
@@ -385,6 +1139,10 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 "type": "string",
             },
             "protocolVersion": {
+                "type": "string",
+            },
+            "schemaDigest": {
+                "description": "The schema digest the running service was built from. Clients share one service instance with whoever attached first, so a client whose generated protocol is newer than the running daemon's would otherwise meet the difference as an unexplained METHOD_NOT_FOUND on a method its own types promise exists. Comparing this against its own digest lets a client say the daemon is older than it is, which is the actual problem. Optional so that an older service which never sends it stays compatible.",
                 "type": "string",
             },
             "sessionToken": {
@@ -404,6 +1162,36 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             "compatible",
             "versionDifference",
             "sessionToken",
+        ],
+        "type": "object",
+    },
+    "inspectElement": {
+        "additionalProperties": False,
+        "properties": {
+            "backend": {
+                "type": "string",
+            },
+            "element": {
+                "$ref": "#/$defs/semanticElement",
+            },
+            "nodeCount": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "truncated": {
+                "type": "boolean",
+            },
+        },
+        "required": [
+            "element",
+            "nodeCount",
+            "truncated",
+            "revision",
+            "backend",
         ],
         "type": "object",
     },
@@ -434,6 +1222,12 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             "backend",
         ],
         "type": "object",
+    },
+    "invokeElement": {
+        "$ref": "#/$defs/actionResult",
+    },
+    "launchApplication": {
+        "$ref": "#/$defs/actionResult",
     },
     "listApplications": {
         "additionalProperties": False,
@@ -489,6 +1283,46 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 "type": "string",
             },
             "revision": {
+                "type": "integer",
+            },
+        },
+        "required": [
+            "applications",
+            "backend",
+        ],
+        "type": "object",
+    },
+    "listInstallableApplications": {
+        "additionalProperties": False,
+        "properties": {
+            "applications": {
+                "items": {
+                    "additionalProperties": False,
+                    "properties": {
+                        "description": {
+                            "type": "string",
+                        },
+                        "id": {
+                            "description": "The desktop entry id. An opaque handle to the caller: it names an application, it does not describe how to run one.",
+                            "type": "string",
+                        },
+                        "name": {
+                            "type": "string",
+                        },
+                    },
+                    "required": [
+                        "id",
+                        "name",
+                    ],
+                    "type": "object",
+                },
+                "type": "array",
+            },
+            "backend": {
+                "type": "string",
+            },
+            "revision": {
+                "minimum": 0,
                 "type": "integer",
             },
         },
@@ -559,6 +1393,32 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "performActions": {
+        "additionalProperties": False,
+        "properties": {
+            "completed": {
+                "description": "How many of the requested actions ran. Less than the number requested means the batch stopped early.",
+                "minimum": 0,
+                "type": "integer",
+            },
+            "results": {
+                "items": {
+                    "$ref": "#/$defs/actionResult",
+                },
+                "type": "array",
+            },
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "results",
+            "completed",
+            "revision",
+        ],
+        "type": "object",
+    },
     "queryElements": {
         "additionalProperties": False,
         "properties": {
@@ -595,6 +1455,9 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "setElementValue": {
+        "$ref": "#/$defs/actionResult",
+    },
     "setObservationMode": {
         "additionalProperties": False,
         "properties": {
@@ -627,9 +1490,87 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "typeText": {
+        "$ref": "#/$defs/actionResult",
+    },
+    "waitFor": {
+        "additionalProperties": False,
+        "properties": {
+            "change": {
+                "$ref": "#/$defs/change",
+                "description": "The change that satisfied the wait, in the same vocabulary the diff engine and the delta stream use. Absent when the condition was satisfied by the revision alone, and absent on timeout: a wait that timed out has no change to report and must not invent one.",
+            },
+            "reason": {
+                "description": "Present when the wait was not satisfied: which condition was still false. A timeout is a normal answer, and this is the part of it a caller can act on.",
+                "type": "string",
+            },
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "satisfied": {
+                "type": "boolean",
+            },
+            "waitedMs": {
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "satisfied",
+            "waitedMs",
+            "revision",
+        ],
+        "type": "object",
+    },
 }
 
 DEFS: Final[dict[str, dict[str, Any]]] = {
+    "actionResult": {
+        "additionalProperties": False,
+        "description": "The result of one action, including the effects it was seen to have. A caller that reads this does not need to re-inspect.",
+        "properties": {
+            "actionId": {
+                "description": "Identifies this action's revision range, which the delta engine reads to attribute later changes.",
+                "type": "string",
+            },
+            "backend": {
+                "type": "string",
+            },
+            "durationMs": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "error": {
+                "$ref": "#/$defs/errorData",
+            },
+            "fallbacksUsed": {
+                "items": {
+                    "type": "string",
+                },
+                "type": "array",
+            },
+            "observedEffects": {
+                "$ref": "#/$defs/observedEffects",
+            },
+            "ok": {
+                "type": "boolean",
+            },
+            "progress": {
+                "additionalProperties": True,
+                "description": "How far an action that takes real time actually got, present whether or not it succeeded. An action interrupted partway has still changed the desktop, so a deadline or a stalled application is reported here rather than raised: the caller reads how much landed, decides whether waiting is still reasonable, and acts on the state instead of on the absence of an answer.",
+                "type": "object",
+            },
+        },
+        "required": [
+            "actionId",
+            "ok",
+            "backend",
+            "fallbacksUsed",
+            "durationMs",
+        ],
+        "type": "object",
+    },
     "bounds": {
         "additionalProperties": False,
         "description": "Screen rectangle in pixels. Reported for orientation and for the user's benefit; it is not an addressing mechanism and no method in this protocol accepts coordinates.",
@@ -694,6 +1635,66 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "change": {
+        "additionalProperties": False,
+        "description": "One semantic change, produced by the single diff engine. Says what changed and where, never where on screen.",
+        "properties": {
+            "applicationId": {
+                "type": "string",
+            },
+            "applicationName": {
+                "description": "The application this change happened in. Present because the identifier above is opaque, and a reader deciding whether a change concerns them should not have to look one up to find out.",
+                "type": "string",
+            },
+            "attribution": {
+                "enum": [
+                    "self",
+                    "external",
+                    "unattributed",
+                ],
+                "type": "string",
+            },
+            "detail": {
+                "additionalProperties": True,
+                "description": "Kind-specific facts, such as the old and new value of a changed state.",
+                "type": "object",
+            },
+            "elementId": {
+                "type": "string",
+            },
+            "kind": {
+                "enum": [
+                    "window-opened",
+                    "window-closed",
+                    "focus-changed",
+                    "element-appeared",
+                    "element-disappeared",
+                    "element-state-changed",
+                    "element-value-changed",
+                    "element-stale",
+                ],
+                "type": "string",
+            },
+            "revision": {
+                "description": "The revision at which this change was observed.",
+                "minimum": 0,
+                "type": "integer",
+            },
+            "summary": {
+                "description": "One human-readable sentence. Passed through the value-egress point, because it can quote an element's name.",
+                "type": "string",
+            },
+            "windowId": {
+                "type": "string",
+            },
+        },
+        "required": [
+            "kind",
+            "revision",
+            "summary",
+        ],
+        "type": "object",
+    },
     "errorData": {
         "additionalProperties": False,
         "description": "The data member of a JSON-RPC error. The domain code lives here; the top-level code stays a reserved JSON-RPC number.",
@@ -719,9 +1720,48 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
                 "additionalProperties": True,
                 "type": "object",
             },
+            "message": {
+                "description": "Present when this error travels inside a result rather than as a JSON-RPC error. A failed step inside a batch has no top-level error member to carry its explanation, and a report that says a step failed without saying why is not worth returning.",
+                "type": "string",
+            },
         },
         "required": [
             "code",
+        ],
+        "type": "object",
+    },
+    "observedEffects": {
+        "additionalProperties": False,
+        "description": "What happened while an action was in flight. Range-only by design: it answers 'what moved while I did that', which is a different question from 'what did I cause'. A change here may still be classed unattributed in a delta. The divergence is intended and documented.",
+        "properties": {
+            "changes": {
+                "items": {
+                    "$ref": "#/$defs/change",
+                },
+                "type": "array",
+            },
+            "fromRevision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "partial": {
+                "description": "True when the settling ceiling fired before the desktop went quiet, so more effects may follow. Never omitted silently when true.",
+                "type": "boolean",
+            },
+            "settledMs": {
+                "description": "How long the service waited for the desktop to go quiet.",
+                "minimum": 0,
+                "type": "integer",
+            },
+            "toRevision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "fromRevision",
+            "toRevision",
+            "changes",
         ],
         "type": "object",
     },

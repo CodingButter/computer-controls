@@ -30,6 +30,10 @@ EXTRA = "extra"
 #: partner, a subject line. It leaves by the same door as element text.
 TITLE = "title"
 APPLICATION_NAME = "applicationName"
+#: A change summary quotes the things it describes, so it inherits their sensitivity.
+#: A delta that narrated a password field's new contents would make every other
+#: precaution in this file pointless.
+SUMMARY = "summary"
 
 
 @dataclass(frozen=True)

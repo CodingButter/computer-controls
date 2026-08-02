@@ -16,7 +16,8 @@ without a lookup table.
 from __future__ import annotations
 
 import hashlib
-from typing import Any
+import logging
+from typing import Any, Callable, Sequence
 
 import gi
 
@@ -25,6 +26,9 @@ gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi  # noqa: E402  (must follow require_version)
 
 from .. import model, registry  # noqa: E402
+from . import x11  # noqa: E402
+
+log = logging.getLogger(__name__)
 
 BACKEND_NAME = "atspi"
 
@@ -41,6 +45,11 @@ MAX_VALUE_CHARS = 512
 # Roles that count as a top-level window. Anything else appearing as a direct
 # child of an application (Zoom parks stray labels there) is not a window.
 WINDOW_ROLES = frozenset({"frame", "dialog", "window", "alert"})
+
+# How far up an ancestor chain to look for the window an element sits in. Bounded
+# because a broken toolkit can hand back a parent chain that never terminates, and an
+# unbounded walk there hangs the loop thread every other call answers on.
+MAX_ANCESTOR_WALK = 32
 
 # On X11, mutter re-parents client windows for decoration and publishes those
 # frames as its own AT-SPI application. Its frames are duplicates of real client
@@ -160,8 +169,56 @@ def _windows_of(app: Atspi.Accessible) -> list[Atspi.Accessible]:
     return windows
 
 
+def xid_for(pid: int, raw_title: str) -> int | None:
+    """The display server's id for the window the accessibility layer is describing.
+
+    The two layers share no identifier, so the match is made on the two facts both of
+    them report: the process and the title. An exact match on both is preferred. When
+    the titles disagree — Chrome, for one, tells the accessibility layer a longer title
+    than it tells the window manager — a process that owns exactly one window is still
+    an unambiguous answer. A process with several windows and no title match is not, and
+    gets None rather than a guess.
+
+    The title used here is the raw one, deliberately taken before the value-egress point:
+    a redaction policy that rewrites titles must not quietly break window matching.
+    """
+    candidates = [w for w in x11.toplevels() if w.pid == pid]
+    for window in candidates:
+        if window.title == raw_title:
+            return window.xid
+    if len(candidates) == 1:
+        return candidates[0].xid
+    return None
+
+
+def xid_of(window: Atspi.Accessible) -> int | None:
+    """The display server's id for a window object the caller already holds.
+
+    The raw title is read here rather than the emitted one, for the reason `xid_for`
+    gives: matching the two layers must not depend on what a redaction policy allows out.
+    """
+    app = _safe(window.get_application)
+    pid = _safe(lambda: app.get_process_id(), 0) if app is not None else 0
+    raw_title = _safe(window.get_name, "") or ""
+    return xid_for(pid or 0, raw_title)
+
+
+def application_name_of(window: Atspi.Accessible) -> str:
+    """The raw name of the application owning a window.
+
+    Raw for the same reason `xid_of` reads the raw title: this name is matched against
+    a capture blocklist, and a policy decision that depended on what redaction let out
+    would fail open exactly where it matters most.
+    """
+    app = _safe(window.get_application)
+    if app is None:
+        return ""
+    return _safe(app.get_name, "") or ""
+
+
 def list_windows(application_id_filter: str | None = None) -> list[dict[str, Any]]:
     windows: list[dict[str, Any]] = []
+    active_xid = x11.active_xid()
     for app in _iter_desktop_apps():
         app_name = _safe(app.get_name, "") or ""
         if app_name in FRAME_PROVIDER_APPS:
@@ -169,8 +226,14 @@ def list_windows(application_id_filter: str | None = None) -> list[dict[str, Any
         app_id = application_id(app)
         if application_id_filter and app_id != application_id_filter:
             continue
+        app_pid = _safe(app.get_process_id, 0) or 0
         for window in _windows_of(app):
             states = _window_states(window)
+            raw_title = _safe(window.get_name, "") or ""
+            # Not a single window in this session reports the accessibility layer's
+            # `active` state, so believing it would mean reporting that nothing is ever
+            # focused. The display server is asked instead, and says so honestly.
+            xid = xid_for(app_pid, raw_title) if active_xid else None
             windows.append(
                 {
                     "id": window_id(window),
@@ -186,12 +249,23 @@ def list_windows(application_id_filter: str | None = None) -> list[dict[str, Any
                         element_id=window_id(window),
                     ),
                     "role": _safe(window.get_role_name, "") or "",
-                    "active": "active" in states,
+                    "active": ("active" in states) or (xid is not None and xid == active_xid),
                     "states": states,
                     "backend": BACKEND_NAME,
                 }
             )
     return windows
+
+
+def application_pids() -> dict[str, int]:
+    """Which process each application on this desktop is.
+
+    Applications, not windows: the walk stops one level up from `list_windows`, so asking
+    who owns a window costs an application enumeration rather than a full window walk.
+    """
+    return {
+        application_id(app): _safe(app.get_process_id, 0) or 0 for app in _iter_desktop_apps()
+    }
 
 
 def find_application(app_id: str) -> Atspi.Accessible | None:
@@ -398,6 +472,33 @@ def find_window(win_id: str) -> Atspi.Accessible | None:
     return None
 
 
+def scope_of(obj: Atspi.Accessible) -> tuple[str, str]:
+    """The window and application an object belongs to, as ids.
+
+    Recorded when an action is dispatched, while the object is still resolvable, because
+    this is what separates an effect from a coincidence later: a change inside an action's
+    revision range but in some other application was not caused by that action, and the
+    only way to know that is to have written down where the action could reach.
+
+    An object whose window has already gone answers with what it can. A partial scope
+    narrows attribution rather than breaking it.
+    """
+    window_ref = ""
+    node = obj
+    for _ in range(MAX_ANCESTOR_WALK):
+        if node is None:
+            break
+        role = _safe(node.get_role_name, "") or ""
+        if role in WINDOW_ROLES:
+            window_ref = window_id(node)
+            break
+        node = _safe(node.get_parent)
+
+    app = _safe(obj.get_application)
+    app_ref = application_id(app) if app is not None else ""
+    return window_ref, app_ref
+
+
 def fingerprint_of(reference: dict[str, Any]) -> registry.Fingerprint | None:
     """Current fingerprint of a previously described object, or None if it is gone.
 
@@ -485,3 +586,346 @@ def rediscover(
     # The caller is about to be handed this id; it has to resolve.
     _remember(obj, new_id)
     return new_id, new_reference, fingerprint
+
+
+# --- Acting -------------------------------------------------------------------
+#
+# Three primitives, and nothing else. Every action the protocol offers is one of
+# these or a batch of them. Notably absent: anything that synthesizes a keystroke or
+# moves a pointer. Setting a text field means handing the text to the toolkit, not
+# typing it at the window and hoping focus was where we thought it was.
+
+
+def grab_focus(obj: Atspi.Accessible) -> bool:
+    """Ask the toolkit to focus an element. False if it cannot or will not."""
+    if not _safe(lambda: obj.get_component_iface()):
+        return False
+    return bool(_safe(obj.grab_focus, False))
+
+
+def actions_of(obj: Atspi.Accessible) -> list[str]:
+    """Public read of the exposed action names, for error messages that help."""
+    return _actions_of(obj)
+
+
+def interfaces_of(obj: Atspi.Accessible) -> list[str]:
+    """Which AT-SPI interfaces this object advertises.
+
+    A claim, not a guarantee — `collection_answers` is the test of it.
+    """
+    return _safe(obj.get_interfaces, []) or []
+
+
+def role_of(obj: Atspi.Accessible) -> str:
+    return _safe(obj.get_role_name, "") or ""
+
+
+def toolkit_of(app: Atspi.Accessible) -> tuple[str, str]:
+    """The toolkit name and version an application reports for itself."""
+    return (
+        _safe(app.get_toolkit_name, "") or "",
+        _safe(app.get_toolkit_version, "") or "",
+    )
+
+
+def collection_answers(app: Atspi.Accessible) -> bool:
+    """Whether a `Collection` query returns, rather than whether one is offered.
+
+    Applications advertise this interface and then decline to serve it. The
+    interface list is a claim; this is the test, and the gap between the two is
+    the entire reason the manual walk exists.
+    """
+
+    def query() -> bool:
+        rule = Atspi.MatchRule.new(
+            Atspi.StateSet.new([]),
+            Atspi.CollectionMatchType.ANY,
+            {},
+            Atspi.CollectionMatchType.ANY,
+            [],
+            Atspi.CollectionMatchType.ANY,
+            [],
+            Atspi.CollectionMatchType.ANY,
+            False,
+        )
+        return app.get_matches(rule, Atspi.CollectionSortOrder.CANONICAL, 1, False) is not None
+
+    return bool(_safe(query, False))
+
+
+def windows_of_application(app_id: str) -> list[Atspi.Accessible]:
+    """The window objects of one application, or an empty list if it is gone."""
+    app = find_application(app_id)
+    return _windows_of(app) if app is not None else []
+
+
+def do_action(obj: Atspi.Accessible, action_name: str) -> bool:
+    """Invoke a named action. Returns False when the toolkit declines it.
+
+    Actions are addressed by NAME, never by the index AT-SPI actually wants. An index
+    is only meaningful relative to a list that the application is free to reorder
+    between one call and the next; a name that has moved is a name that no longer
+    matches, which is a clean failure instead of a wrong button.
+    """
+    names = _actions_of(obj)
+    if action_name not in names:
+        return False
+    index = names.index(action_name)
+    return bool(_safe(lambda: obj.do_action(index), False))
+
+
+def set_text_value(obj: Atspi.Accessible, text: str) -> bool:
+    """Replace an element's text through the EditableText interface."""
+    if not _safe(lambda: obj.get_editable_text_iface()):
+        return False
+    return bool(_safe(lambda: obj.set_text_contents(text), False))
+
+
+def insert_text(obj: Atspi.Accessible, text: str, offset: int = -1) -> bool:
+    """Insert at a caret position without disturbing what is already there.
+
+    The interface an application receives dictated speech through, used here for
+    the same reason: an application that listens for edits hears these, where it
+    hears nothing at all when a field's whole contents are swapped underneath it.
+
+    An offset of -1 means the end, which is where a person typing would be.
+    """
+    if not _safe(lambda: obj.get_editable_text_iface()):
+        return False
+    at = offset
+    if at < 0:
+        at = len(_safe(lambda: Atspi.Text.get_text(obj, 0, -1), "") or "")
+    return bool(_safe(lambda: obj.insert_text(at, text, len(text)), False))
+
+
+def delete_text(obj: Atspi.Accessible, start: int, end: int) -> bool:
+    """Remove a range of characters by offset.
+
+    This is what editing is at this layer. There is no backspace to press and no
+    selection to make first: a range is spliced out in one call, atomically,
+    which is both simpler than imitating a person and more truthful — an
+    application sees one edit rather than forty deletions it has to coalesce.
+
+    A selection can be set beforehand if a human should watch the text highlight
+    before it goes, but that is presentation. The removal does not need it.
+    """
+    if not _safe(lambda: obj.get_editable_text_iface()):
+        return False
+    length = len(_safe(lambda: Atspi.Text.get_text(obj, 0, -1), "") or "")
+    if start < 0 or end > length or start >= end:
+        # Out-of-range offsets are the caller holding a stale idea of the field,
+        # which is worth an honest refusal rather than a clamp that deletes
+        # something adjacent to what was meant.
+        return False
+    return bool(_safe(lambda: obj.delete_text(start, end), False))
+
+
+def select_text(obj: Atspi.Accessible, start: int, end: int) -> bool:
+    """Highlight a range, so a person can see what is about to change."""
+    if not _safe(lambda: obj.get_text_iface()):
+        return False
+    if _safe(lambda: Atspi.Text.get_n_selections(obj), 0):
+        _safe(lambda: Atspi.Text.remove_selection(obj, 0), False)
+    return bool(_safe(lambda: Atspi.Text.add_selection(obj, start, end), False))
+
+
+def find_range(obj: Atspi.Accessible, needle: str) -> tuple[int, int] | None:
+    """Where a piece of text sits in a field, as offsets, or nothing if absent.
+
+    Addressing an edit by the text being replaced rather than by raw offsets is
+    the same discipline as naming an action instead of indexing it: an offset
+    computed from a field somebody has since typed into points at the wrong
+    characters, while text that has moved simply is not found.
+    """
+    if not needle:
+        return None
+    body = _safe(lambda: Atspi.Text.get_text(obj, 0, -1), "") or ""
+    at = body.find(needle)
+    if at < 0 or body.find(needle, at + 1) >= 0:
+        # Ambiguity is refused: two matches mean the caller does not know which
+        # one it meant, and guessing edits the wrong sentence.
+        return None
+    return at, at + len(needle)
+
+
+def text_contains(obj: Atspi.Accessible, needle: str) -> str:
+    """Whether a field holds this text anywhere in it — the verdict, not the text.
+
+    An edit lands in the middle of a field, so confirming one is a containment
+    question rather than an equality question. Same discipline as `text_matches`,
+    including its third answer: a field that masks its own contents cannot
+    confirm or deny, and saying so is more use than a confident no.
+    """
+    role = _safe(obj.get_role_name, "") or ""
+    return verdict_for(_text_value(obj, role), needle, contains=True)
+
+
+def is_editable(obj: Atspi.Accessible) -> bool:
+    """Whether this element accepts text at all, asked before any is sent."""
+    return bool(_safe(lambda: obj.get_editable_text_iface()))
+
+
+def text_matches(obj: Atspi.Accessible, expected: str, exact: bool) -> str:
+    """Does the field now say what it was supposed to say?
+
+    Three answers, not two. The comparison happens here, against the raw text,
+    and only the verdict leaves: asking the caller to compare would mean handing
+    it the field's contents to compare against, and a field redacted on the way
+    out could never be verified at all.
+
+    The third answer exists because a password entry does not hand its contents
+    even to us. GTK returns a row of bullets to the accessibility layer itself,
+    so the text we would compare against is the mask. Reporting that as a
+    mismatch would be a lie in the most alarming direction — telling a caller
+    its password did not go in when it did, and inviting it to type the thing
+    again. `unverifiable` says what is actually true: the words were delivered
+    and nothing on this desktop can confirm the result.
+    """
+    role = _safe(obj.get_role_name, "") or ""
+    return verdict_for(_text_value(obj, role), expected, exact=exact)
+
+
+#: Characters toolkits substitute for a password's real contents. A field made
+#: entirely of one of these, where we asked for something else, is masked rather
+#: than wrong.
+_MASK_CHARACTERS = frozenset("•*●·⬤∙")
+
+
+def _is_masked(actual: str, expected: str) -> bool:
+    if not actual or actual == expected:
+        return False
+    return set(actual) <= _MASK_CHARACTERS
+
+
+def verdict_for(actual: str, expected: str, *, exact: bool = True, contains: bool = False) -> str:
+    """The three-way answer, decided in one place.
+
+    Split out from the two functions above so that the rule lives once. The
+    version of this that mattered was written twice — once here and once in a
+    test's stub — and the copy in the stub kept saying `True` for a masked
+    field long after this one had learned better.
+    """
+    if _is_masked(actual, expected):
+        return "unverifiable"
+    if contains:
+        matched = expected in actual
+    else:
+        matched = actual == expected if exact else actual.endswith(expected)
+    return "verified" if matched else "mismatch"
+
+
+def set_numeric_value(obj: Atspi.Accessible, amount: float) -> bool:
+    """Set a slider or spinner through the Value interface, refusing out-of-range.
+
+    The toolkit would clamp silently. A caller who asked for 200 on a scale that stops
+    at 100 has a wrong belief about the world, and returning success would preserve it.
+    """
+    if not _safe(lambda: obj.get_value_iface()):
+        return False
+    minimum = _safe(obj.get_minimum_value)
+    maximum = _safe(obj.get_maximum_value)
+    if minimum is not None and amount < minimum:
+        return False
+    if maximum is not None and amount > maximum:
+        return False
+    return bool(_safe(lambda: obj.set_current_value(amount), False))
+
+
+def sample_values(element_ids: Sequence[str]) -> dict[str, str]:
+    """Current values for elements a caller already holds, skipping the unreachable.
+
+    Only elements someone has been shown are sampled. Reading every text field of
+    every window on every observation would cost more than everything it measured,
+    and nobody is holding a reference to most of them anyway.
+
+    An element that has gone is simply absent from the result rather than an error:
+    disappearance is the registry's subject and staleness its vocabulary, and a
+    value sample that raised would take the whole observation down with it.
+    """
+    sampled: dict[str, str] = {}
+    for element_id in element_ids:
+        obj = _objects.get(element_id)
+        if obj is None:
+            continue
+        role = _safe(obj.get_role_name, "") or ""
+        if role not in TEXT_VALUE_ROLES:
+            continue
+        sampled[element_id] = read_back(obj, element_id)
+    return sampled
+
+
+def read_back(obj: Atspi.Accessible, element_id: str = "") -> str:
+    """Whatever the element now says its value is, through the egress point.
+
+    A set-value result quotes the field back so the caller can see what actually landed
+    — and a password field's contents are exactly as sensitive on the way out of a write
+    as on the way out of a read. Same door.
+    """
+    role = _safe(obj.get_role_name, "") or ""
+    return model.egress_value(
+        _text_value(obj, role),
+        field=model.VALUE,
+        role=role,
+        states=tuple(_states_of(obj)),
+        element_id=element_id,
+    )
+
+
+# The events worth waking up for. Not an exhaustive list of what AT-SPI broadcasts —
+# deliberately. Every registered event costs a D-Bus round trip per occurrence, and the
+# ones omitted here (caret movement, every keystroke's text insertion) fire continuously
+# while a human types without ever meaning "the desktop is now different".
+WATCHED_EVENTS = (
+    "window:create",
+    "window:destroy",
+    "window:activate",
+    "window:deactivate",
+    "object:state-changed:focused",
+    "object:state-changed:showing",
+    "object:children-changed",
+    "object:property-change:accessible-value",
+)
+
+#: Registered listeners, each paired with the event name it was registered for. The pair
+#: is the point: a listener must be deregistered with the same name it registered with,
+#: and deregistering with anything else tears down the underlying match without unhooking
+#: this listener — after which the process receives no desktop events at all and every
+#: later subscription registers successfully into silence.
+_listeners: list[tuple[Atspi.EventListener, str]] = []
+
+
+def watch_events(on_hint: Callable[[], None]) -> Callable[[], None]:
+    """Subscribe to the events that mean 'look again'. Returns an unsubscribe.
+
+    The payload is deliberately dropped. An event carries a reference to the object that
+    changed, and building the delta out of that reference would make the event stream a
+    second source of truth about the desktop — one that is authoritative for whatever it
+    happened to mention and blind to everything it did not. The re-read stays the only
+    account of what is true; the event only decides when to take it.
+
+    Must be called on the loop thread: AT-SPI delivers events on the thread whose main
+    context it was initialised with.
+    """
+
+    def deliver(_event: object) -> None:
+        try:
+            on_hint()
+        except Exception:
+            # An event listener that raises inside GLib takes out the loop every other
+            # call in this process depends on.
+            log.exception("desktop event hint failed")
+
+    mine: list[tuple[Atspi.EventListener, str]] = []
+    for name in WATCHED_EVENTS:
+        listener = Atspi.EventListener.new(deliver)
+        if listener.register(name):
+            mine.append((listener, name))
+    _listeners.extend(mine)
+
+    def unsubscribe() -> None:
+        for listener, name in mine:
+            _safe(lambda l=listener, n=name: l.deregister(n))
+            if (listener, name) in _listeners:
+                _listeners.remove((listener, name))
+
+    return unsubscribe

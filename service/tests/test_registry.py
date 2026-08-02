@@ -129,3 +129,29 @@ def test_a_failing_rediscoverer_still_produces_a_clean_stale_error():
     with pytest.raises(ElementReferenceStale) as excinfo:
         registry.resolve("el-1")
     assert "newElementId" not in excinfo.value.detail
+
+
+def test_the_watch_set_is_the_newest_and_stays_bounded():
+    """Observers that re-read on every look cannot re-read a whole session's history.
+
+    The cost of an observation must not grow with how much has been inspected, or a
+    long session's settling wait slowly stops being a measurement and starts being
+    the thing that needs measuring.
+    """
+    registry = ElementRegistry()
+    for i in range(50):
+        registry.record([obs(f"el-{i}", fp(role="entry", name=f"field {i}"))])
+
+    watched = registry.recent(16, roles=frozenset({"entry"}))
+
+    assert len(watched) == 16
+    assert watched[0] == "el-49"
+    assert "el-0" not in watched
+
+
+def test_the_watch_set_skips_roles_that_hold_no_value():
+    registry = ElementRegistry()
+    registry.record([obs("el-text", fp(role="entry")), obs("el-button", fp(role="push button"))])
+
+    assert registry.recent(16, roles=frozenset({"entry"})) == ["el-text"]
+    assert set(registry.recent(16)) == {"el-text", "el-button"}

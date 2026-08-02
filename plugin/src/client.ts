@@ -157,9 +157,17 @@ export class DesktopClient {
     }
   }
 
+  /**
+   * @param timeoutMs Overrides the default deadline for this one call. A method
+   * that deliberately takes time — typing a sentence at human speed — knows how
+   * long it will take before it starts, and cutting the connection at a fixed
+   * twenty seconds would abandon an action that is still running perfectly well
+   * on the far side of the socket.
+   */
   async request<T = unknown>(
     method: string,
     params: Record<string, unknown> = {},
+    timeoutMs?: number,
   ): Promise<T> {
     await this.connect();
     const socket = this.#socket;
@@ -172,17 +180,18 @@ export class DesktopClient {
     }
 
     const id = this.#nextId++;
+    const deadline = timeoutMs ?? this.#requestTimeoutMs;
     return await new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
         reject(
           new DesktopServiceError(
             "TIMEOUT",
-            `The desktop service did not answer ${method} within ${this.#requestTimeoutMs}ms`,
-            { method, timeoutMs: this.#requestTimeoutMs },
+            `The desktop service did not answer ${method} within ${deadline}ms`,
+            { method, timeoutMs: deadline },
           ),
         );
-      }, this.#requestTimeoutMs);
+      }, deadline);
 
       this.#pending.set(id, {
         resolve: resolve as (value: unknown) => void,

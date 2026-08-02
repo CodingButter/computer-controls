@@ -1,8 +1,45 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: f649b92ee4ded5d1
+// Protocol version: 1.0   schema sha256: 0ce1d6e9caba87f3
 
 import { z } from "mastracode/plugin";
+
+export const changeSchema = z.object({
+  applicationId: z.string().optional(),
+  applicationName: z.string().describe("The application this change happened in. Present because the identifier above is opaque, and a reader deciding whether a change concerns them should not have to look one up to find out.").optional(),
+  attribution: z.enum(["self", "external", "unattributed"]).optional(),
+  detail: z.record(z.string(), z.unknown()).describe("Kind-specific facts, such as the old and new value of a changed state.").optional(),
+  elementId: z.string().optional(),
+  kind: z.enum(["window-opened", "window-closed", "focus-changed", "element-appeared", "element-disappeared", "element-state-changed", "element-value-changed", "element-stale"]),
+  revision: z.number().int().min(0).describe("The revision at which this change was observed."),
+  summary: z.string().describe("One human-readable sentence. Passed through the value-egress point, because it can quote an element's name."),
+  windowId: z.string().optional(),
+});
+
+export const observedEffectsSchema = z.object({
+  changes: z.array(changeSchema),
+  fromRevision: z.number().int().min(0),
+  partial: z.boolean().describe("True when the settling ceiling fired before the desktop went quiet, so more effects may follow. Never omitted silently when true.").optional(),
+  settledMs: z.number().int().min(0).describe("How long the service waited for the desktop to go quiet.").optional(),
+  toRevision: z.number().int().min(0),
+});
+
+export const errorDataSchema = z.object({
+  code: z.enum(["APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR"]),
+  detail: z.record(z.string(), z.unknown()).optional(),
+  message: z.string().describe("Present when this error travels inside a result rather than as a JSON-RPC error. A failed step inside a batch has no top-level error member to carry its explanation, and a report that says a step failed without saying why is not worth returning.").optional(),
+});
+
+export const actionResultSchema = z.object({
+  actionId: z.string().describe("Identifies this action's revision range, which the delta engine reads to attribute later changes."),
+  backend: z.string(),
+  durationMs: z.number().int().min(0),
+  error: errorDataSchema.optional(),
+  fallbacksUsed: z.array(z.string()),
+  observedEffects: observedEffectsSchema.optional(),
+  ok: z.boolean(),
+  progress: z.record(z.string(), z.unknown()).describe("How far an action that takes real time actually got, present whether or not it succeeded. An action interrupted partway has still changed the desktop, so a deadline or a stalled application is reported here rather than raised: the caller reads how much landed, decides whether waiting is still reasonable, and acts on the state instead of on the absence of an answer.").optional(),
+});
 
 export const boundsSchema = z.object({
   height: z.number().int(),
@@ -17,11 +54,6 @@ export const capabilityTierReportSchema = z.object({
   id: z.enum(["app-native", "accessibility", "compositor", "vision", "raw-input"]),
   name: z.string(),
   reason: z.union([z.string(), z.null()]).describe("Why it is unavailable. Required reading when available is false.").optional(),
-});
-
-export const errorDataSchema = z.object({
-  code: z.enum(["APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR"]),
-  detail: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const semanticElementSchema: z.ZodType<unknown> = z.lazy(() =>
@@ -40,6 +72,82 @@ export const semanticElementSchema: z.ZodType<unknown> = z.lazy(() =>
   }),
 );
 
+export const auditTailParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+  limit: z.number().int().min(1).max(200).optional(),
+});
+export const auditTailResult = z.object({
+  entries: z.array(z.record(z.string(), z.unknown())),
+  path: z.string(),
+  writeFailures: z.number().int().describe("Records this service could not write. Non-zero means the log is incomplete, which a reader has to be told rather than left to infer from a gap.").optional(),
+  written: z.number().int().optional(),
+});
+
+export const captureWindowParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+  maxWidth: z.number().int().min(64).max(4096).describe("Scale the image down to at most this width. Only ever downward: enlarging a capture invents detail that was never captured.").optional(),
+  windowId: z.string(),
+});
+export const captureWindowResult = z.object({
+  backend: z.string(),
+  capturedHeight: z.number().int().optional(),
+  capturedWidth: z.number().int().describe("Width before the invisible client-side-decoration margin was cropped away. Differs from width on GTK windows, which reserve room for their own drop shadow.").optional(),
+  format: z.enum(["png"]),
+  frameCropped: z.boolean().optional(),
+  height: z.number().int(),
+  image: z.string().describe("The image itself, base64-encoded, so a capture travels over any transport this protocol is carried on rather than only over one with a shared filesystem."),
+  revision: z.number().int(),
+  scaled: z.boolean().optional(),
+  width: z.number().int(),
+  windowId: z.string(),
+});
+
+export const editTextParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  elementId: z.string(),
+  find: z.string().max(4000).describe("The existing text to replace. Must appear exactly once: two matches mean the caller does not know which one it meant, and the edit is refused rather than guessed."),
+  replaceWith: z.string().max(4000).describe("What to put in its place. Omit to delete the range outright.").optional(),
+  settleMs: z.number().int().min(0).max(10000).optional(),
+  showSelection: z.boolean().describe("Highlight the range before removing it, so a watching human sees what changed. Presentation only: the edit does not need it.").optional(),
+  wordsPerMinute: z.number().int().min(10).max(220).describe("When present the replacement is typed at this speed rather than inserted at once, for an edit a person is watching.").optional(),
+});
+export const editTextResult = z.record(z.string(), z.unknown());
+
+export const emergencyStopParams = z.object({
+  clear: z.boolean().describe("Lift a stop rather than raise one. Separate and deliberate: a stop that any subsequent call could clear as a side effect would be a suggestion.").optional(),
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  reason: z.string().max(400).optional(),
+});
+export const emergencyStopResult = z.object({
+  grantsRevoked: z.number().int(),
+  inFlight: z.number().int().describe("Actions already dispatched when the stop landed. These are the ones nobody can call back.").optional(),
+  stopped: z.boolean(),
+});
+
+export const focusWindowParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  settleMs: z.number().int().min(0).max(10000).describe("Quiet period the service waits for before reporting effects. The ceiling is protocol-visible rather than a magic number in the code.").optional(),
+  windowId: z.string(),
+});
+export const focusWindowResult = z.record(z.string(), z.unknown());
+
+export const getDeltaSinceParams = z.object({
+  clientId: z.string().describe("Who is asking. Attribution is computed for this caller: the same change reads as 'self' to the client that caused it and 'external' to everyone else.").optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+  sinceRevision: z.number().int().min(0).describe("The last revision this caller has seen. Changes at or below it are not repeated."),
+});
+export const getDeltaSinceResult = z.object({
+  changes: z.array(changeSchema),
+  complete: z.boolean().describe("False when the caller fell so far behind that the oldest changes it missed are no longer held. An incomplete answer that looked complete would be a lie that reads like calm: a caller told false should re-read rather than assume the quiet was real."),
+  resumeRevision: z.number().int().min(0).describe("Present when complete is false: the earliest cursor that still yields everything the service holds. Pass it as sinceRevision to resume without a gap. It is a cursor, not the oldest surviving change — sinceRevision is exclusive, so returning the oldest surviving revision would make the caller skip it.").optional(),
+  revision: z.number().int().min(0),
+});
+
 export const getDesktopCapabilitiesParams = z.object({
   clientId: z.string().describe("Which client is asking. Multiple clients share one service instance and one element namespace; this is for audit and scope, not for addressing.").optional(),
   confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
@@ -57,6 +165,24 @@ export const getDesktopCapabilitiesResult = z.object({
     waylandDisplay: z.string().optional(),
   }),
   tiers: z.array(capabilityTierReportSchema),
+});
+
+export const getDesktopStateParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+});
+export const getDesktopStateResult = z.object({
+  activeWindowId: z.string().describe("Empty when nothing on this desktop holds focus, which is a real state and not an error."),
+  observationMode: z.enum(["active", "idle"]).optional(),
+  revision: z.number().int().min(0),
+  windows: z.array(z.object({
+    active: z.boolean(),
+    applicationId: z.string(),
+    applicationName: z.string().optional(),
+    role: z.string(),
+    title: z.string(),
+    windowId: z.string(),
+  })),
 });
 
 export const getElementParams = z.object({
@@ -79,6 +205,21 @@ export const getRevisionResult = z.object({
   revision: z.number().int(),
 });
 
+export const grantScopeParams = z.object({
+  applications: z.array(z.string().max(200)).describe("Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing.").optional(),
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  operationClasses: z.array(z.enum(["observe", "edit", "activate", "submit", "destructive"])).describe("What this client intends to do. Ask for what the task needs and no more: a grant is also a description of the blast radius in the audit log."),
+  reason: z.string().max(400).describe("What this is for, in the caller's own words. Recorded in the audit log, where the useful question months later is why, not what.").optional(),
+  seconds: z.number().int().min(30).max(86400).describe("How long the grant survives without use. Idle time, not a lifetime — a grant being used every second does not expire mid-sentence.").optional(),
+});
+export const grantScopeResult = z.object({
+  applications: z.array(z.string()).optional(),
+  ceiling: z.array(z.string()).describe("The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice."),
+  expiresInSeconds: z.number().int().optional(),
+  operationClasses: z.array(z.string()).describe("What this client now holds. Always includes observe: a client that may edit must be able to check whether its edit worked."),
+});
+
 export const helloParams = z.object({
   clientId: z.string().optional(),
   clientName: z.string().optional(),
@@ -86,11 +227,30 @@ export const helloParams = z.object({
   protocolVersion: z.string().regex(/^[0-9]+\.[0-9]+$/),
 });
 export const helloResult = z.object({
+  clientId: z.string().describe("The identity this connection will be known by, issued by the service when the connection was accepted rather than taken from anything the client said. Grants, audit records and change attribution all key off it, so a client that wants to recognise its own actions in a delta should remember this and stop naming itself. A `clientId` sent in any request is kept only as a label. Absent from an older service, which still trusts the caller's own name.").optional(),
   compatible: z.boolean(),
   observationMode: z.enum(["active", "idle"]).optional(),
   protocolVersion: z.string(),
+  schemaDigest: z.string().describe("The schema digest the running service was built from. Clients share one service instance with whoever attached first, so a client whose generated protocol is newer than the running daemon's would otherwise meet the difference as an unexplained METHOD_NOT_FOUND on a method its own types promise exists. Comparing this against its own digest lets a client say the daemon is older than it is, which is the actual problem. Optional so that an older service which never sends it stays compatible.").optional(),
   sessionToken: z.string(),
   versionDifference: z.enum(["none", "minor"]).describe("A minor difference is reported and allowed. A major mismatch fails the call instead of appearing here."),
+});
+
+export const inspectElementParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+  depth: z.number().int().min(1).max(12).describe("How far below the anchor to walk. The same bound window inspection uses — drilling changes where a walk starts, never how far it may go.").optional(),
+  elementId: z.string().describe("Where the walk starts. Must come from an earlier inspection or query: there is no way to drill into something the caller has not already seen and chosen."),
+  excludeRoles: z.array(z.string()).optional(),
+  includeRoles: z.array(z.string()).optional(),
+  maxNodes: z.number().int().min(1).max(1000).optional(),
+});
+export const inspectElementResult = z.object({
+  backend: z.string(),
+  element: semanticElementSchema,
+  nodeCount: z.number().int().min(0),
+  revision: z.number().int().min(0),
+  truncated: z.boolean(),
 });
 
 export const inspectWindowParams = z.object({
@@ -110,6 +270,23 @@ export const inspectWindowResult = z.object({
   window: semanticElementSchema,
 });
 
+export const invokeElementParams = z.object({
+  action: z.string().describe("The action's own name, as reported in the element's actions list. Not an index: indices move."),
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  elementId: z.string(),
+  settleMs: z.number().int().min(0).max(10000).optional(),
+});
+export const invokeElementResult = z.record(z.string(), z.unknown());
+
+export const launchApplicationParams = z.object({
+  applicationEntryId: z.string().describe("An id from listInstallableApplications. An id absent from that list is refused rather than attempted."),
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  settleMs: z.number().int().min(0).max(10000).describe("Quiet period the service waits for before reporting effects. A cold-starting application usually outlasts it; wait on window-opened rather than raising this.").optional(),
+});
+export const launchApplicationResult = z.record(z.string(), z.unknown());
+
 export const listApplicationsParams = z.object({
   clientId: z.string().optional(),
   confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
@@ -128,6 +305,20 @@ export const listApplicationsResult = z.object({
   })),
   backend: z.string(),
   revision: z.number().int().optional(),
+});
+
+export const listInstallableApplicationsParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+});
+export const listInstallableApplicationsResult = z.object({
+  applications: z.array(z.object({
+    description: z.string().optional(),
+    id: z.string().describe("The desktop entry id. An opaque handle to the caller: it names an application, it does not describe how to run one."),
+    name: z.string(),
+  })),
+  backend: z.string(),
+  revision: z.number().int().min(0).optional(),
 });
 
 export const listWindowsParams = z.object({
@@ -150,6 +341,21 @@ export const listWindowsResult = z.object({
   })),
 });
 
+export const performActionsParams = z.object({
+  actions: z.array(z.object({
+    method: z.enum(["focusWindow", "invokeElement", "setElementValue", "typeText", "editText"]).describe("Which call this step is. Widened when typing arrived: focus a window and then type into it is the sequence somebody writing a message actually wants, and splitting it across two calls leaves a gap in which the desktop can change underneath the second one."),
+    params: z.record(z.string(), z.unknown()),
+  })),
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  stopOnFailure: z.boolean().describe("When true the batch halts at the first failure and reports which actions ran. Defaults to true: continuing a sequence past a step that did not happen is rarely what anyone wants.").optional(),
+});
+export const performActionsResult = z.object({
+  completed: z.number().int().min(0).describe("How many of the requested actions ran. Less than the number requested means the batch stopped early."),
+  results: z.array(actionResultSchema),
+  revision: z.number().int().min(0),
+});
+
 export const queryElementsParams = z.object({
   clientId: z.string().optional(),
   confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
@@ -168,6 +374,15 @@ export const queryElementsResult = z.object({
   searchTruncated: z.boolean().describe("The search gave up before covering the window."),
 });
 
+export const setElementValueParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  elementId: z.string(),
+  settleMs: z.number().int().min(0).max(10000).optional(),
+  value: z.union([z.string(), z.number()]).describe("Text for an editable-text element, a number for a value element. The element decides which applies; a mismatch is an error rather than a coercion."),
+});
+export const setElementValueResult = z.record(z.string(), z.unknown());
+
 export const setObservationModeParams = z.object({
   ceilingMs: z.number().int().min(0).describe("Hard upper bound on holding a batch, so a continuously busy desktop still reports in.").optional(),
   clientId: z.string().optional(),
@@ -182,4 +397,35 @@ export const setObservationModeResult = z.object({
   observationMode: z.enum(["active", "idle"]),
   reconcileIntervalMs: z.number().int(),
   revision: z.number().int(),
+});
+
+export const typeTextParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  elementId: z.string(),
+  replace: z.boolean().describe("Clear the field first. Defaults to false, which appends: extending a field is what typing does, and it leaves anything already there alone.").optional(),
+  settleMs: z.number().int().min(0).max(10000).optional(),
+  text: z.string().max(4000).describe("What to type. Bounded because the call is held open for as long as the typing takes, and a caller cannot wait forever."),
+  wordsPerMinute: z.number().int().min(10).max(220).describe("Typing speed. Defaults to a competent typist. Faster than a person can type is available and is a choice the caller makes knowingly.").optional(),
+});
+export const typeTextResult = z.record(z.string(), z.unknown());
+
+export const waitForParams = z.object({
+  clientId: z.string().optional(),
+  condition: z.enum(["window-opened", "window-closed", "element-appeared", "element-state-changed", "revision-advanced"]),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+  elementId: z.string().optional(),
+  name: z.string().describe("Matched case-insensitively as a substring, the same rule queryElements uses.").optional(),
+  revision: z.number().int().min(0).optional(),
+  role: z.string().optional(),
+  state: z.string().optional(),
+  timeoutMs: z.number().int().min(1).max(120000),
+  windowId: z.string().optional(),
+});
+export const waitForResult = z.object({
+  change: changeSchema.describe("The change that satisfied the wait, in the same vocabulary the diff engine and the delta stream use. Absent when the condition was satisfied by the revision alone, and absent on timeout: a wait that timed out has no change to report and must not invent one.").optional(),
+  reason: z.string().describe("Present when the wait was not satisfied: which condition was still false. A timeout is a normal answer, and this is the part of it a caller can act on.").optional(),
+  revision: z.number().int().min(0),
+  satisfied: z.boolean(),
+  waitedMs: z.number().int().min(0),
 });

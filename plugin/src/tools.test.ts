@@ -50,3 +50,31 @@ describe("inspection tool schemas", () => {
     expect(tools.desktop_inspect_window.tool.description).toMatch(/action list/i);
   });
 });
+
+describe("typing and editing", () => {
+  it("offers both a paced door and an atomic one", () => {
+    // A10: the legible variant may never be the only way to do something.
+    expect(Object.keys(tools)).toEqual(
+      expect.arrayContaining(["desktop_type_text", "desktop_set_element_value", "desktop_edit_text"]),
+    );
+  });
+
+  it("bounds how much text one call may carry and how fast it may arrive", () => {
+    const typing = schemaOf("desktop_type_text");
+    expect(typing.safeParse({ elementId: "el-1", text: "x".repeat(9000) }).success).toBe(false);
+    expect(typing.safeParse({ elementId: "el-1", text: "hello", wordsPerMinute: 5000 }).success).toBe(false);
+    expect(typing.safeParse({ elementId: "el-1", text: "hello", wordsPerMinute: 70 }).success).toBe(true);
+  });
+
+  it("edits are addressed by text, never by offsets", () => {
+    const editing = schemaOf("desktop_edit_text");
+    expect(editing.safeParse({ elementId: "el-1", start: 3, end: 9 }).success).toBe(false);
+    expect(editing.safeParse({ elementId: "el-1", find: "old words" }).success).toBe(true);
+  });
+
+  it("tells the model that a stopped call is still a result", () => {
+    expect(tools.desktop_type_text.tool.description).toMatch(/progress/i);
+    expect(tools.desktop_type_text.tool.description).toMatch(/read back/i);
+    expect(tools.desktop_edit_text.tool.description).toMatch(/exactly once/i);
+  });
+});

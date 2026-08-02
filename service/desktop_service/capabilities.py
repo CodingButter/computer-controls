@@ -20,12 +20,39 @@ import os
 import shutil
 from typing import Any, Callable
 
+from . import policy
 
-def _detect_session() -> dict[str, Any]:
-    session_type = os.environ.get("XDG_SESSION_TYPE", "") or "unknown"
-    desktop = os.environ.get("XDG_CURRENT_DESKTOP", "") or "unknown"
-    wayland_display = os.environ.get("WAYLAND_DISPLAY", "")
-    display = os.environ.get("DISPLAY", "")
+
+def _detect_session(discover: Callable[[], dict[str, str]] | None = None) -> dict[str, Any]:
+    """Describe the session, preferring our own environment and falling back to
+    the desktop's.
+
+    Our own environment wins when it has an answer: a caller who set `DISPLAY`
+    deliberately is not to be second-guessed. `discover` is only consulted for
+    what is missing, which is the common case for a daemon started from a shell
+    that never belonged to the desktop it drives.
+    """
+
+    borrowed = discover() if discover is not None else {}
+
+    def read(name: str) -> str:
+        return os.environ.get(name, "") or borrowed.get(name, "")
+
+    session_type = read("XDG_SESSION_TYPE") or "unknown"
+    desktop = read("XDG_CURRENT_DESKTOP") or "unknown"
+    wayland_display = read("WAYLAND_DISPLAY")
+    display = read("DISPLAY")
+
+    # `tty` is the one inherited value worth overruling: it is what every shell,
+    # tmux pane and systemd unit carries, and it says nothing about the desktop
+    # being driven. Every other explicit answer stands even when discovery
+    # disagrees with it.
+    if session_type == "tty" and borrowed.get("XDG_SESSION_TYPE"):
+        session_type = borrowed["XDG_SESSION_TYPE"]
+
+    borrowed_desktop = not os.environ.get("XDG_CURRENT_DESKTOP") and bool(
+        borrowed.get("XDG_CURRENT_DESKTOP")
+    )
 
     if session_type == "x11" or (display and not wayland_display):
         display_server = "x11"
@@ -47,7 +74,10 @@ def _detect_session() -> dict[str, Any]:
         "displayServer": display_server,
         "desktopEnvironment": desktop,
         "compositor": compositor,
-        "compositorSource": "inferred from XDG_CURRENT_DESKTOP",
+        "compositorSource": (
+            "inferred from XDG_CURRENT_DESKTOP"
+            + (" borrowed from the session's own processes" if borrowed_desktop else "")
+        ),
         "display": display,
         "waylandDisplay": wayland_display,
     }
@@ -68,11 +98,16 @@ def _raw_input_reason() -> str:
 
 def build_report(
     probe_accessibility: Callable[[], dict[str, Any]],
+    probe_capture: Callable[[], str],
     session_token: str,
     observation_mode: str,
+    discover_session: Callable[[], dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    session = {"token": session_token, **_detect_session()}
+    session = {"token": session_token, **_detect_session(discover_session)}
     accessibility = probe_accessibility()
+    # The empty string means "nothing stands in the way", so availability and its
+    # reason come from one probe and cannot disagree with each other.
+    capture_reason = probe_capture()
 
     tiers = [
         {
@@ -118,9 +153,21 @@ def build_report(
         },
         {
             "id": "vision",
-            "name": "Screen capture, vision and OCR",
-            "available": False,
-            "reason": "out of scope: this build has no screen capture backend at all",
+            "name": "Window capture, vision and OCR",
+            "available": not capture_reason,
+            "reason": capture_reason or None,
+            "detail": {
+                "windowCapture": not capture_reason,
+                "screenCapture": False,
+                "screenCaptureReason": (
+                    "out of scope by design: captures are addressed by window id, so a "
+                    "caller can never ask for the screen and never receive somebody "
+                    "else's window in the frame"
+                ),
+                "ocr": False,
+                "ocrReason": "deferred by scope: no OCR engine is bundled with this build",
+                "blockedApplications": sorted(policy.blocked_applications()),
+            },
         },
         {
             "id": "raw-input",
