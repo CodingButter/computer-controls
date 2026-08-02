@@ -4,10 +4,17 @@ Every claim in the compatibility matrix comes from this module running against a
 live application. Nothing in it is hand-typed, because a hand-typed matrix
 describes the toolkit the author remembers rather than the one installed.
 
-The probe answers five questions per application, and each one is a thing the
+The probe answers six questions per application, and each one is a thing the
 rest of the service depends on: which AT-SPI interfaces it advertises, how deep
 its tree can actually be walked, whether `Collection` filtering works, how many
-actions its frames expose, and whether an editable text field exists to write to.
+actions its frames expose, how many of the elements *inside* those frames expose
+actions, and whether an editable text field exists to write to.
+
+Frames and elements are counted separately because they are different findings
+and were once confused for each other. GTK4 puts an application's whole command
+set on the frame and leaves the tree empty; Qt does the reverse. Measuring only
+the frame reads the second case as an application with nothing to invoke, which
+is a statement about the instrument rather than about the application.
 
 It never fails. An application that answers nothing is a *result* — the honest
 one — and a probe that raised on the difficult applications would only ever
@@ -38,6 +45,14 @@ EDITABLE_ROLES = frozenset(
     {"entry", "text", "password text", "document text", "spin button", "combo box"}
 )
 
+#: How many action-bearing elements are asked for their action *names*. The count
+#: is taken from every node; the names are evidence, and a handful of them says
+#: what kind of surface this is without paying a round trip per action per node.
+MAX_SAMPLED_ACTION_ELEMENTS = 5
+
+#: Upper bound on the distinct `role: action` strings kept as that evidence.
+MAX_SAMPLED_ACTIONS = 8
+
 
 @dataclass
 class ApplicationProbe:
@@ -61,6 +76,15 @@ class ApplicationProbe:
     collection_works: bool = False
     frame_action_count: int = 0
     frame_actions: list[str] = field(default_factory=list)
+    #: Elements *below* the frame that expose at least one action. A toolkit that
+    #: puts nothing on the frame and everything on its widgets reads as zero in
+    #: the field above and as its real surface here.
+    actionable_elements: int = 0
+    #: A bounded sample of `role: action` strings from those elements, so a count
+    #: of them can be checked against what they actually are.
+    element_actions: list[str] = field(default_factory=list)
+    #: Elements asked for their action names so far, bounding the sample's cost.
+    sampled_action_elements: int = 0
     editable_fields: int = 0
     #: Set when the walk stopped early because a call raised or returned nothing.
     notes: list[str] = field(default_factory=list)
@@ -82,9 +106,25 @@ class ApplicationProbe:
             "collectionWorks": self.collection_works,
             "frameActionCount": self.frame_action_count,
             "frameActions": self.frame_actions,
+            "actionableElements": self.actionable_elements,
+            "elementActions": self.element_actions,
             "editableFields": self.editable_fields,
             "notes": self.notes,
         }
+
+
+def _sample_actions(obj: Any, role: str, result: ApplicationProbe) -> None:
+    """Keep a few action names as evidence for the count, and then stop asking."""
+
+    if result.sampled_action_elements >= MAX_SAMPLED_ACTION_ELEMENTS:
+        return
+    result.sampled_action_elements += 1
+    for name in backend.actions_of(obj):
+        described = f"{role or 'node'}: {name}"
+        if described not in result.element_actions:
+            if len(result.element_actions) >= MAX_SAMPLED_ACTIONS:
+                return
+            result.element_actions.append(described)
 
 
 def _walk(root: Any, result: ApplicationProbe) -> None:
@@ -105,6 +145,12 @@ def _walk(root: Any, result: ApplicationProbe) -> None:
         role = backend.role_of(obj)
         if role in EDITABLE_ROLES:
             result.editable_fields += 1
+
+        # The frame is measured separately, by its caller, and counting it here
+        # too would report a GTK4 menu twice under two different names.
+        if depth > 0 and backend.action_count_of(obj) > 0:
+            result.actionable_elements += 1
+            _sample_actions(obj, role, result)
 
         if result.node_count >= MAX_PROBE_NODES:
             result.node_limited = True
