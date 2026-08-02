@@ -71,10 +71,16 @@ class Attention:
         """The deepest walk this connection may ask for.
 
         The flat ceiling exists because a walk from the desktop is unbounded in
-        practice, not because twelve levels is a meaningful number. Once
-        attention names applications the walk starts inside one of them, and the
-        node budget — which is the real cost bound — still applies, so the depth
-        cap can be relaxed without relaxing what it was protecting.
+        practice, not because twelve levels is a meaningful number. Where a walk
+        starts inside a named application the node budget — which is the real
+        cost bound — still applies, so the depth cap can be relaxed without
+        relaxing what it was protecting.
+
+        This answers for the connection. Whether a *particular* walk starts
+        inside one of those applications is a question about a target, which
+        this module cannot see and does not guess at: the caller confirms it
+        with `covers` before spending the deeper budget. Attention subtracts,
+        so a declaration on its own is never enough to be granted more.
         """
         return tree if self.scoped and self.depth == TREE else surface
 
