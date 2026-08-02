@@ -134,6 +134,23 @@ def bus_reachable() -> tuple[bool, str | None]:
     return True, None
 
 
+def _desktop() -> Atspi.Accessible | None:
+    """The one door to the toolkit's root, and the only place that opens it.
+
+    Every route into AT-SPI starts by asking for the desktop, so guarding the
+    question here guards all of them at once. The first version of this guard
+    was put on `probe_desktop` alone, which read as sufficient and was not: the
+    window lookup underneath `typeText` reaches the root by another path, and a
+    bus-less machine still died — several layers below anything that looked like
+    a probe. One door, checked once, is the only shape that stays true when
+    somebody adds a fourth caller.
+    """
+    reachable, _ = bus_reachable()
+    if not reachable:
+        return None
+    return Atspi.get_desktop(0)
+
+
 def probe_desktop() -> dict[str, Any]:
     """Decide whether the accessibility bridge actually works by using it.
 
@@ -144,7 +161,7 @@ def probe_desktop() -> dict[str, Any]:
     if not reachable:
         return {"available": False, "reason": reason}
     try:
-        desktop = Atspi.get_desktop(0)
+        desktop = _desktop()
         if desktop is None:
             return {"available": False, "reason": "Atspi.get_desktop(0) returned None"}
         count = desktop.get_child_count()
@@ -159,7 +176,7 @@ def probe_desktop() -> dict[str, Any]:
 
 
 def _iter_desktop_apps():
-    desktop = Atspi.get_desktop(0)
+    desktop = _desktop()
     if desktop is None:
         return
     for index in range(desktop.get_child_count()):

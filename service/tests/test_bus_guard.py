@@ -83,6 +83,24 @@ def test_probe_desktop_answers_unavailable_without_a_bus():
     assert "'available': False" in done.stdout
 
 
+def test_a_deep_lookup_survives_a_bus_less_machine():
+    """The case the first version of this guard missed.
+
+    Guarding `probe_desktop` looked like enough and was not: a window lookup
+    several layers under `typeText` reaches the toolkit's root by its own path,
+    and that one still aborted. The test is written against the deep call rather
+    than the probe, because the probe was never the one that killed a test run.
+    """
+    done = _in_a_bus_less_process(
+        "from desktop_service.backends import atspi\n"
+        "print('WINDOW', atspi.find_window('win-nothing'))\n"
+        "print('APPS', list(atspi._iter_desktop_apps()))\n"
+    )
+    assert done.returncode == 0, f"a deep lookup still aborts: {done.stderr[-400:]}"
+    assert "WINDOW None" in done.stdout
+    assert "APPS []" in done.stdout
+
+
 def test_the_loop_starts_and_says_why_it_is_empty():
     """A bus-less machine gets a running service that reports itself unavailable.
 
