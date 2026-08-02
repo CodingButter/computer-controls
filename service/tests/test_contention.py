@@ -11,6 +11,7 @@ rule to be quietly skipped.
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 
@@ -54,7 +55,15 @@ def desktop(tmp_path, monkeypatch):
         "text_matches",
         lambda obj, expected, exact: server.atspi.verdict_for(obj.text, expected, exact=exact),
     )
-    monkeypatch.setattr(server.time, "sleep", lambda seconds: None)
+    # Only the paced writer's own waiting is skipped. Patching the module's
+    # `sleep` would silently disarm every test that waits for something real —
+    # a lease running out, most of all — so the cadence is what gets stubbed.
+    monkeypatch.setattr(
+        server.cadence,
+        "plan",
+        lambda text, wpm=0, seed=None: [server.cadence.Keystroke(word, 0.0)
+                                        for word in server.cadence.split_words(text)],
+    )
     monkeypatch.setattr(server, "_snapshot", lambda: state.Snapshot(revision=1, windows={}, values={}))
     monkeypatch.setattr(server, "_element_scope", lambda element_id: ("win-a", "app-a"))
 
@@ -284,3 +293,43 @@ def test_claiming_an_element_that_is_not_there_is_refused_before_it_is_owned(des
         call(built, "claimElement", elementId="el-nowhere", clientId="agent-one", estimatedWorkMs=1_000)
 
     assert holds.holder("el-nowhere") is None
+
+
+def test_a_claim_that_ran_out_is_reported_to_the_client_on_its_next_write(desktop, monkeypatch):
+    """Through the handlers, with nothing looking at the element in between.
+
+    This is the path a client actually takes — claim, go away, come back and
+    write — and it is the one where the lapse has to be noticed, because
+    nothing else on it ever asks about the element.
+    """
+    built, fields, log = desktop
+    # The settling margin is real — an estimate of 1ms still buys a two-second
+    # lease — so it is taken off here rather than waited out twice.
+    monkeypatch.setattr(holds, "CLAIM_MARGIN_MS", 0)
+    call(built, "claimElement", elementId="el-a", clientId="agent-one", estimatedWorkMs=1)
+    time.sleep(0.01)
+
+    with pytest.raises(DesktopError) as lapsed:
+        call(built, "typeText", elementId="el-a", text="carrying on regardless", clientId="agent-one")
+
+    assert lapsed.value.code == ErrorCode.CLAIM_EXPIRED
+    assert "claim the element again" in lapsed.value.detail["remedy"]
+    # The lease it ran out of, not a zero: the report is about an estimate, and
+    # an estimate the caller is not shown is one it cannot correct.
+    assert lapsed.value.detail["leaseMs"] == 1
+    assert fields["el-a"].text == ""
+    assert log.tail()[-1]["errorCode"] == "CLAIM_EXPIRED"
+
+    # Told once. The next write is an ordinary unclaimed write and goes through.
+    assert call(built, "typeText", elementId="el-a", text="starting over", clientId="agent-one")["ok"]
+
+
+def test_a_lapsed_claim_does_not_refuse_the_agent_that_took_the_element_next(desktop, monkeypatch):
+    """The report is about an estimate, not about a conflict: nothing is in the way."""
+    built, _, _ = desktop
+    monkeypatch.setattr(holds, "CLAIM_MARGIN_MS", 0)
+    call(built, "claimElement", elementId="el-a", clientId="agent-one", estimatedWorkMs=1)
+    time.sleep(0.01)
+
+    taken = call(built, "claimElement", elementId="el-a", clientId="agent-two", estimatedWorkMs=5_000)
+    assert taken["claim"]["clientId"] == "agent-two"

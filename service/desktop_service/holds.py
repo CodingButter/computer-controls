@@ -136,11 +136,22 @@ def lease_for(
 _holds: dict[str, Hold] = {}
 #: (client, element) pairs whose claim ran out rather than being given back, so
 #: the client that estimated badly hears about it on its next write instead of
-#: discovering it as a stranger's ELEMENT_HELD later on.
-_expired: dict[tuple[str, str], float] = {}
+#: discovering it as a stranger's ELEMENT_HELD later on. Each remembers when it
+#: lapsed and the lease it lapsed from: telling a caller its estimate was short
+#: without telling it what the estimate bought is a report it cannot act on.
+_expired: dict[tuple[str, str], tuple[float, int]] = {}
 #: Guards `_holds` only. It is never held across a call onto the GLib loop, so
 #: it cannot take part in a deadlock with the thread that owns the toolkit.
 _lock = threading.Lock()
+
+
+#: Elements with a write in flight right now. A lease may not end in the middle
+#: of a write it is covering: an agent that claimed a field and then typed into
+#: it would otherwise be *less* protected than one that never claimed at all,
+#: because a plain write's hold cannot expire and a claim's can. The lease
+#: bounds how long an element may be held between calls, which is what it was
+#: for; it was never meant to interrupt one.
+_writing: set[str] = set()
 
 
 def _live(element_id: str) -> Hold | None:
@@ -155,13 +166,13 @@ def _live(element_id: str) -> Hold | None:
     existing = _holds.get(element_id)
     if existing is None:
         return None
-    if not existing.expired():
+    if not existing.expired() or element_id in _writing:
         return existing
     del _holds[element_id]
     if len(_expired) >= _EXPIRY_LEDGER_MAX:
-        oldest = min(_expired, key=_expired.__getitem__)
+        oldest = min(_expired, key=lambda key: _expired[key][0])
         del _expired[oldest]
-    _expired[(existing.client_id, element_id)] = time.monotonic()
+    _expired[(existing.client_id, element_id)] = (time.monotonic(), existing.lease_ms or 0)
     return None
 
 
@@ -215,14 +226,28 @@ def claim(
         return held
 
 
-def lapsed(element_id: str, client_id: str) -> bool:
-    """Did this client's claim on this element run out rather than end?
+def lapsed(element_id: str, client_id: str) -> int | None:
+    """The lease this client's claim ran out of, or None if it did not run out.
+
+    The lease comes back with the answer because the report is about an
+    estimate: a caller told that its claim lapsed, without being told what it
+    had asked for, cannot tell a lease it underestimated from one it never
+    meant to hold that long.
 
     Asked once, by the write that arrives after it. Reporting it twice would
     turn one bad estimate into a stream of errors about the past.
+
+    The sweep happens here rather than being assumed to have happened already.
+    Expiry is noticed on the way past, and the ordinary path — claim, do some
+    other work, write — goes past nothing in between: without this the question
+    is asked of an empty ledger, answered no, and the lapse is reported one
+    write later or never. A diagnostic that arrives after the thing it was
+    diagnosing is not a diagnostic.
     """
     with _lock:
-        return _expired.pop((client_id, element_id), None) is not None
+        _live(element_id)
+        record = _expired.pop((client_id, element_id), None)
+        return None if record is None else record[1]
 
 
 def acquire(element_id: str, client_id: str, method: str) -> Hold:
@@ -305,15 +330,26 @@ def for_write(method: str, element_id: str, client_id: str) -> Iterator[Hold | N
     if method not in WRITE_METHODS or not element_id:
         yield None
         return
-    if lapsed(element_id, client_id):
-        raise errors.ClaimExpired(element_id)
+    lease_ms = lapsed(element_id, client_id)
+    if lease_ms is not None:
+        raise errors.ClaimExpired(element_id, lease_ms=lease_ms)
     hold = acquire(element_id, client_id, method)
+    with _lock:
+        _writing.add(element_id)
     try:
         yield hold
     finally:
-        # A claim outlives the write that happened inside it. Releasing here
-        # would hand the element to somebody else between two calls the caller
-        # thinks of as one piece of work, which is the whole thing a claim
-        # exists to prevent.
-        if not hold.claimed:
-            release(element_id, holder_id=client_id)
+        with _lock:
+            _writing.discard(element_id)
+            # A claim outlives the write that happened inside it. Releasing here
+            # would hand the element to somebody else between two calls the
+            # caller thinks of as one piece of work, which is the whole thing a
+            # claim exists to prevent.
+            #
+            # And the hold given back is this write's own hold, identity and
+            # all, rather than whatever is on the element belonging to the same
+            # client. The two differ when a client claims an element while its
+            # own earlier write is still in flight: matching on the name alone,
+            # the finishing write frees the claim it never took.
+            if not hold.claimed and _holds.get(element_id) is hold:
+                del _holds[element_id]

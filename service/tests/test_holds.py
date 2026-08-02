@@ -171,10 +171,15 @@ def test_a_lease_that_runs_out_frees_the_element() -> None:
 
 
 def test_the_client_whose_claim_ran_out_is_told_once() -> None:
-    """A bad estimate is a report, not a mystery — and not a stream of them."""
+    """A bad estimate is a report, not a mystery — and not a stream of them.
+
+    Deliberately nothing looks at the element in between. An earlier version of
+    this test asked for the holder first, which is what performed the sweep that
+    noticed the expiry: it proved the report could be produced, not that the
+    write would produce it, and the write did not.
+    """
     holds.claim("el-a", "cl-one", lease_ms=1)
     time.sleep(0.005)
-    assert holds.holder("el-a") is None  # noticed on the way past
 
     with pytest.raises(errors.ClaimExpired) as lapse:
         with holds.for_write("typeText", "el-a", "cl-one"):
@@ -217,3 +222,57 @@ def test_a_lease_nobody_can_outlive_is_refused_by_the_ceiling() -> None:
 
 def test_a_caller_that_says_nothing_about_the_work_gets_the_default() -> None:
     assert holds.lease_for() == holds.DEFAULT_LEASE_MS
+
+
+def test_text_that_takes_longer_to_type_than_any_lease_gets_the_ceiling() -> None:
+    """The boundary the honest-sounding version of this rule falls off.
+
+    A lease cannot cover eighty minutes of typing, so it does not pretend to.
+    What must not happen is the write being interrupted by the shortfall, which
+    is the test below.
+    """
+    slowest = "x" * 4000  # the schema's own maximum, at its slowest cadence
+    assert cadence.estimate_ms(slowest, 10) > holds.MAX_LEASE_MS
+    assert holds.lease_for(for_text=slowest, words_per_minute=10) == holds.MAX_LEASE_MS
+
+
+def test_a_lease_does_not_end_in_the_middle_of_a_write_it_is_covering() -> None:
+    """Otherwise claiming a field makes a long write *less* safe than not claiming.
+
+    A plain write's hold cannot expire. If a claim's could, an agent that
+    claimed a field and then typed a long message into it would be the only
+    caller a second writer could interrupt mid-sentence — the exact opposite of
+    what it asked for.
+    """
+    holds.claim("el-a", "cl-one", lease_ms=10)
+
+    with holds.for_write("typeText", "el-a", "cl-one"):
+        time.sleep(0.05)  # the lease runs out while the write is in flight
+        assert holds.holder("el-a").client_id == "cl-one"
+        with pytest.raises(errors.ElementHeld):
+            holds.claim("el-a", "cl-two", lease_ms=5_000)
+
+
+def test_a_finishing_write_gives_back_its_own_hold_and_not_a_later_claim() -> None:
+    """Same client, two threads: the write must not free the claim it never took."""
+    with holds.for_write("typeText", "el-a", "cl-one") as writing:
+        assert not writing.claimed
+        # The same client claims the element while its own write is in flight.
+        # Re-claiming is allowed; what must not follow is the write's cleanup
+        # releasing it on the way out.
+        holds.claim("el-a", "cl-one", lease_ms=5_000)
+
+    survivor = holds.holder("el-a")
+    assert survivor is not None and survivor.claimed
+
+
+def test_the_expiry_ledger_forgets_the_oldest_rather_than_growing() -> None:
+    """Bounded on purpose: a courtesy that grows without limit is a leak."""
+    for index in range(holds._EXPIRY_LEDGER_MAX + 10):
+        holds.claim(f"el-{index}", "cl-one", lease_ms=1)
+        time.sleep(0.002)
+        holds.holder(f"el-{index}")  # the sweep that notices it lapsed
+
+    assert len(holds._expired) == holds._EXPIRY_LEDGER_MAX
+    assert ("cl-one", "el-0") not in holds._expired
+    assert ("cl-one", f"el-{holds._EXPIRY_LEDGER_MAX + 9}") in holds._expired

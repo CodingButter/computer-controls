@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 95f1232b013c51b0
+// Protocol version: 1.0   schema sha256: bfa45250563894d0
 
 import { z } from "mastracode/plugin";
 

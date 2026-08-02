@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 95f1232b013c51b0
+// Protocol version: 1.0   schema sha256: bfa45250563894d0
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "95f1232b013c51b0" as const;
+export const SCHEMA_DIGEST = "bfa45250563894d0" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -203,7 +203,7 @@ export interface CaptureWindowResult {
   windowId: string;
 }
 
-/** Take exclusive write ownership of one element for a bounded time. Required before any write: an agent may not write to an element it has not claimed. A claimed element cannot be taken by anyone else until it is released or its lease runs out — there is no preemption by a second agent, because the thing being protected is a sentence that is only half typed. The lease is sized by the work rather than by a house number: give estimatedWorkMs, or give the text about to be typed and let the service compute it with the same cadence arithmetic the typing itself uses, so the estimate and the work cannot drift apart. A claim that expires mid-write is the caller having estimated badly, which is a report rather than a mystery. The person at the keyboard is not a client and holds no claim; their arrival still ends any write in the field they touch, and no claim outranks that. (operation class: edit) */
+/** Take exclusive write ownership of one element for a bounded time, across as many calls as the work takes. No write is ever unowned — a write with no claim behind it takes one for its own duration and gives it back — so this is not a step to be added before every typeText. It is what closes the gap between two calls a caller thinks of as one piece of work: read the field, decide, type, check, type again. A claimed element cannot be taken by anyone else until it is released or its lease runs out — there is no preemption by a second agent, because the thing being protected is a sentence that is only half typed. The lease is sized by the work rather than by a house number: give estimatedWorkMs, or give the text about to be typed and let the service compute it with the same cadence arithmetic the typing itself uses, so the estimate and the work cannot drift apart. A lease is capped at ten minutes however long the work is, so work longer than that is claimed again as it goes; and a lease never ends in the middle of a write it is covering, because it exists to bound how long an element is held between calls rather than to interrupt one. A claim that has run out by the time the next write arrives is the caller having estimated badly, which it is told once, by name, rather than discovering later as somebody else's refusal. The person at the keyboard is not a client and holds no claim; their arrival still ends any write in the field they touch, and no claim outranks that. (operation class: edit) */
 export interface ClaimElementParams {
   clientId?: string;
   confirm?: boolean;
