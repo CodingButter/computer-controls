@@ -1,0 +1,17 @@
+{
+  "name": "@codingbutter/desktop-control",
+  "version": "0.1.0",
+  "description": "Semantic desktop control plugin for Mastra Code",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

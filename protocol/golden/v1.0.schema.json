@@ -1,0 +1,428 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CodingButter/computer-controls/protocol/v1.0",
+  "title": "Semantic Desktop Control Protocol",
+  "protocolVersion": "1.0",
+  "description": "The contract between any client and the desktop service. Frozen at 1.0. Additive changes only: new methods and new optional fields. Removing a method, renaming or removing a field, narrowing a type, changing an error code, or adding a required request field is a breaking change and requires a major version.",
+
+  "enums": {
+    "operationClass": {
+      "description": "What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.",
+      "values": {
+        "observe": "Reads desktop state. Changes nothing.",
+        "edit": "Changes a value in place, such as typing into a field.",
+        "activate": "Moves focus or raises a window. Visible to the user, trivially reversible.",
+        "submit": "Triggers an application's own action. Consequences belong to the application.",
+        "destructive": "May discard or overwrite user data, or is not reversible."
+      }
+    },
+    "capabilityTier": {
+      "description": "The complete tier vocabulary, including tiers deliberately not implemented. Declared complete at freeze so deferred backends land as additive fills rather than as a widened enum.",
+      "values": {
+        "app-native": "An application's own automation protocol. Deferred: browser integrations are out of scope for now.",
+        "accessibility": "AT-SPI2 via GObject Introspection. The general backend.",
+        "compositor": "Window management facts from the display server or compositor.",
+        "vision": "Screen capture with OCR or a vision model. Out of scope by design.",
+        "raw-input": "Synthetic pointer and keyboard events. Out of scope by design."
+      }
+    },
+    "observationMode": {
+      "description": "How hard the service watches the desktop. Set by the client; the service reports which mode it is in. See A2 in the amendments: the runtime owns cadence because most events that justify going fast are invisible to the desktop service.",
+      "values": {
+        "active": "Fast reconciliation, short debounce, low latency. For when work is happening.",
+        "idle": "Backed-off reconciliation. Events are still subscribed to and still delivered; only the reconciliation sweep slows down."
+      }
+    },
+    "errorCode": {
+      "description": "The complete domain error vocabulary. Carried in the JSON-RPC error object under data.code.",
+      "values": {
+        "APPLICATION_NOT_FOUND": "No application matches the given id.",
+        "WINDOW_NOT_FOUND": "No window matches the given id.",
+        "ELEMENT_NOT_FOUND": "No element matches the given id in this service instance.",
+        "ELEMENT_REFERENCE_STALE": "The element id is known but no longer describes the same element. Carries what changed and, when the element was re-found, its new id.",
+        "BACKEND_UNAVAILABLE": "The backend that would answer this call is not available in this session.",
+        "ACTION_NOT_SUPPORTED": "The element exists but does not offer the requested action.",
+        "PERMISSION_DENIED": "The caller's granted scope does not include this operation class, or the target application is blocked.",
+        "SESSION_EXPIRED": "The client session's grant has expired and must be renewed. Distinct from PERMISSION_DENIED so a caller can tell 'never allowed' from 'allowed, ask again'.",
+        "TIMEOUT": "The desktop did not answer within the allotted time.",
+        "METHOD_NOT_FOUND": "No such method in this protocol version.",
+        "INVALID_PARAMS": "The request did not satisfy this schema.",
+        "INTERNAL_ERROR": "The service failed in a way that is not the caller's fault."
+      }
+    }
+  },
+
+  "$defs": {
+    "bounds": {
+      "type": "object",
+      "description": "Screen rectangle in pixels. Reported for orientation and for the user's benefit; it is not an addressing mechanism and no method in this protocol accepts coordinates.",
+      "properties": {
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "width": { "type": "integer" },
+        "height": { "type": "integer" }
+      },
+      "required": ["x", "y", "width", "height"],
+      "additionalProperties": false
+    },
+
+    "semanticElement": {
+      "type": "object",
+      "description": "One thing on the desktop, as a caller sees it.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable reference. Valid for the service instance's lifetime. Never reused for a different element.",
+          "pattern": "^(el|win|app)-[0-9a-f]{12}$"
+        },
+        "backend": { "type": "string", "enum": ["atspi", "compositor"] },
+        "role": { "type": "string", "description": "What kind of thing it is, in the backend's vocabulary." },
+        "name": { "type": "string", "description": "Accessible name. Passed through the value-egress point." },
+        "value": { "type": "string", "description": "Current value, for elements that hold one. Passed through the value-egress point." },
+        "states": { "type": "array", "items": { "type": "string" } },
+        "actions": { "type": "array", "items": { "type": "string" }, "description": "Action names invokable on this element. For a window this is often the application's whole command set." },
+        "bounds": { "$ref": "#/$defs/bounds" },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/semanticElement" } },
+        "truncated": { "type": "boolean", "description": "Present and true when children were withheld by a node budget. Never silently omitted." },
+        "extra": {
+          "type": "object",
+          "description": "Backend-specific detail that does not fit the common model, namespaced by backend. Present so richer backends are not flattened to a lowest common denominator.",
+          "additionalProperties": true
+        }
+      },
+      "required": ["id", "backend", "role", "name", "states", "actions"],
+      "additionalProperties": false
+    },
+
+    "capabilityTierReport": {
+      "type": "object",
+      "description": "One tier's availability. An unavailable tier is always reported with a reason, never omitted.",
+      "properties": {
+        "id": { "type": "string", "enum": ["app-native", "accessibility", "compositor", "vision", "raw-input"] },
+        "name": { "type": "string" },
+        "available": { "type": "boolean" },
+        "reason": { "type": ["string", "null"], "description": "Why it is unavailable. Required reading when available is false." },
+        "detail": { "type": "object", "additionalProperties": true }
+      },
+      "required": ["id", "name", "available"],
+      "additionalProperties": false
+    },
+
+    "errorData": {
+      "type": "object",
+      "description": "The data member of a JSON-RPC error. The domain code lives here; the top-level code stays a reserved JSON-RPC number.",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND",
+            "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED",
+            "PERMISSION_DENIED", "SESSION_EXPIRED", "TIMEOUT",
+            "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR"
+          ]
+        },
+        "detail": { "type": "object", "additionalProperties": true }
+      },
+      "required": ["code"],
+      "additionalProperties": false
+    },
+
+    "requestCommon": {
+      "type": "object",
+      "description": "Fields every request may carry. Declared at freeze time so segment 3 adds enforcement without adding a field.",
+      "properties": {
+        "confirm": {
+          "type": "boolean",
+          "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required."
+        },
+        "clientId": {
+          "type": "string",
+          "description": "Which client is asking. Multiple clients share one service instance and one element namespace; this is for audit and scope, not for addressing."
+        }
+      }
+    },
+
+    "responseCommon": {
+      "type": "object",
+      "description": "Fields every response carries so a caller always knows when it was observed and how.",
+      "properties": {
+        "revision": { "type": "integer", "minimum": 0, "description": "The session revision these results were observed at." },
+        "backend": { "type": "string", "description": "Which backend answered." },
+        "fallbacksUsed": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Backends tried before the one that answered. Empty when the preferred backend worked."
+        },
+        "observationMode": { "type": "string", "enum": ["active", "idle"] }
+      }
+    }
+  },
+  "methods": {
+    "hello": {
+      "operationClass": "observe",
+      "summary": "Version handshake. First call on a connection.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "protocolVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+          "clientName": { "type": "string" },
+          "clientId": { "type": "string" }
+        },
+        "required": ["protocolVersion"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "protocolVersion": { "type": "string" },
+          "compatible": { "type": "boolean" },
+          "versionDifference": {
+            "type": "string",
+            "enum": ["none", "minor"],
+            "description": "A minor difference is reported and allowed. A major mismatch fails the call instead of appearing here."
+          },
+          "sessionToken": { "type": "string" },
+          "observationMode": { "type": "string", "enum": ["active", "idle"] }
+        },
+        "required": ["protocolVersion", "compatible", "versionDifference", "sessionToken"],
+        "additionalProperties": false
+      }
+    },
+
+    "getDesktopCapabilities": {
+      "operationClass": "observe",
+      "summary": "What this session can and cannot do, probed rather than assumed.",
+      "params": { "type": "object", "properties": {}, "additionalProperties": false },
+      "result": {
+        "type": "object",
+        "properties": {
+          "session": {
+            "type": "object",
+            "properties": {
+              "token": { "type": "string" },
+              "displayServer": { "type": "string" },
+              "desktopEnvironment": { "type": "string" },
+              "compositor": { "type": "string" },
+              "compositorSource": { "type": "string" },
+              "display": { "type": "string" },
+              "waylandDisplay": { "type": "string" }
+            },
+            "required": ["token", "displayServer"],
+            "additionalProperties": false
+          },
+          "tiers": { "type": "array", "items": { "$ref": "#/$defs/capabilityTierReport" } },
+          "recommendedBackends": { "type": "array", "items": { "type": "string" } },
+          "observationMode": { "type": "string", "enum": ["active", "idle"] }
+        },
+        "required": ["session", "tiers", "recommendedBackends"],
+        "additionalProperties": false
+      }
+    },
+
+    "setObservationMode": {
+      "operationClass": "observe",
+      "summary": "Tell the service how hard to watch. The runtime owns cadence because the events that justify going fast — filesystem changes, transcripts, timers, agent activity — are invisible from here.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "mode": { "type": "string", "enum": ["active", "idle"] },
+          "reconcileIntervalMs": {
+            "type": "integer",
+            "minimum": 100,
+            "description": "How often the reconciliation sweep runs in this mode. The sweep catches what the event stream dropped; it is not how changes are noticed. Idle backs this off, it does not stop subscribing."
+          },
+          "debounceMs": { "type": "integer", "minimum": 0, "description": "Quiet period before a batch of changes is released." },
+          "ceilingMs": { "type": "integer", "minimum": 0, "description": "Hard upper bound on holding a batch, so a continuously busy desktop still reports in." },
+          "clientId": { "type": "string" }
+        },
+        "required": ["mode"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "observationMode": { "type": "string", "enum": ["active", "idle"] },
+          "reconcileIntervalMs": { "type": "integer" },
+          "debounceMs": { "type": "integer" },
+          "ceilingMs": { "type": "integer" },
+          "revision": { "type": "integer" }
+        },
+        "required": ["observationMode", "reconcileIntervalMs", "debounceMs", "ceilingMs", "revision"],
+        "additionalProperties": false
+      }
+    },
+
+    "listApplications": {
+      "operationClass": "observe",
+      "summary": "Applications currently running on the desktop.",
+      "params": { "type": "object", "properties": { "clientId": { "type": "string" } }, "additionalProperties": false },
+      "result": {
+        "type": "object",
+        "properties": {
+          "applications": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "name": { "type": "string" },
+                "pid": { "type": "integer" },
+                "toolkit": {
+                  "type": "object",
+                  "properties": { "name": { "type": "string" }, "version": { "type": "string" } },
+                  "required": ["name", "version"],
+                  "additionalProperties": false
+                },
+                "windowCount": { "type": "integer" }
+              },
+              "required": ["id", "name", "pid", "toolkit"],
+              "additionalProperties": false
+            }
+          },
+          "backend": { "type": "string" },
+          "revision": { "type": "integer" }
+        },
+        "required": ["applications", "backend"],
+        "additionalProperties": false
+      }
+    },
+
+    "listWindows": {
+      "operationClass": "observe",
+      "summary": "Top-level windows, optionally narrowed to one application.",
+      "params": {
+        "type": "object",
+        "properties": { "applicationId": { "type": "string" }, "clientId": { "type": "string" } },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "windows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "applicationId": { "type": "string" },
+                "applicationName": { "type": "string" },
+                "title": { "type": "string" },
+                "role": { "type": "string" },
+                "active": { "type": "boolean" },
+                "states": { "type": "array", "items": { "type": "string" } },
+                "backend": { "type": "string" }
+              },
+              "required": ["id", "applicationId", "title", "role", "active", "states", "backend"],
+              "additionalProperties": false
+            }
+          },
+          "backend": { "type": "string" },
+          "revision": { "type": "integer" }
+        },
+        "required": ["windows", "backend"],
+        "additionalProperties": false
+      }
+    },
+
+    "inspectWindow": {
+      "operationClass": "observe",
+      "summary": "A compact, bounded semantic tree of one window, including the window's own actions.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "windowId": { "type": "string" },
+          "depth": { "type": "integer", "minimum": 1, "maximum": 12 },
+          "maxNodes": { "type": "integer", "minimum": 1, "maximum": 1000 },
+          "includeRoles": { "type": "array", "items": { "type": "string" } },
+          "excludeRoles": { "type": "array", "items": { "type": "string" } },
+          "clientId": { "type": "string" }
+        },
+        "required": ["windowId"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "window": { "$ref": "#/$defs/semanticElement" },
+          "nodeCount": { "type": "integer" },
+          "truncated": { "type": "boolean" },
+          "revision": { "type": "integer" },
+          "backend": { "type": "string" }
+        },
+        "required": ["window", "nodeCount", "truncated", "revision", "backend"],
+        "additionalProperties": false
+      }
+    },
+
+    "queryElements": {
+      "operationClass": "observe",
+      "summary": "Find elements in a window by role, name or state. At least one filter is required.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "windowId": { "type": "string" },
+          "role": { "type": "string" },
+          "name": { "type": "string" },
+          "states": { "type": "array", "items": { "type": "string" } },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 200 },
+          "clientId": { "type": "string" }
+        },
+        "required": ["windowId"],
+        "anyOf": [
+          { "required": ["role"] },
+          { "required": ["name"] },
+          { "required": ["states"] }
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "elements": { "type": "array", "items": { "$ref": "#/$defs/semanticElement" } },
+          "matchCount": { "type": "integer" },
+          "searchTruncated": { "type": "boolean" },
+          "revision": { "type": "integer" },
+          "backend": { "type": "string" }
+        },
+        "required": ["elements", "matchCount", "searchTruncated", "revision", "backend"],
+        "additionalProperties": false
+      }
+    },
+
+    "getElement": {
+      "operationClass": "observe",
+      "summary": "Re-describe one element by id. Raises ELEMENT_REFERENCE_STALE rather than substituting a similar element.",
+      "params": {
+        "type": "object",
+        "properties": { "elementId": { "type": "string" }, "clientId": { "type": "string" } },
+        "required": ["elementId"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "element": { "$ref": "#/$defs/semanticElement" },
+          "revision": { "type": "integer" },
+          "backend": { "type": "string" }
+        },
+        "required": ["element", "revision", "backend"],
+        "additionalProperties": false
+      }
+    },
+
+    "getRevision": {
+      "operationClass": "observe",
+      "summary": "The session's current revision. The addressing unit for deltas and causal attribution.",
+      "params": { "type": "object", "properties": { "clientId": { "type": "string" } }, "additionalProperties": false },
+      "result": {
+        "type": "object",
+        "properties": {
+          "revision": { "type": "integer" },
+          "observationMode": { "type": "string", "enum": ["active", "idle"] }
+        },
+        "required": ["revision"],
+        "additionalProperties": false
+      }
+    }
+  }
+}
