@@ -14,7 +14,7 @@ import threading
 
 import pytest
 
-from desktop_service import audit, holds, security, server, state
+from desktop_service import audit, holds, presence, security, server, state
 from desktop_service.errors import DesktopError, ErrorCode
 
 
@@ -57,6 +57,18 @@ def desktop(tmp_path, monkeypatch):
     monkeypatch.setattr(server.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(server, "_snapshot", lambda: state.Snapshot(revision=1, windows={}, values={}))
     monkeypatch.setattr(server, "_element_scope", lambda element_id: ("win-a", "app-a"))
+
+    # Nobody is at this keyboard, and these fields are in no window a display
+    # server has heard of. Both probes are stubbed because a paced write asks
+    # them between every two words: unstubbed, two writers racing here make
+    # concurrent calls to the real X server and the real registry, and the test
+    # measures that machine's mood rather than this rule. It passes every time
+    # where there is no display to reach, which is exactly why it has to be said
+    # out loud here.
+    monkeypatch.setattr(
+        server, "_presence", presence.Watch(lambda: 90_000, lambda: "no-such-window")
+    )
+    monkeypatch.setattr(server, "_display_window_of", lambda element_id: "")
 
     built = server.build_server(str(tmp_path / "test.sock"))
     for client in ("agent-one", "agent-two"):
