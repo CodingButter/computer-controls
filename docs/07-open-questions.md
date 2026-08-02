@@ -10,37 +10,86 @@ feels better about it.
 
 ---
 
-## Electron applications expose a frame and almost nothing under it
+## Electron applications announce a child and then decline to hand it over
 
-**Applications** — vesktop (Discord), and Electron generally. Measured in
-`05-compatibility-matrix.md`.
+**Applications** — Discord 1.0.151, Visual Studio Code 1.131.0, and Electron
+generally. Measured in `05-compatibility-matrix.md`.
 
-**Symptom** — the application appears on the accessibility bus, answers as a
-`frame`, advertises the `Collection` interface, and then yields about thirty
-nodes for an entire chat client. Its two frame actions are the Chromium
-defaults, `doDefault` and `showContextMenu`, so nothing in the window is
-addressable by meaning. Depth is not the limit: the walk reaches its ceiling on
-a tree that is genuinely that small.
+**Symptom, stated precisely** — the application appears on the accessibility
+bus and answers as a `frame`. The frame reports `child_count = 1`. Asking for
+that child returns nothing:
 
-**Reproduce** — `service/tests/probe_lazy_tree.py`, run from `service/` with
-`PYTHONPATH=.`. It counts a window's nodes, waits three seconds with an
-assistive client attached, and counts again.
+```
+Discord: app advertises 1 children, handed over 1
+   frame advertises 1 handed over 0
+code:    app advertises 1 children, handed over 1
+   frame advertises 1 handed over 0
+gnome-text-editor: app advertises 1 children, handed over 1
+   frame advertises 1 handed over 1
+```
 
-**Hypothesis, tested and rejected** — that Chromium builds its accessibility
-tree lazily once an assistive client announces itself, so the first read is
-early rather than wrong. It does not: vesktop reads 8 nodes at t0 and 8 nodes
-three seconds later, Chrome reads 98 and 98. Whatever the tree is going to be,
-it already is by the time we look.
+This is the whole finding, and it is not the one previously recorded here. The
+tree is not small and it is not absent. The window knows it contains exactly one
+thing — its web contents — and will not produce it. A GTK application asked the
+same question in the same breath hands its child over.
 
-**Hypothesis, current** — this is the embedder's choice, not the engine's.
-Google Chrome and vesktop run the same Chromium and give completely different
-answers: Chrome exposes 277 nodes across its windows with a working `Collection`
-interface, vesktop exposes 30. Chromium's accessibility is opt-in per embedding
-application, and an Electron app that never turns it on presents the empty shell
-of one that did. Visual Studio Code is the sharper version of the same result —
-launched normally, and again with `--force-renderer-accessibility`, it never
-joins the accessibility bus at all. It is not a shallow tree; there is no
-application there to walk.
+**What that rules out.** "Electron never turns accessibility on" does not
+survive it: an application that had turned nothing on would report zero children,
+not one. Something published the count. Whatever holds the page's nodes is not
+answering on the same bus as the thing that counted them.
+
+**Correction to the previous entry.** It claimed Visual Studio Code "never joins
+the accessibility bus at all — there is no application there to walk." That is
+wrong. VS Code is on the bus, as an application with a frame, behaving
+identically to Discord. Withholding a child is not the same as being absent, and
+the difference is the entire question.
+
+**Hypothesis, tested and rejected (1) — lazy construction.** That Chromium
+builds its tree once an assistive client announces itself, so the first read is
+early rather than wrong. Waiting three seconds and walking again grows the tree
+by zero nodes, on both Electron and Chrome
+(`service/tests/probe_lazy_tree.py`).
+
+**Hypothesis, tested and rejected (2) — the session accessibility flag.**
+That Chromium waits for the signal a screen reader sets, and our session has it
+off. Setting `org.a11y.Status` `ScreenReaderEnabled` to true — the exact signal,
+verified to flip both `IsEnabled` and `ScreenReaderEnabled`, and to start Orca —
+and re-walking after thirty seconds moves nothing:
+
+| Application | flag off | flag on, +30s |
+| --- | --- | --- |
+| Google Chrome | 281 nodes | 281 nodes |
+| vesktop 1.6.5 | 30 nodes | 30 nodes |
+| code 1.131.0 | 1 node | 1 node |
+
+Chrome is fully exposed with the flag *off*, which is the load-bearing half:
+whatever Chrome is doing, it is not doing it because an assistive technology
+announced itself.
+
+**Hypothesis, tested and rejected (3) — a launch flag the user can set.**
+`--force-renderer-accessibility` is a declared command-line option in VS Code's
+main bundle, and on Linux it is additionally re-read from user settings. Running
+a throwaway instance with it produces the same two nodes and the same withheld
+child. In Discord's and vesktop's bundles the string does not appear at all,
+alongside no `setAccessibilitySupportEnabled` call — for those two there is no
+switch to fail to find.
+
+**What Chrome does instead** — the same walk on Chrome reaches a `document web`
+node that hands over its child, and 398 nodes of page content below it. Chrome's
+frames are not special; its renderer answers. Two of its three frames yield 5 and
+7 nodes, because they have no page in them.
+
+**Not settled** — why the count is published when the subtree is not. The
+candidate worth measuring next is Electron version and bundled Chromium version:
+vesktop 1.6.5 yielded 30 nodes where official Discord 1.0.151 yields 1, which is
+a 30× difference between two builds of the same product, and is the only variable
+so far that has moved this number at all.
+
+**Tier that picks it up** — the Chromium DevTools Protocol, per the layered
+backend design: for a Chromium-family application the CDP tier addresses the DOM
+directly and does not care what the accessibility bridge was willing to publish.
+That tier is not in this build. Until it is, an Electron window is honestly
+reported as a shallow tree rather than being made to look driveable.
 
 **Tier that picks it up** — the Chromium DevTools Protocol, per the layered
 backend design: for a Chromium-family application the CDP tier addresses the DOM
