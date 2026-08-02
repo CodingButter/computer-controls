@@ -44,6 +44,14 @@ def typing(monkeypatch):
 
     monkeypatch.setattr(server, "_resolve_element", lambda element_id: element)
     monkeypatch.setattr(server.loop, "call_on_loop", lambda work, timeout=None: work())
+    # Typing resolves the window it is writing into before the first word, to
+    # detect a person taking the field mid-sentence. That lookup is a real
+    # toolkit call, reached through the patched call_on_loop above, so a fake
+    # element is not enough on its own to keep this test off the accessibility
+    # bus. Answering "no such window" is the honest fake: it is what a desktop
+    # with nothing to take would say, and it exercises the real
+    # _display_window_of rather than replacing it.
+    monkeypatch.setattr(server.atspi, "find_window", lambda win_id: None)
     monkeypatch.setattr(server.atspi, "is_editable", lambda obj: obj.editable)
     monkeypatch.setattr(server.atspi, "insert_text", lambda obj, chunk, offset=-1: obj.insert(chunk))
     monkeypatch.setattr(server.atspi, "set_text_value", lambda obj, value: (setattr(obj, "text", value), True)[1])
