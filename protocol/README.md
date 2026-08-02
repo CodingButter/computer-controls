@@ -124,6 +124,27 @@ what the event stream dropped. A service that implemented idle mode by walking t
 accessibility tree less often, rather than by sweeping less often, has misunderstood this
 completely and will both cost more and notice less.
 
+## Attention
+
+Attention is what a client is looking at. Permission is what it may touch. They share a
+vocabulary — both talk about applications — and keeping them apart is the whole design.
+
+`setAttention` is **per connection**, keyed by the identity the transport mints rather than by
+any name in the request body, so two agents sharing one service can watch different things and
+neither can adopt the other's view. It declares the whole attention: a field left out takes its
+default, and a call with no fields returns the connection to the whole desktop. An undeclared
+connection attends to everything, which is why nothing that predates this method notices it.
+
+Attention can only **subtract**. The consent ceiling filters first and produces a set attention
+narrows further, so naming a walled-off application stores the name and shows nothing — there
+is no ordering here in which asking reveals whether the application is even running.
+
+Naming applications also lifts the inspection depth ceiling. The flat cap exists because a walk
+that starts at the desktop is unbounded in practice, not because twelve levels means anything;
+a walk that starts inside one named application is bounded by the node budget, which is the
+real cost. That is what makes content sitting below a dozen layers of scaffolding — an editor's
+document text — reachable without drilling to an anchor first.
+
 ## Errors
 
 The top-level JSON-RPC `code` stays a reserved number. The domain code lives in `data.code`,

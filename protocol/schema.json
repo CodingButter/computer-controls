@@ -33,6 +33,13 @@
         "idle": "Backed-off reconciliation. Events are still subscribed to and still delivered; only the reconciliation sweep slows down."
       }
     },
+    "attentionDepth": {
+      "description": "How far into what it is watching a client wants to see. Attention is not permission: it narrows what one connection is shown, inside whatever the consent ceiling already allows. See A11 in the amendments.",
+      "values": {
+        "surface": "The top of each window. The shallow default budget, which is all a client watching the whole desktop can afford.",
+        "tree": "The whole tree under what the client is attending to. Affordable only once attention names applications, because then the walk starts inside one of them rather than at the desktop."
+      }
+    },
     "changeKind": {
       "description": "The complete vocabulary of semantic changes. One engine produces these for both an action's observedEffects and a pushed delta, so a reader learns one vocabulary rather than two.",
       "values": {
@@ -348,6 +355,43 @@
       }
     },
 
+    "setAttention": {
+      "operationClass": "observe",
+      "summary": "Declare what this connection is looking at. Attention is not permission: it narrows what this one client is shown and how deep it may look, always inside what the consent ceiling already allows. It is per connection, so two agents on one service can watch different things. The call declares the whole attention — a field left out takes its default, and a call with no fields returns the connection to the whole desktop.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "applications": {
+            "type": "array",
+            "items": { "type": "string", "maxLength": 128 },
+            "maxItems": 32,
+            "description": "Applications this connection cares about, by id or by name. Empty means the whole desktop, which is what an undeclared connection gets."
+          },
+          "depth": {
+            "type": "string",
+            "enum": ["surface", "tree"],
+            "description": "How far in to look. 'tree' lifts the depth ceiling on inspection, and only means anything once applications are named: the budget is affordable because the walk starts inside one application rather than at the desktop."
+          },
+          "clientId": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "applications": { "type": "array", "items": { "type": "string" } },
+          "depth": { "type": "string", "enum": ["surface", "tree"] },
+          "maxDepth": {
+            "type": "integer",
+            "description": "The depth ceiling now in force for this connection, so a client learns what its declaration bought rather than discovering it by truncation."
+          },
+          "revision": { "type": "integer" }
+        },
+        "required": ["applications", "depth", "maxDepth", "revision"],
+        "additionalProperties": false
+      }
+    },
+
     "listApplications": {
       "operationClass": "observe",
       "summary": "Applications currently running on the desktop.",
@@ -431,7 +475,12 @@
         "type": "object",
         "properties": {
           "windowId": { "type": "string" },
-          "depth": { "type": "integer", "minimum": 1, "maximum": 12 },
+          "depth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 64,
+            "description": "How far below the window's frame to walk. What the service grants depends on the caller's attention: a connection watching the whole desktop is held to the shallow ceiling, one that has named applications may go as deep as it asks. Over-asking is clamped rather than refused, and the truncation marker says so."
+          },
           "maxNodes": { "type": "integer", "minimum": 1, "maximum": 1000 },
           "includeRoles": { "type": "array", "items": { "type": "string" } },
           "excludeRoles": { "type": "array", "items": { "type": "string" } },
@@ -716,8 +765,8 @@
           "depth": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 12,
-            "description": "How far below the anchor to walk. The same bound window inspection uses — drilling changes where a walk starts, never how far it may go."
+            "maximum": 64,
+            "description": "How far below the anchor to walk. The same bound window inspection uses, and the same dependence on attention — drilling changes where a walk starts, never how far it may go."
           },
           "maxNodes": { "type": "integer", "minimum": 1, "maximum": 1000 },
           "includeRoles": { "type": "array", "items": { "type": "string" } },

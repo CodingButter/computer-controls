@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 0ce1d6e9caba87f3
+// Protocol version: 1.0   schema sha256: 6301dcd6aeced49c
 
 import { z } from "mastracode/plugin";
 
@@ -239,7 +239,7 @@ export const helloResult = z.object({
 export const inspectElementParams = z.object({
   clientId: z.string().optional(),
   confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
-  depth: z.number().int().min(1).max(12).describe("How far below the anchor to walk. The same bound window inspection uses — drilling changes where a walk starts, never how far it may go.").optional(),
+  depth: z.number().int().min(1).max(64).describe("How far below the anchor to walk. The same bound window inspection uses, and the same dependence on attention — drilling changes where a walk starts, never how far it may go.").optional(),
   elementId: z.string().describe("Where the walk starts. Must come from an earlier inspection or query: there is no way to drill into something the caller has not already seen and chosen."),
   excludeRoles: z.array(z.string()).optional(),
   includeRoles: z.array(z.string()).optional(),
@@ -256,7 +256,7 @@ export const inspectElementResult = z.object({
 export const inspectWindowParams = z.object({
   clientId: z.string().optional(),
   confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
-  depth: z.number().int().min(1).max(12).optional(),
+  depth: z.number().int().min(1).max(64).describe("How far below the window's frame to walk. What the service grants depends on the caller's attention: a connection watching the whole desktop is held to the shallow ceiling, one that has named applications may go as deep as it asks. Over-asking is clamped rather than refused, and the truncation marker says so.").optional(),
   excludeRoles: z.array(z.string()).optional(),
   includeRoles: z.array(z.string()).optional(),
   maxNodes: z.number().int().min(1).max(1000).optional(),
@@ -372,6 +372,19 @@ export const queryElementsResult = z.object({
   moreResults: z.boolean().describe("More matches exist than were returned — either the search was cut short or the answer hit its limit with tree left unwalked. A caller seeing this should narrow its filter rather than assume it has seen everything.").optional(),
   revision: z.number().int(),
   searchTruncated: z.boolean().describe("The search gave up before covering the window."),
+});
+
+export const setAttentionParams = z.object({
+  applications: z.array(z.string().max(128)).describe("Applications this connection cares about, by id or by name. Empty means the whole desktop, which is what an undeclared connection gets.").optional(),
+  clientId: z.string().optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+  depth: z.enum(["surface", "tree"]).describe("How far in to look. 'tree' lifts the depth ceiling on inspection, and only means anything once applications are named: the budget is affordable because the walk starts inside one application rather than at the desktop.").optional(),
+});
+export const setAttentionResult = z.object({
+  applications: z.array(z.string()),
+  depth: z.enum(["surface", "tree"]),
+  maxDepth: z.number().int().describe("The depth ceiling now in force for this connection, so a client learns what its declaration bought rather than discovering it by truncation."),
+  revision: z.number().int(),
 });
 
 export const setElementValueParams = z.object({

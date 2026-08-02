@@ -20,6 +20,7 @@ from typing import Any
 
 from . import (
     actions,
+    attention,
     audit,
     cadence,
     capabilities,
@@ -139,9 +140,39 @@ def _withheld(rows: list[dict[str, Any]], *keys: str) -> list[dict[str, Any]]:
     return [row for row in rows if ceiling.permits_application(identity(row))]
 
 
-def _method_list_applications(_params: dict[str, Any]) -> dict[str, Any]:
+def _attended(
+    rows: list[dict[str, Any]], want: attention.Attention, *keys: str
+) -> list[dict[str, Any]]:
+    """Drop the rows this connection said it was not looking at.
+
+    Unlike the ceiling above, every way a row names its application counts here:
+    a client narrowing its own view is not drawing a security boundary, so being
+    forgiving about whether it said the id or the name costs nothing. It matches
+    on the same set of keys either way, which is what makes the two filters
+    composable rather than merely adjacent.
+    """
+    if not want.scoped:
+        return rows
+    return [row for row in rows if want.covers(*(row.get(key) or "" for key in keys))]
+
+
+def _visible(params: dict[str, Any], rows: list[dict[str, Any]], *keys: str) -> list[dict[str, Any]]:
+    """Rows this caller may see, then rows this caller asked to see.
+
+    The order is the whole argument. The ceiling runs first and produces a set
+    attention can only shrink, so there is no declaration — including one naming
+    a blocked application outright — that puts a withheld row back. Attention
+    narrows a view; it cannot widen one.
+    """
+    return _attended(_withheld(rows, *keys), attention.of(_client_id(params)), *keys)
+
+
+def _method_list_applications(params: dict[str, Any]) -> dict[str, Any]:
     applications = loop.call_on_loop(atspi.list_applications)
-    return {"applications": _withheld(applications, "name", "id"), "backend": atspi.BACKEND_NAME}
+    return {
+        "applications": _visible(params, applications, "name", "id"),
+        "backend": atspi.BACKEND_NAME,
+    }
 
 
 def _method_list_windows(params: dict[str, Any]) -> dict[str, Any]:
@@ -153,14 +184,28 @@ def _method_list_windows(params: dict[str, Any]) -> dict[str, Any]:
         )
     windows = loop.call_on_loop(atspi.list_windows, application_id)
     return {
-        "windows": _withheld(windows, "applicationName", "applicationId"),
+        "windows": _visible(params, windows, "applicationName", "applicationId"),
         "backend": atspi.BACKEND_NAME,
     }
 
 
 MAX_DEPTH = 12
+
+#: What the cap becomes once a connection has said which applications it is
+#: watching. The shallow number was never a statement about twelve being the
+#: interesting depth — it was the only defence against a walk that starts at the
+#: desktop and does not know where it is going. An attention-scoped walk starts
+#: inside one application, and the node budget below is unchanged, so the real
+#: cost bound still holds while the arbitrary one gets out of the way. This is
+#: what makes a text editor's document buffer — which sits below twelve levels
+#: of scaffolding when counted from the frame — reachable without drilling.
+SCOPED_MAX_DEPTH = 64
 MAX_NODES = 1000
 MAX_QUERY_LIMIT = 200
+
+
+def _depth_ceiling(params: dict[str, Any]) -> int:
+    return attention.of(_client_id(params)).depth_ceiling(MAX_DEPTH, SCOPED_MAX_DEPTH)
 
 
 def _method_inspect_window(params: dict[str, Any]) -> dict[str, Any]:
@@ -168,7 +213,7 @@ def _method_inspect_window(params: dict[str, Any]) -> dict[str, Any]:
     include = params.get("includeRoles")
     exclude = params.get("excludeRoles") or []
     bounds = inspection.Bounds(
-        depth=_int_param(params, "depth", inspection.DEFAULT_DEPTH, MAX_DEPTH),
+        depth=_int_param(params, "depth", inspection.DEFAULT_DEPTH, _depth_ceiling(params)),
         max_nodes=_int_param(params, "maxNodes", inspection.DEFAULT_MAX_NODES, MAX_NODES),
         include_roles=frozenset(include) if include else None,
         exclude_roles=frozenset(exclude),
@@ -256,9 +301,11 @@ def _method_inspect_element(params: dict[str, Any]) -> dict[str, Any]:
 
     Window inspection spends its depth on the path down from the frame, and on real
     applications that path is mostly scaffolding: `gnome-text-editor`'s document buffer
-    sits below the maximum legal depth of 12, so no permitted window inspection can reach
-    it. Raising the cap would make every inspection more expensive to fix a problem about
-    where the walk starts.
+    sits below the shallow maximum depth, so an unscoped window inspection cannot reach it.
+    Raising that cap for everyone would make every inspection more expensive to fix a
+    problem about where the walk starts — which is why the cap moves only for a connection
+    that has said which applications it is watching, and drilling stays available to one
+    that has not.
 
     The anchor is resolved through the registry first, so drilling from a reference whose
     element has been rebuilt raises `ELEMENT_REFERENCE_STALE` — with re-resolution — in
@@ -269,7 +316,7 @@ def _method_inspect_element(params: dict[str, Any]) -> dict[str, Any]:
     include = params.get("includeRoles")
     exclude = params.get("excludeRoles") or []
     bounds = inspection.Bounds(
-        depth=_int_param(params, "depth", inspection.DEFAULT_DEPTH, MAX_DEPTH),
+        depth=_int_param(params, "depth", inspection.DEFAULT_DEPTH, _depth_ceiling(params)),
         max_nodes=_int_param(params, "maxNodes", inspection.DEFAULT_MAX_NODES, MAX_NODES),
         include_roles=frozenset(include) if include else None,
         exclude_roles=frozenset(exclude),
@@ -369,10 +416,10 @@ def _observe() -> tuple[state.Snapshot, list[dict[str, Any]]]:
     watched = _registry.recent(VALUE_WATCH_LIMIT, roles=atspi.TEXT_VALUE_ROLES)
 
     def look():
-        return atspi.list_windows(), atspi.sample_values(watched)
+        return atspi.list_windows(), atspi.sample_values(watched), atspi.owners_of(watched)
 
-    windows, values = loop.call_on_loop(look, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
-    snapshot = state.snapshot_from_windows(_registry.revision, windows, values)
+    windows, values, owners = loop.call_on_loop(look, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
+    snapshot = state.snapshot_from_windows(_registry.revision, windows, values, owners)
     return snapshot, _deltas.observe(snapshot)
 
 
@@ -919,7 +966,12 @@ def _method_get_delta_since(params: dict[str, Any]) -> dict[str, Any]:
     # still recorded the change — its picture of the desktop has to stay whole
     # or the next revision would be computed against a fiction — but a caller
     # who may not see the window does not get told the window moved.
-    delta["changes"] = _withheld(delta.get("changes") or [], "applicationName")
+    # ...and a client watching one application is not told about the others.
+    # That is the same filter, one predicate later: the wall decides what may be
+    # seen, the client decides what it wants of that.
+    delta["changes"] = _visible(
+        params, delta.get("changes") or [], "applicationName", "applicationId"
+    )
     if not delta["complete"]:
         delta["resumeRevision"] = _deltas.resume_revision
     return delta
@@ -928,7 +980,8 @@ def _method_get_delta_since(params: dict[str, Any]) -> dict[str, Any]:
 def _method_get_desktop_state(params: dict[str, Any]) -> dict[str, Any]:
     """The whole current picture — what a caller reads to re-acquire after a gap."""
     snapshot = _snapshot()
-    windows = _withheld(
+    windows = _visible(
+        params,
         [
             {
                 "windowId": window.window_id,
@@ -949,7 +1002,9 @@ def _method_get_desktop_state(params: dict[str, Any]) -> dict[str, Any]:
         # The active window is a window like any other. Naming it while
         # withholding it from the list would answer "is the password manager
         # in front right now". Empty is already this field's word for nothing
-        # holding focus, and from out here the two are indistinguishable.
+        # holding focus, and from out here the two are indistinguishable. To a
+        # client watching one application it reads as "nothing you are watching
+        # is in front", which is the truthful answer to what it asked.
         "activeWindowId": (
             snapshot.active_window if snapshot.active_window in visible else ""
         ),
@@ -1208,6 +1263,41 @@ def _method_set_observation_mode(params: dict[str, Any]) -> dict[str, Any]:
     return {**_session.set_observation_mode(params), "revision": _registry.revision}
 
 
+def _method_set_attention(params: dict[str, Any]) -> dict[str, Any]:
+    """Record what this connection is looking at.
+
+    Deliberately a whole declaration rather than a set of adjustments: a client
+    that sends only `depth` has also said "every application", because a view
+    assembled out of remembered fragments is a view nobody can reason about from
+    either end. Sending nothing therefore returns the connection to the desktop,
+    which is where it started.
+
+    Nothing here is a permission. Naming an application the user walled off
+    stores the name and shows the client nothing, because the ceiling has
+    already removed those rows by the time attention is consulted.
+    """
+    applications = params.get("applications")
+    if applications is not None and not isinstance(applications, list):
+        raise InvalidParams(
+            "'applications' must be an array of names when provided",
+            {"received": type(applications).__name__},
+        )
+    declared = attention.declare(
+        _client_id(params),
+        applications or (),
+        _str_param(params, "depth") or attention.SURFACE,
+    )
+    return {
+        "applications": list(declared.declared),
+        "depth": declared.depth,
+        # What the declaration actually bought. A client that asked to go deep
+        # without naming an application learns here that it did not, instead of
+        # finding out from a truncated tree.
+        "maxDepth": declared.depth_ceiling(MAX_DEPTH, SCOPED_MAX_DEPTH),
+        "revision": _registry.revision,
+    }
+
+
 _PR_SET_PDEATHSIG = 1
 
 
@@ -1435,7 +1525,11 @@ def _absorb_result(record: audit.Record, result: dict[str, Any]) -> None:
 
 
 def build_server(socket_path: str) -> JsonRpcServer:
-    base = JsonRpcServer(socket_path)
+    # Attention dies with the connection that declared it. Identities are never
+    # reused, so a survivor could not be inherited by a later client — it would
+    # just accumulate, one entry per connection, in a process meant to run for
+    # weeks.
+    base = JsonRpcServer(socket_path, on_disconnect=attention.forget)
 
     class _ValidatingServer:
         """Registers every handler behind its schema check."""
@@ -1455,6 +1549,7 @@ def build_server(socket_path: str) -> JsonRpcServer:
     server = _ValidatingServer(base)
     server.register("hello", _session.hello)
     server.register("setObservationMode", _method_set_observation_mode)
+    server.register("setAttention", _method_set_attention)
     server.register("getDesktopCapabilities", _method_capabilities)
     server.register("listApplications", _method_list_applications)
     server.register("listWindows", _method_list_windows)
