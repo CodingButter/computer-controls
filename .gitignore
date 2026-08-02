@@ -11,3 +11,4 @@ __pycache__/
 # Plan copies generated for reading — never committed
 /PLAN-*.md
 .mastracode/*.md
+.playwright-mcp/
