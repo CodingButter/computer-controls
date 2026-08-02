@@ -32,7 +32,7 @@ and the human, where it belongs.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from . import protocol_generated
 from .errors import PermissionDenied, SessionExpired
@@ -159,6 +159,15 @@ class Grant:
 
     classes: frozenset[str] = DEFAULT_CLASSES
     applications: frozenset[str] = frozenset()
+    #: What this client holds *in a particular application*, when the answer is
+    #: not the same everywhere. A task that reads notes from an editor and sends
+    #: them from a browser needs to submit in one of those and never in the
+    #: other; a single class set applied to a list of names cannot say that, and
+    #: quietly hands the editor a permission the task never asked for.
+    #:
+    #: An entry here replaces `classes` for calls against that application rather
+    #: than adding to it, so the narrow answer wins where there is one.
+    per_application: dict[str, frozenset[str]] = field(default_factory=dict)
     granted_at: float = 0.0
     last_used_at: float = 0.0
     #: How long the grant survives *without use*. Idle expiry, not a lifetime:
@@ -170,6 +179,30 @@ class Grant:
 
     def is_expired(self, now: float) -> bool:
         return bool(self.idle_seconds) and (now - self.last_used_at) >= self.idle_seconds
+
+    def hand_in(self, application: str) -> frozenset[str] | None:
+        """What this client holds against `application`, or None if it holds nothing.
+
+        None is a refusal, not an absence of opinion: once a grant names
+        applications individually, the ones it did not name are outside it. A
+        grant that fell back to its general hand for unnamed applications would
+        make the per-application form a suggestion.
+
+        An empty application is the desktop itself rather than a thing inside it
+        — listing windows, asking the revision — and answers from the general
+        hand.
+        """
+        if not application:
+            return self.classes
+        name = application.strip().casefold()
+        for pattern, classes in self.per_application.items():
+            if pattern in name:
+                return classes | DEFAULT_CLASSES
+        if self.per_application:
+            return None
+        if self.applications and not any(allowed in name for allowed in self.applications):
+            return None
+        return self.classes
 
 
 @dataclass(frozen=True)
@@ -236,6 +269,7 @@ class Consent:
         *,
         classes,
         applications=(),
+        per_application: dict[str, object] | None = None,
         seconds: float | None = None,
         reason: str = "",
     ) -> Grant:
@@ -254,7 +288,15 @@ class Consent:
                 method="grantScope",
                 remedy="Clear the stop deliberately; it does not time out on its own.",
             )
-        wanted = frozenset(_normalise(classes))
+        scoped = {
+            str(app).strip().casefold(): frozenset(_normalise(app_classes))
+            for app, app_classes in (per_application or {}).items()
+            if str(app).strip()
+        }
+        # Every class named anywhere in this grant faces the ceiling, including
+        # the ones only named against a single application. A per-application
+        # entry is a narrowing device, never a side door around the ceiling.
+        wanted = frozenset(_normalise(classes)) | frozenset().union(*scoped.values(), frozenset())
         unknown = wanted - set(OPERATION_CLASSES)
         if unknown:
             raise ScopeError(
@@ -272,7 +314,7 @@ class Consent:
                 granted=tuple(sorted(self._ceiling.classes)),
                 remedy=self._ceiling.how_to_raise,
             )
-        apps = frozenset(_normalise(applications))
+        apps = frozenset(_normalise(applications)) | frozenset(scoped)
         refused = {app for app in apps if not self._ceiling.permits_application(app)}
         if refused:
             raise ScopeError(
@@ -283,8 +325,9 @@ class Consent:
         now = self._now()
         window = float(seconds if seconds is not None else self._ceiling.idle_expiry_seconds)
         issued = Grant(
-            classes=wanted | DEFAULT_CLASSES,
+            classes=frozenset(_normalise(classes)) | DEFAULT_CLASSES,
             applications=apps,
+            per_application=scoped,
             granted_at=now,
             last_used_at=now,
             idle_seconds=window,
@@ -354,19 +397,22 @@ class Consent:
                     idle_seconds=idle_for,
                     remedy="Call grantScope. Nothing was revoked in anger — it simply timed out.",
                 )
-        held = grant.classes if grant else DEFAULT_CLASSES
+        # What is held here, rather than what is held in general: a grant can say
+        # different things about different applications, and the question is
+        # always about the one being touched.
+        held = grant.hand_in(application) if grant else DEFAULT_CLASSES
+        if held is None:
+            covers = sorted(grant.per_application) or sorted(grant.applications)
+            return deny(
+                f"This client's grant covers {', '.join(covers)}, not {application!r}."
+            )
 
         if operation_class not in held:
+            where = f" in {application!r}" if application and grant and grant.per_application else ""
             return deny(
                 f"{method} is a {operation_class!r} operation and this client holds "
-                f"{', '.join(sorted(held))}."
+                f"{', '.join(sorted(held))}{where}."
             )
-        if grant and grant.applications and application:
-            name = application.strip().casefold()
-            if not any(allowed in name for allowed in grant.applications):
-                return deny(
-                    f"This client's grant covers {', '.join(sorted(grant.applications))}, not {application!r}."
-                )
         if operation_class in self._ceiling.confirm_classes and not confirmed:
             return deny(
                 f"{method} is a {operation_class!r} operation and needs confirm: true. "

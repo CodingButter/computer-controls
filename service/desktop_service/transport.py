@@ -19,6 +19,7 @@ import stat
 import threading
 from typing import Any, Callable
 
+from . import identity
 from .errors import (
     JSONRPC_INVALID_REQUEST,
     JSONRPC_PARSE_ERROR,
@@ -141,8 +142,11 @@ class JsonRpcServer:
             ).start()
 
     def _serve_connection(self, conn: socket.socket) -> None:
+        # One identity per connection, minted here and held for as long as the
+        # connection lasts. This is the only place it can be assigned honestly:
+        # by the time a request is parsed, everything in it came from the client.
         try:
-            with conn.makefile("rwb") as stream:
+            with identity.bound(identity.mint()), conn.makefile("rwb") as stream:
                 for raw in stream:
                     line = raw.decode("utf-8", errors="replace").strip()
                     if not line:

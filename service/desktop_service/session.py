@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import identity
 from .errors import DesktopError, ErrorCode
 from .protocol_generated import PROTOCOL_VERSION, SCHEMA_DIGEST
 
@@ -58,12 +59,21 @@ class Session:
                     "compatible": False,
                 },
             )
+        # What the client calls itself is recorded as a label. It is not an
+        # identity: the identity below was issued when the connection was
+        # accepted, before anything the client said could influence it.
+        identity.set_label(params.get("clientId") or params.get("clientName"))
         return {
             "protocolVersion": PROTOCOL_VERSION,
             "compatible": True,
             "versionDifference": "none" if requested == PROTOCOL_VERSION else "minor",
             "sessionToken": self.token,
             "observationMode": self.mode,
+            # The name this connection will be known by for grants, audit and
+            # attribution, whatever the client puts in `clientId` afterwards.
+            # Returned so a client can recognise its own actions in a delta
+            # without having to be trusted about who it is.
+            "clientId": identity.current(),
             # The version the running process was built from, not the version on
             # disk. Clients attach to whichever service instance is already
             # listening, so a client generated against a newer schema meets the

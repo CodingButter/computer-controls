@@ -53,6 +53,10 @@ class Record:
     operation_class: str
     client_id: str
     decision: str
+    #: What the client calls itself. A label only: the id above is issued by the
+    #: service, this one is written by the caller, and the two are kept apart so
+    #: that a log reader can tell a claim from a fact.
+    client_label: str = ""
     reason: str = ""
     application: str = ""
     window_id: str = ""
@@ -76,6 +80,7 @@ class Record:
         if self.reason:
             payload["reason"] = self.reason
         for key, value in (
+            ("clientLabel", self.client_label),
             ("application", self.application),
             ("windowId", self.window_id),
             ("elementId", self.element_id),

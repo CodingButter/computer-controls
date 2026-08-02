@@ -25,6 +25,7 @@ from . import (
     capabilities,
     config,
     deltas,
+    identity,
     inspect as inspection,
     policy,
     protocol_generated,
@@ -432,13 +433,20 @@ def _settle_bounds(params: dict[str, Any]) -> dict[str, int]:
 
 
 def _client_id(params: dict[str, Any]) -> str:
-    """Who is asking. Optional in the protocol, load-bearing for attribution.
+    """Who is asking. Load-bearing for grants, audit and attribution.
 
-    A client that does not name itself gets an empty id, which is a real identity here
-    rather than a missing one: two anonymous clients are indistinguishable and will see
-    each other's actions as their own. That is a consequence of not identifying yourself,
-    not a defect in the engine.
+    The connection's issued identity wins whenever there is one, and over a socket
+    there always is: a `clientId` in the params is a name the caller wrote for
+    itself, and a name a caller can write for itself is a name it can write for
+    somebody else. It survives only as a label.
+
+    The fallback to the params is not a hole, because it is unreachable from
+    outside: it exists for in-process callers and tests, which drive the handlers
+    directly and have no connection to be identified by.
     """
+    issued = identity.current()
+    if issued:
+        return issued
     value = params.get("clientId")
     return str(value) if isinstance(value, str) else ""
 
@@ -1357,12 +1365,13 @@ def _guarded(method: str, handler):
         # field may be missing, of the wrong type, or hostile. Anything that is
         # not the shape we expect is treated as absent, which fails towards
         # refusing rather than towards allowing.
-        client_id = _text(params.get("clientId"))
+        client_id = _client_id(params)
         application = _application_of(params) if _needs_application(operation_class) else ""
         record = audit.Record(
             method=method,
             operation_class=operation_class,
             client_id=client_id,
+            client_label=identity.current_label() or identity.label_of(params.get("clientId")),
             decision="allowed",
             application=application,
             window_id=_text(params.get("windowId")),

@@ -307,3 +307,151 @@ def test_an_existing_file_is_named_as_something_to_widen():
 
     remedy = denial.value.detail["remedy"]
     assert "Widen" in remedy and "does not exist" not in remedy
+
+
+class TestPermissionsPerApplication:
+    """The shape a real task needs: read here, send there, and never the reverse.
+
+    Take the notes out of an editor and send them from a browser. Sending is the
+    one irreversible act in that sentence and it belongs to exactly one of those
+    two applications. A grant that names a class set and a list of applications
+    cannot say so, and hands the editor a permission the task never asked for.
+    """
+
+    def consent(self):
+        return security.Consent(
+            security.Ceiling(classes=frozenset({"observe", "edit", "activate", "submit"}))
+        )
+
+    def dispatch(self, consent):
+        return consent.grant(
+            "the-facebook-agent",
+            classes=["observe"],
+            per_application={
+                "gnome-text-editor": ["observe"],
+                "chrome": ["observe", "edit", "submit"],
+            },
+            reason="take the notes from the editor and send them from the browser",
+        )
+
+    def test_it_may_send_from_the_application_the_task_sends_from(self):
+        consent = self.consent()
+        self.dispatch(consent)
+        decision = consent.decide(
+            method="invokeElement",
+            operation_class="submit",
+            client_id="the-facebook-agent",
+            application="chrome",
+            confirmed=True,
+        )
+        assert decision.allowed
+
+    def test_it_may_not_send_from_the_application_it_only_reads(self):
+        """The bug this whole class exists for."""
+        consent = self.consent()
+        self.dispatch(consent)
+        decision = consent.decide(
+            method="invokeElement",
+            operation_class="submit",
+            client_id="the-facebook-agent",
+            application="gnome-text-editor",
+            confirmed=True,
+        )
+        assert not decision.allowed
+        assert "gnome-text-editor" in decision.reason
+
+    def test_it_may_not_type_into_the_application_it_only_reads(self):
+        consent = self.consent()
+        self.dispatch(consent)
+        decision = consent.decide(
+            method="typeText",
+            operation_class="edit",
+            client_id="the-facebook-agent",
+            application="gnome-text-editor",
+        )
+        assert not decision.allowed
+
+    def test_it_may_read_both(self):
+        consent = self.consent()
+        self.dispatch(consent)
+        for application in ("gnome-text-editor", "chrome"):
+            assert consent.decide(
+                method="getElement",
+                operation_class="observe",
+                client_id="the-facebook-agent",
+                application=application,
+            ).allowed
+
+    def test_an_application_the_task_never_mentioned_is_outside_the_grant(self):
+        """Naming applications individually makes the unnamed ones refusals."""
+        consent = self.consent()
+        self.dispatch(consent)
+        decision = consent.decide(
+            method="getElement",
+            operation_class="observe",
+            client_id="the-facebook-agent",
+            application="vesktop",
+        )
+        assert not decision.allowed
+
+    def test_a_per_application_entry_cannot_reach_past_the_ceiling(self):
+        """Otherwise it would be a side door rather than a narrowing device."""
+        consent = security.Consent(security.Ceiling(classes=frozenset({"observe", "edit"})))
+        with pytest.raises(security.ScopeError):
+            consent.grant(
+                "sneaky",
+                classes=["observe"],
+                per_application={"chrome": ["submit"]},
+            )
+
+    def test_the_reason_it_was_granted_is_kept(self):
+        """A manager's justification, readable months later in the audit log."""
+        consent = self.consent()
+        grant = self.dispatch(consent)
+        assert "send them from the browser" in grant.reason
+
+    def test_the_old_shape_still_means_what_it_meant(self):
+        """Existing callers grant one hand across a list of applications."""
+        consent = self.consent()
+        consent.grant("plain", classes=["observe", "edit"], applications=["chrome"])
+        assert consent.decide(
+            method="typeText", operation_class="edit", client_id="plain", application="chrome"
+        ).allowed
+        assert not consent.decide(
+            method="typeText", operation_class="edit", client_id="plain", application="vesktop"
+        ).allowed
+
+    def test_a_grant_built_directly_still_refuses_what_it_did_not_name(self):
+        """The rule has to live in the grant, not only in how grants are issued.
+
+        `grant()` folds the per-application names into the application list, so
+        the two mechanisms agree and either one would refuse an unnamed
+        application. That agreement is exactly what hides a broken rule — a
+        grant assembled any other way has only this one.
+        """
+        grant = security.Grant(
+            classes=frozenset({"observe", "submit"}),
+            per_application={"chrome": frozenset({"observe"})},
+        )
+        assert grant.hand_in("chrome") == frozenset({"observe"})
+        assert grant.hand_in("vesktop") is None
+
+    def test_naming_a_blocked_application_per_application_is_refused_when_asked_for(self):
+        """At the moment of asking, not only at the moment of using.
+
+        Using it would be refused anyway — the ceiling is checked on every call.
+        But a grant that appears to have been issued and then refuses everything
+        it covers is a grant somebody debugs for an hour.
+        """
+        consent = security.Consent(
+            security.Ceiling(
+                classes=frozenset({"observe", "edit", "submit"}),
+                blocked_applications=frozenset({"keepassxc"}),
+            )
+        )
+        with pytest.raises(security.ScopeError):
+            consent.grant(
+                "hopeful",
+                classes=["observe"],
+                per_application={"keepassxc": ["observe", "edit"]},
+            )

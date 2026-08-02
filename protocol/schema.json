@@ -270,6 +270,10 @@
             "description": "A minor difference is reported and allowed. A major mismatch fails the call instead of appearing here."
           },
           "sessionToken": { "type": "string" },
+          "clientId": {
+            "type": "string",
+            "description": "The identity this connection will be known by, issued by the service when the connection was accepted rather than taken from anything the client said. Grants, audit records and change attribution all key off it, so a client that wants to recognise its own actions in a delta should remember this and stop naming itself. A `clientId` sent in any request is kept only as a label. Absent from an older service, which still trusts the caller's own name."
+          },
           "observationMode": { "type": "string", "enum": ["active", "idle"] },
           "schemaDigest": {
             "type": "string",

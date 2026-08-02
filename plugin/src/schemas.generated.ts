@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: ec17f85647e0ef4f
+// Protocol version: 1.0   schema sha256: 0ce1d6e9caba87f3
 
 import { z } from "mastracode/plugin";
 
@@ -227,6 +227,7 @@ export const helloParams = z.object({
   protocolVersion: z.string().regex(/^[0-9]+\.[0-9]+$/),
 });
 export const helloResult = z.object({
+  clientId: z.string().describe("The identity this connection will be known by, issued by the service when the connection was accepted rather than taken from anything the client said. Grants, audit records and change attribution all key off it, so a client that wants to recognise its own actions in a delta should remember this and stop naming itself. A `clientId` sent in any request is kept only as a label. Absent from an older service, which still trusts the caller's own name.").optional(),
   compatible: z.boolean(),
   observationMode: z.enum(["active", "idle"]).optional(),
   protocolVersion: z.string(),

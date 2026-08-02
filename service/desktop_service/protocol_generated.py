@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: ec17f85647e0ef4f
+# Protocol version: 1.0   schema sha256: 0ce1d6e9caba87f3
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "ec17f85647e0ef4f"
+SCHEMA_DIGEST: Final = "0ce1d6e9caba87f3"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -1124,6 +1124,10 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
     "hello": {
         "additionalProperties": False,
         "properties": {
+            "clientId": {
+                "description": "The identity this connection will be known by, issued by the service when the connection was accepted rather than taken from anything the client said. Grants, audit records and change attribution all key off it, so a client that wants to recognise its own actions in a delta should remember this and stop naming itself. A `clientId` sent in any request is kept only as a label. Absent from an older service, which still trusts the caller's own name.",
+                "type": "string",
+            },
             "compatible": {
                 "type": "boolean",
             },
