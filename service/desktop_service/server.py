@@ -225,6 +225,14 @@ def _depth_ceiling(params: dict[str, Any]) -> int:
     the deep budget. An undeclared connection is capped at the shallow ceiling
     whatever it names, so the lookup would be a per-call tax on a question
     already answered.
+
+    On a desktop whose consent ceiling names applications, `_guarded` has
+    already resolved the same target for the permission check, so this is a
+    second identical lookup on that one path. Measured at 1.3ms median against
+    a deep walk that costs upwards of 400ms, which is not worth threading a
+    resolved name through the guard seam to avoid — but it is a round trip on
+    the single thread every client shares, so it is worth knowing it is here
+    before adding a third.
     """
     focus = attention.of(_client_id(params))
     ceiling = focus.depth_ceiling(MAX_DEPTH, SCOPED_MAX_DEPTH)
