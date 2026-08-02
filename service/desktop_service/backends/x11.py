@@ -29,6 +29,7 @@ import ctypes
 import ctypes.util
 import os
 from dataclasses import dataclass
+from typing import Any
 
 BACKEND = "x11"
 
@@ -351,3 +352,99 @@ def activate(xid: int) -> bool:
     )
     xlib.lib.XFlush(xlib.display)
     return bool(sent)
+
+
+class _ScreenSaverInfo(ctypes.Structure):
+    _fields_ = [
+        ("window", ctypes.c_ulong),
+        ("state", ctypes.c_int),
+        ("kind", ctypes.c_int),
+        ("til_or_since", ctypes.c_ulong),
+        ("idle", ctypes.c_ulong),
+        ("event_mask", ctypes.c_ulong),
+    ]
+
+
+_xss: Any = None
+_xss_info: Any = None
+_xss_reason = ""
+
+
+def _screensaver() -> Any:
+    """The MIT-SCREEN-SAVER extension, bound once, or None with a reason kept.
+
+    Bound separately from libX11 because it is an extension: a display server can be
+    perfectly healthy and still not offer it, and that is a fact about the session
+    rather than a failure of this backend.
+    """
+    global _xss, _xss_info, _xss_reason
+    if _xss is not None or _xss_reason:
+        return _xss
+    xlib = _connect()
+    if xlib is None:
+        _xss_reason = unavailable_reason()
+        return None
+    library = ctypes.util.find_library("Xss")
+    if library is None:
+        _xss_reason = "libXss not found"
+        return None
+    try:
+        lib = ctypes.CDLL(library)
+        lib.XScreenSaverQueryExtension.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+        ]
+        event_base = ctypes.c_int()
+        error_base = ctypes.c_int()
+        if not lib.XScreenSaverQueryExtension(
+            xlib.display, ctypes.byref(event_base), ctypes.byref(error_base)
+        ):
+            _xss_reason = "this display server does not offer MIT-SCREEN-SAVER"
+            return None
+        lib.XScreenSaverAllocInfo.restype = ctypes.POINTER(_ScreenSaverInfo)
+        lib.XScreenSaverQueryInfo.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            ctypes.POINTER(_ScreenSaverInfo),
+        ]
+        _xss_info = lib.XScreenSaverAllocInfo()
+        if not _xss_info:
+            _xss_reason = "the screen saver extension would not allocate"
+            return None
+        _xss = lib
+        return _xss
+    except Exception as exc:  # a broken extension is a missing one, told honestly
+        _xss_reason = str(exc)
+        return None
+
+
+def idle_ms() -> int | None:
+    """Milliseconds since the last input the display server saw. None when it cannot say.
+
+    This is the whole presence mechanism, and its shape is the point: the X server will
+    tell us *when* input last happened and nothing whatsoever about what it was. No key,
+    no button, no window it went to. That is the difference between a clock and a
+    keylogger, and it is why presence can be read continuously without the service ever
+    becoming something a person would want turned off.
+
+    It is also why presence alone decides nothing. Any input resets this counter —
+    a keystroke, a click, a mouse nudge on the way past — so the number says a human is
+    *at* the machine, never that they are reaching for the field we are writing in. The
+    destination carries that test; this only bounds it in time.
+    """
+    lib = _screensaver()
+    if lib is None:
+        return None
+    xlib = _connect()
+    if xlib is None:
+        return None
+    if not lib.XScreenSaverQueryInfo(xlib.display, xlib.root, _xss_info):
+        return None
+    return int(_xss_info.contents.idle)
+
+
+def presence_unavailable_reason() -> str:
+    """Why idle time cannot be read here, for a capability report to quote."""
+    _screensaver()
+    return _xss_reason
