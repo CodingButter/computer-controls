@@ -101,6 +101,64 @@ def test_a_deep_lookup_survives_a_bus_less_machine():
     assert "APPS []" in done.stdout
 
 
+def test_watching_events_on_a_bus_less_machine_watches_nothing():
+    """Registering a listener connects, and connecting is what aborts.
+
+    The third route in, and the one that asks for no desktop at all — which is
+    why funnelling the desktop lookups did not cover it.
+    """
+    done = _in_a_bus_less_process(
+        "from desktop_service.backends import atspi\n"
+        "stop = atspi.watch_events(lambda: None)\n"
+        "print('SUBSCRIBED')\n"
+        "stop()\n"
+        "print('UNSUBSCRIBED')\n"
+    )
+    assert done.returncode == 0, f"watching events still aborts: {done.stderr[-400:]}"
+    assert "SUBSCRIBED" in done.stdout
+    assert "UNSUBSCRIBED" in done.stdout
+
+
+def test_a_yes_is_not_re_asked_on_every_call():
+    """The guard sits on hot paths. A round trip per call would be a tax on all of them."""
+    from desktop_service.backends import atspi
+
+    atspi.forget_bus_answer()
+    calls = {"n": 0}
+    real = atspi._ask_the_bus
+
+    def counted():
+        calls["n"] += 1
+        return real()
+
+    atspi._ask_the_bus = counted
+    try:
+        for _ in range(50):
+            atspi.bus_reachable()
+    finally:
+        atspi._ask_the_bus = real
+        atspi.forget_bus_answer()
+
+    assert calls["n"] == 1, f"the bus was asked {calls['n']} times for one answer"
+
+
+def test_a_no_is_re_asked_so_a_late_desktop_is_noticed():
+    """A desktop that starts after the service did should not need a restart."""
+    from desktop_service.backends import atspi
+
+    atspi.forget_bus_answer()
+    answers = iter([(False, "not yet"), (True, None)])
+    real = atspi._ask_the_bus
+    atspi._ask_the_bus = lambda: next(answers)
+    try:
+        assert atspi.bus_reachable() == (False, "not yet")
+        atspi._bus_asked_at -= atspi.BUS_RETRY_SECONDS + 1
+        assert atspi.bus_reachable() == (True, None)
+    finally:
+        atspi._ask_the_bus = real
+        atspi.forget_bus_answer()
+
+
 def test_the_loop_starts_and_says_why_it_is_empty():
     """A bus-less machine gets a running service that reports itself unavailable.
 

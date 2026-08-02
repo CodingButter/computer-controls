@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from typing import Any, Callable, Sequence
 
 import gi
@@ -36,6 +37,23 @@ BACKEND_NAME = "atspi"
 # Short on purpose: this runs before anything else can, and a machine that cannot
 # answer in three seconds is a machine we are going to report as unavailable.
 BUS_PROBE_TIMEOUT_MS = 3000
+
+# How long a "no bus" answer stands before it is asked again. A desktop that
+# starts after this service did is a normal thing to happen and should not need a
+# restart to be noticed; a bus-less machine should not pay a D-Bus round trip per
+# call to be told the same thing.
+BUS_RETRY_SECONDS = 5.0
+
+#: The remembered answer. `None` means nobody has asked yet.
+_bus_ok: bool | None = None
+_bus_reason: str | None = None
+_bus_asked_at: float = 0.0
+
+
+def forget_bus_answer() -> None:
+    """Drop the cached reachability answer. For tests, and for a deliberate recheck."""
+    global _bus_ok, _bus_reason, _bus_asked_at
+    _bus_ok, _bus_reason, _bus_asked_at = None, None, 0.0
 
 # Roles whose text content is worth carrying. Everything else reports no value
 # rather than a truncated slab of document.
@@ -110,7 +128,27 @@ def bus_reachable() -> tuple[bool, str | None]:
     The same question asked over plain D-Bus fails politely: `Gio` raises
     `GLib.Error` and the process survives. So the rule is that nothing calls into
     `Atspi` until this has answered yes.
+
+    A yes is remembered for the life of the process. The abort happens when the
+    bridge first *connects*; once it has, a bus that later goes away surfaces as
+    ordinary D-Bus errors that `_safe` already absorbs. Re-asking would put a
+    blocking round trip on the one thread every client's calls are marshalled
+    onto — a third of a millisecond each, on tree walks that make thousands.
+    A no is remembered only briefly, because a desktop that comes up after the
+    service did should be picked up without a restart.
     """
+    global _bus_ok, _bus_reason, _bus_asked_at
+    now = time.monotonic()
+    if _bus_ok is True:
+        return True, None
+    if _bus_ok is False and (now - _bus_asked_at) < BUS_RETRY_SECONDS:
+        return False, _bus_reason
+    ok, reason = _ask_the_bus()
+    _bus_ok, _bus_reason, _bus_asked_at = ok, reason, now
+    return ok, reason
+
+
+def _ask_the_bus() -> tuple[bool, str | None]:
     try:
         bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         reply = bus.call_sync(
@@ -1022,6 +1060,15 @@ def watch_events(on_hint: Callable[[], None]) -> Callable[[], None]:
             log.exception("desktop event hint failed")
 
     mine: list[tuple[Atspi.EventListener, str]] = []
+    # Registering a listener connects to the bridge, and connecting to a bridge
+    # that is not there aborts the process — the same way a desktop lookup does,
+    # by a route that never asks for the desktop. Watching nothing is the honest
+    # answer on a machine with no bus: the reconciliation sweep still runs, and
+    # `getDeltaSince` still reports whatever a re-read finds.
+    reachable, reason = bus_reachable()
+    if not reachable:
+        log.warning("not watching desktop events: %s", reason)
+        return lambda: None
     for name in WATCHED_EVENTS:
         listener = Atspi.EventListener.new(deliver)
         if listener.register(name):
