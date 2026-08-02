@@ -23,7 +23,7 @@ import gi
 
 gi.require_version("Atspi", "2.0")
 
-from gi.repository import Atspi  # noqa: E402  (must follow require_version)
+from gi.repository import Atspi, Gio, GLib  # noqa: E402  (must follow require_version)
 
 from .. import model, registry  # noqa: E402
 from . import x11  # noqa: E402
@@ -31,6 +31,11 @@ from . import x11  # noqa: E402
 log = logging.getLogger(__name__)
 
 BACKEND_NAME = "atspi"
+
+# How long to wait for the session bus to say whether an accessibility bus exists.
+# Short on purpose: this runs before anything else can, and a machine that cannot
+# answer in three seconds is a machine we are going to report as unavailable.
+BUS_PROBE_TIMEOUT_MS = 3000
 
 # Roles whose text content is worth carrying. Everything else reports no value
 # rather than a truncated slab of document.
@@ -92,12 +97,52 @@ def _safe(fn, default=None):
         return default
 
 
+def bus_reachable() -> tuple[bool, str | None]:
+    """Ask the session bus whether an accessibility bus exists, without touching Atspi.
+
+    This has to exist because of how `Atspi` fails. When there is no accessibility
+    bus to connect to, `Atspi.get_desktop(0)` does not raise — it emits a
+    `dbind-ERROR` through `g_error`, and `g_error` calls `abort()`. There is no
+    Python exception to catch: the whole process dies with a core dump, taking
+    every other client of a shared daemon with it. An `except Exception` around
+    that call is decorative, and we shipped one for months.
+
+    The same question asked over plain D-Bus fails politely: `Gio` raises
+    `GLib.Error` and the process survives. So the rule is that nothing calls into
+    `Atspi` until this has answered yes.
+    """
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        reply = bus.call_sync(
+            "org.a11y.Bus",
+            "/org/a11y/bus",
+            "org.a11y.Bus",
+            "GetAddress",
+            None,
+            GLib.VariantType("(s)"),
+            Gio.DBusCallFlags.NONE,
+            BUS_PROBE_TIMEOUT_MS,
+            None,
+        )
+    except GLib.Error as exc:
+        return False, f"no accessibility bus: {exc.message}"
+    except Exception as exc:  # noqa: BLE001 - a broken session bus is not our bug
+        return False, f"no accessibility bus: {type(exc).__name__}: {exc}"
+    address = reply.unpack()[0]
+    if not address:
+        return False, "the session bus answered with an empty accessibility bus address"
+    return True, None
+
+
 def probe_desktop() -> dict[str, Any]:
     """Decide whether the accessibility bridge actually works by using it.
 
     The `toolkit-accessibility` gsetting reads `false` on this machine while the
     bridge is fully functional, so it is not consulted anywhere.
     """
+    reachable, reason = bus_reachable()
+    if not reachable:
+        return {"available": False, "reason": reason}
     try:
         desktop = Atspi.get_desktop(0)
         if desktop is None:
