@@ -193,21 +193,40 @@ def _method_list_windows(params: dict[str, Any]) -> dict[str, Any]:
 
 MAX_DEPTH = 12
 
-#: What the cap becomes once a connection has said which applications it is
-#: watching. The shallow number was never a statement about twelve being the
-#: interesting depth — it was the only defence against a walk that starts at the
-#: desktop and does not know where it is going. An attention-scoped walk starts
-#: inside one application, and the node budget below is unchanged, so the real
-#: cost bound still holds while the arbitrary one gets out of the way. This is
-#: what makes a text editor's document buffer — which sits below twelve levels
-#: of scaffolding when counted from the frame — reachable without drilling.
+#: What the cap becomes for a walk *into* one of the applications a connection
+#: has said it is watching. The shallow number was never a statement about
+#: twelve being the interesting depth — it was the only defence against a walk
+#: that starts somewhere large and does not know where it is going. A walk
+#: inside one named application is small in a way the desktop's is not, and the
+#: node budget below is unchanged, so the real cost bound still holds while the
+#: arbitrary one gets out of the way. This is what makes a text editor's
+#: document buffer — which sits below twelve levels of scaffolding when counted
+#: from the frame — reachable without drilling. A scoped connection inspecting
+#: something it did not name is outside that argument and gets the flat cap.
 SCOPED_MAX_DEPTH = 64
 MAX_NODES = 1000
 MAX_QUERY_LIMIT = 200
 
 
 def _depth_ceiling(params: dict[str, Any]) -> int:
-    return attention.of(_client_id(params)).depth_ceiling(MAX_DEPTH, SCOPED_MAX_DEPTH)
+    """The deepest walk this call may ask for — the connection's budget, spent on its own target.
+
+    Attention buys the lift, but the argument for it is about where the walk
+    starts: the tree under one named application is small in a way the desktop's
+    is not. A connection watching an editor that inspects a browser window is
+    outside that argument, so it gets the flat cap. Clamped rather than refused,
+    like every other over-large bound here: a shallower tree marked `truncated`
+    tells the caller more than an error does.
+
+    The target is resolved only when the lift is actually in play. An unscoped
+    connection, or a scoped one asking for a surface walk, pays nothing — the
+    same reason `_application_of` resolves lazily for the consent ceiling.
+    """
+    want = attention.of(_client_id(params))
+    lifted = want.depth_ceiling(MAX_DEPTH, SCOPED_MAX_DEPTH)
+    if lifted == MAX_DEPTH:
+        return MAX_DEPTH
+    return lifted if want.covers(_application_of(params)) else MAX_DEPTH
 
 
 def _method_inspect_window(params: dict[str, Any]) -> dict[str, Any]:
@@ -305,9 +324,9 @@ def _method_inspect_element(params: dict[str, Any]) -> dict[str, Any]:
     applications that path is mostly scaffolding: `gnome-text-editor`'s document buffer
     sits below the shallow maximum depth, so an unscoped window inspection cannot reach it.
     Raising that cap for everyone would make every inspection more expensive to fix a
-    problem about where the walk starts — which is why the cap moves only for a connection
-    that has said which applications it is watching, and drilling stays available to one
-    that has not.
+    problem about where the walk starts — which is why the cap moves only for a walk into an
+    application the connection has said it is watching, and drilling stays available to every
+    walk that is not.
 
     The anchor is resolved through the registry first, so drilling from a reference whose
     element has been rebuilt raises `ELEMENT_REFERENCE_STALE` — with re-resolution — in
@@ -1427,9 +1446,11 @@ def _method_set_attention(params: dict[str, Any]) -> dict[str, Any]:
     return {
         "applications": list(declared.declared),
         "depth": declared.depth,
-        # What the declaration actually bought. A client that asked to go deep
-        # without naming an application learns here that it did not, instead of
-        # finding out from a truncated tree.
+        # What the declaration actually bought, inside the applications it
+        # names. A client that asked to go deep without naming an application
+        # learns here that it did not, instead of finding out from a truncated
+        # tree; a client that named some learns the ceiling it gets when it
+        # inspects one of them, which is not what it gets anywhere else.
         "maxDepth": declared.depth_ceiling(MAX_DEPTH, SCOPED_MAX_DEPTH),
         "revision": _registry.revision,
     }

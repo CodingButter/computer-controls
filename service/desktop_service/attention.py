@@ -25,9 +25,10 @@ import threading
 from dataclasses import dataclass, field
 
 #: Look at the top of what you are watching, or all the way down it. The deep
-#: budget is only affordable once applications are named — the tree under one
+#: budget is only affordable inside a named application — the tree under one
 #: application is small in a way the tree under the desktop is not — so `tree`
-#: without a scope is a declaration of intent that buys nothing yet.
+#: without a scope is a declaration of intent that buys nothing yet, and with
+#: one it buys nothing for a walk that goes somewhere else.
 SURFACE = "surface"
 TREE = "tree"
 
@@ -68,13 +69,18 @@ class Attention:
         return False
 
     def depth_ceiling(self, surface: int, tree: int) -> int:
-        """The deepest walk this connection may ask for.
+        """The deepest walk this connection may ask for, into an application it named.
 
         The flat ceiling exists because a walk from the desktop is unbounded in
-        practice, not because twelve levels is a meaningful number. Once
-        attention names applications the walk starts inside one of them, and the
-        node budget — which is the real cost bound — still applies, so the depth
-        cap can be relaxed without relaxing what it was protecting.
+        practice, not because twelve levels is a meaningful number. A walk into a
+        named application starts inside it, and the node budget — which is the
+        real cost bound — still applies, so the depth cap can be relaxed without
+        relaxing what it was protecting.
+
+        Half the question is here. This answers whether the connection could be
+        lifted at all; whether a particular call is aimed somewhere the argument
+        covers is asked at the call site, against `covers` above. Reading this
+        method alone is how the two came apart once already.
         """
         return tree if self.scoped and self.depth == TREE else surface
 

@@ -167,9 +167,11 @@ export default defineMastraCodePlugin({
           "Narrow what you are shown to the applications you are actually working in. " +
           "Listings, desktop state and the change feed all stop mentioning anything else, " +
           "so focus moving elsewhere no longer interrupts you. Naming applications also " +
-          "lifts the inspection depth ceiling — the walk starts inside one application " +
-          "instead of at the desktop — which is what makes deeply nested content, such as " +
-          "an editor's document text, reachable without drilling. This narrows your view " +
+          "lifts the inspection depth ceiling for walks into those applications — the walk " +
+          "starts inside one of them instead of at the desktop — which is what makes deeply " +
+          "nested content, such as an editor's document text, reachable without drilling. " +
+          "Inspect something you did not name and the shallow ceiling applies again. " +
+          "This narrows your view " +
           "only: it is not permission, and it can never reveal an application the user has " +
           "walled off. Call it with no applications to go back to watching the whole desktop.",
         inputSchema: schemas.setAttentionParams,

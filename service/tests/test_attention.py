@@ -354,15 +354,80 @@ def test_the_ceiling_runs_before_attention_at_the_one_choke_point():
 # --- depth ------------------------------------------------------------------
 
 
-def test_the_depth_ceiling_lifts_only_for_a_scoped_connection(open_desktop):
+@pytest.fixture()
+def aimed_at(monkeypatch):
+    """Say which application the call's target turns out to belong to.
+
+    The real resolution is a lookup on the toolkit thread, so the tests below
+    stub it the way the enforcement tests do. Every one of them names a target:
+    a ceiling asked for without one is a question this service never asks.
+    """
+
+    def aim(application: str):
+        monkeypatch.setattr(server, "_application_of", lambda params: application)
+
+    return aim
+
+
+def test_the_depth_ceiling_lifts_only_for_a_scoped_connection(open_desktop, aimed_at):
     """Criterion three: the budget is measured from what the client is watching."""
+    aimed_at("some-editor")
     declare("cl-scoped", ["some-editor"], attention.TREE)
     declare("cl-shallow", ["some-editor"], attention.SURFACE)
     declare("cl-greedy", (), attention.TREE)
-    assert server._depth_ceiling({"clientId": "cl-scoped"}) == server.SCOPED_MAX_DEPTH
-    assert server._depth_ceiling({"clientId": "cl-shallow"}) == server.MAX_DEPTH
-    assert server._depth_ceiling({"clientId": "cl-greedy"}) == server.MAX_DEPTH
-    assert server._depth_ceiling({"clientId": "cl-undeclared"}) == server.MAX_DEPTH
+    editor = {"windowId": "win-1"}
+    assert server._depth_ceiling({"clientId": "cl-scoped", **editor}) == server.SCOPED_MAX_DEPTH
+    assert server._depth_ceiling({"clientId": "cl-shallow", **editor}) == server.MAX_DEPTH
+    assert server._depth_ceiling({"clientId": "cl-greedy", **editor}) == server.MAX_DEPTH
+    assert server._depth_ceiling({"clientId": "cl-undeclared", **editor}) == server.MAX_DEPTH
+
+
+def test_the_deep_budget_follows_the_target_not_the_connection(open_desktop, aimed_at):
+    """The lift is argued for by where the walk starts, so it has to ask where that is.
+
+    One connection, one declaration, two windows. Nothing about the client
+    changes between these two calls — only what it is pointing at — and the
+    budget has to change with it, or the justification is decoration.
+    """
+    declare("cl-scoped", ["some-editor"], attention.TREE)
+
+    aimed_at("some-editor")
+    assert (
+        server._depth_ceiling({"clientId": "cl-scoped", "windowId": "win-1"})
+        == server.SCOPED_MAX_DEPTH
+    )
+
+    aimed_at("a-browser")
+    assert server._depth_ceiling({"clientId": "cl-scoped", "windowId": "win-2"}) == server.MAX_DEPTH
+
+
+def test_a_target_the_desktop_could_not_name_does_not_buy_the_deep_budget(open_desktop, aimed_at):
+    # A window that has gone away, or a lookup that timed out. The unidentified
+    # marker is not a name any attention can cover, so the budget falls back to
+    # the flat cap rather than through it.
+    declare("cl-scoped", ["some-editor"], attention.TREE)
+    aimed_at(server._UNIDENTIFIED)
+    assert server._depth_ceiling({"clientId": "cl-scoped", "windowId": "win-1"}) == server.MAX_DEPTH
+
+
+def test_the_target_is_not_resolved_when_the_lift_is_not_in_play(open_desktop, monkeypatch):
+    """The check costs a toolkit lookup, so nobody pays it for an answer already known.
+
+    A connection that cannot be lifted has the same ceiling whatever it is
+    pointing at. Resolving the target anyway would tax every shallow inspection
+    on the service to answer a question with one possible answer.
+    """
+
+    def refuse(params):
+        raise AssertionError("resolved the target for a call that could not be lifted")
+
+    monkeypatch.setattr(server, "_application_of", refuse)
+    declare("cl-shallow", ["some-editor"], attention.SURFACE)
+    declare("cl-greedy", (), attention.TREE)
+    for client_id in ("cl-shallow", "cl-greedy", "cl-undeclared"):
+        assert (
+            server._depth_ceiling({"clientId": client_id, "windowId": "win-1"}) == server.MAX_DEPTH
+        )
 
 
 def test_both_inspection_methods_ask_for_the_same_ceiling():
