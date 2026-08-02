@@ -52,7 +52,7 @@ words "frame actions".
 
 ---
 
-## Zoom exposes one interface and no `Collection`
+## Zoom exposes one interface and no `Collection` (and 218 actionable elements)
 
 **Application** — zoom, Qt 6.8.8.
 
@@ -80,13 +80,17 @@ asked a single element inside one. Zero frame actions is the ordinary case —
 driveable — because a toolkit puts its actions on the frame, as GTK4 does, or on
 its widgets, as Qt does. The probe now counts action-bearing elements as well
 (`actionableElements`, and the `Actionable elements` column beside the frame
-one), so the question becomes a measurement instead of an inference. Run
-`tests/probe_element_actions.py zoom` from the service directory with Zoom open,
-and re-run the matrix generator: whichever way it comes back, the number is a
-number. Until then no claim about Zoom's actions belongs in this file, and the
-escalation to raw input that the old sentence implied is not earned — raw input
-is out of scope for this build by design, and would need a measured dead end
-rather than an unmeasured one.
+one), so the question becomes a measurement instead of an inference.
+
+**Measured, 2026-08-02, Zoom running on this desktop** — 237 nodes, 0 frame
+actions, **218 actionable elements**: push buttons offering `Press`, lists and
+labels offering `SetFocus`, scroll bars offering `Increase` and `Decrease`. Zoom
+is driveable, and the earlier sentence was wrong about it. The escalation to raw
+input that sentence implied is not earned and is not needed — raw input remains
+out of scope for this build by design, and would need a measured dead end rather
+than an unmeasured one. Reproduce with
+`PYTHONPATH=. .venv/bin/python tests/probe_element_actions.py zoom` from the
+service directory.
 
 ---
 

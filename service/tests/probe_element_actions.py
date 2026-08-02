@@ -7,8 +7,8 @@ column alone, and there was nothing to run that would have contradicted it.
 
 Run from the service directory, against whatever is on the bus:
 
-    .venv/bin/python tests/probe_element_actions.py            # every application
-    .venv/bin/python tests/probe_element_actions.py zoom       # one, by name
+    PYTHONPATH=. .venv/bin/python tests/probe_element_actions.py         # everything
+    PYTHONPATH=. .venv/bin/python tests/probe_element_actions.py zoom    # one, by name
 """
 
 import sys
