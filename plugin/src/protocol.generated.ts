@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: a4e567b96347c643
+// Protocol version: 1.0   schema sha256: bfa45250563894d0
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "a4e567b96347c643" as const;
+export const SCHEMA_DIGEST = "bfa45250563894d0" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -34,8 +34,8 @@ export type WaitCondition = "window-opened" | "window-closed" | "element-appeare
 export const WAIT_CONDITION_VALUES: readonly WaitCondition[] = ["window-opened", "window-closed", "element-appeared", "element-state-changed", "revision-advanced"];
 
 /** The complete domain error vocabulary. Carried in the JSON-RPC error object under data.code. */
-export type ErrorCode = "APPLICATION_NOT_FOUND" | "WINDOW_NOT_FOUND" | "ELEMENT_NOT_FOUND" | "ELEMENT_REFERENCE_STALE" | "BACKEND_UNAVAILABLE" | "ACTION_NOT_SUPPORTED" | "PERMISSION_DENIED" | "SESSION_EXPIRED" | "ELEMENT_HELD" | "TIMEOUT" | "METHOD_NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL_ERROR";
-export const ERROR_CODE_VALUES: readonly ErrorCode[] = ["APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR"];
+export type ErrorCode = "APPLICATION_NOT_FOUND" | "WINDOW_NOT_FOUND" | "ELEMENT_NOT_FOUND" | "ELEMENT_REFERENCE_STALE" | "BACKEND_UNAVAILABLE" | "ACTION_NOT_SUPPORTED" | "PERMISSION_DENIED" | "SESSION_EXPIRED" | "ELEMENT_HELD" | "CLAIM_EXPIRED" | "TIMEOUT" | "METHOD_NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL_ERROR";
+export const ERROR_CODE_VALUES: readonly ErrorCode[] = ["APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "CLAIM_EXPIRED", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR"];
 
 /** The result of one action, including the effects it was seen to have. A caller that reads this does not need to re-inspect. */
 export interface ActionResult {
@@ -84,6 +84,22 @@ export interface Change {
   /** One human-readable sentence. Passed through the value-egress point, because it can quote an element's name. */
   summary: string;
   windowId?: string;
+}
+
+/** One client's exclusive right to write one element, for a bounded time. A claim is not permission — permission is a separate question, already answered by the consent ceiling — and it is not a queue. It answers only 'who is allowed to be mid-sentence in this field right now'. */
+export interface ElementClaim {
+  /** The issued identity holding the claim, never a name a client chose for itself. */
+  clientId: string;
+  /** The holder's readable label, for telling a person who is in their field. */
+  clientLabel?: string;
+  elementId: string;
+  /** Time left on the lease, as of this answer. */
+  expiresInMs: number;
+  heldForMs: number;
+  /** The lease as granted, so a caller can tell a long claim from an old one. */
+  leaseMs: number;
+  /** What the holder said it was doing. Present when it said. */
+  reason?: string;
 }
 
 /** The data member of a JSON-RPC error. The domain code lives here; the top-level code stays a reserved JSON-RPC number. */
@@ -185,6 +201,24 @@ export interface CaptureWindowResult {
   scaled?: boolean;
   width: number;
   windowId: string;
+}
+
+/** Take exclusive write ownership of one element for a bounded time, across as many calls as the work takes. No write is ever unowned — a write with no claim behind it takes one for its own duration and gives it back — so this is not a step to be added before every typeText. It is what closes the gap between two calls a caller thinks of as one piece of work: read the field, decide, type, check, type again. A claimed element cannot be taken by anyone else until it is released or its lease runs out — there is no preemption by a second agent, because the thing being protected is a sentence that is only half typed. The lease is sized by the work rather than by a house number: give estimatedWorkMs, or give the text about to be typed and let the service compute it with the same cadence arithmetic the typing itself uses, so the estimate and the work cannot drift apart. A lease is capped at ten minutes however long the work is, so work longer than that is claimed again as it goes; and a lease never ends in the middle of a write it is covering, because it exists to bound how long an element is held between calls rather than to interrupt one. A claim that has run out by the time the next write arrives is the caller having estimated badly, which it is told once, by name, rather than discovering later as somebody else's refusal. The person at the keyboard is not a client and holds no claim; their arrival still ends any write in the field they touch, and no claim outranks that. (operation class: edit) */
+export interface ClaimElementParams {
+  clientId?: string;
+  confirm?: boolean;
+  elementId: string;
+  /** How long the caller believes its work will take. The lease is this plus a settling margin. Bounded, because a lease nobody can outlive is ownership wearing a lease's name. */
+  estimatedWorkMs?: number;
+  /** Instead of an estimate: the text about to be typed. The service sizes the lease from it at the words-per-minute given, using the arithmetic the typing will use. */
+  forText?: string;
+  /** What this claim is for, in the caller's words. Shown to whoever is refused, and recorded in the audit log. */
+  reason?: string;
+  wordsPerMinute?: number;
+}
+export interface ClaimElementResult {
+  claim: ElementClaim;
+  revision: number;
 }
 
 /** Replace or remove part of an editable element's text, addressed by the text itself rather than by character offsets. Editing at this layer is a splice — a range is removed and something is put in its place in one operation — because there is no keyboard here and nothing to press backspace on. An offset computed from a field somebody has since typed into points at the wrong characters; text that has moved is simply not found, which is a refusal instead of a wrong edit. (operation class: edit) */
@@ -525,6 +559,20 @@ export interface QueryElementsResult {
   searchTruncated: boolean;
 }
 
+/** Give a claimed element back before its lease runs out. Releasing what you do not hold is not an error: the desired state is that this client owns nothing here, and it is already true. A client that disconnects releases everything it held, because an element owned by a process that no longer exists is owned forever. (operation class: edit) */
+export interface ReleaseElementParams {
+  clientId?: string;
+  /** Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. */
+  confirm?: boolean;
+  elementId: string;
+}
+export interface ReleaseElementResult {
+  heldForMs?: number;
+  /** True when this call gave up a claim, false when there was nothing of this client's to give up. */
+  released: boolean;
+  revision: number;
+}
+
 /** Declare what this connection is looking at. Attention is not permission: it narrows what this one client is shown and how deep it may look, always inside what the consent ceiling already allows. It is per connection, so two agents on one service can watch different things. The call declares the whole attention — a field left out takes its default, and a call with no fields returns the connection to the whole desktop. (operation class: observe) */
 export interface SetAttentionParams {
   /** Applications this connection cares about, by id or by name. Empty means the whole desktop, which is what an undeclared connection gets. */
@@ -615,11 +663,12 @@ export interface WaitForResult {
   waitedMs: number;
 }
 
-export type MethodName = "auditTail" | "captureWindow" | "editText" | "emergencyStop" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "grantScope" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "setAttention" | "setElementValue" | "setObservationMode" | "typeText" | "waitFor";
+export type MethodName = "auditTail" | "captureWindow" | "claimElement" | "editText" | "emergencyStop" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "grantScope" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "releaseElement" | "setAttention" | "setElementValue" | "setObservationMode" | "typeText" | "waitFor";
 
 export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   auditTail: "observe",
   captureWindow: "observe",
+  claimElement: "edit",
   editText: "edit",
   emergencyStop: "observe",
   focusWindow: "activate",
@@ -639,6 +688,7 @@ export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   listWindows: "observe",
   performActions: "submit",
   queryElements: "observe",
+  releaseElement: "edit",
   setAttention: "observe",
   setElementValue: "edit",
   setObservationMode: "observe",
@@ -649,6 +699,7 @@ export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
 export interface MethodMap {
   auditTail: { params: AuditTailParams; result: AuditTailResult };
   captureWindow: { params: CaptureWindowParams; result: CaptureWindowResult };
+  claimElement: { params: ClaimElementParams; result: ClaimElementResult };
   editText: { params: EditTextParams; result: EditTextResult };
   emergencyStop: { params: EmergencyStopParams; result: EmergencyStopResult };
   focusWindow: { params: FocusWindowParams; result: FocusWindowResult };
@@ -668,6 +719,7 @@ export interface MethodMap {
   listWindows: { params: ListWindowsParams; result: ListWindowsResult };
   performActions: { params: PerformActionsParams; result: PerformActionsResult };
   queryElements: { params: QueryElementsParams; result: QueryElementsResult };
+  releaseElement: { params: ReleaseElementParams; result: ReleaseElementResult };
   setAttention: { params: SetAttentionParams; result: SetAttentionResult };
   setElementValue: { params: SetElementValueParams; result: SetElementValueResult };
   setObservationMode: { params: SetObservationModeParams; result: SetObservationModeResult };

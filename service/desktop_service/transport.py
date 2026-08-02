@@ -8,6 +8,40 @@ Threading: this server accepts on its own thread and serves each connection on a
 thread of its own. It never touches a toolkit binding directly — handlers marshal
 onto the GLib loop themselves (see `backends/loop.py`). That is what lets several
 clients be in flight at once without any of them reaching the desktop off-thread.
+
+One connection per agent
+------------------------
+
+This socket is local, `0600`, and stays that way. What reaches it may not be
+local for much longer: the shape this project is heading for is one server per
+machine — this daemon, an agent layer above it, a gateway above that — and many
+clients holding nothing but a server URL and a credential. Nothing
+network-facing ever speaks to the desktop directly, which is the entire reason
+the guarantees below this line keep their meaning.
+
+So the rule for whatever opens this socket on their behalf: **one connection per
+agent, never one for the server.** The connection is not a transport detail
+here, it is the unit of identity, and four separate mechanisms key off it:
+
+- the identity minted in `_serve_connection` below, which the client cannot
+  influence because it is issued before the client has said anything;
+- the grant, filed under that identity by `security.Consent` and consulted under
+  it too;
+- ownership of an element while it is being written, keyed by the same identity
+  in `holds`;
+- the teardown at the end of this file, which releases the holds *of that
+  connection* when it drops.
+
+Multiplex two agents onto one connection and they become one client in all four
+places at once: indistinguishable in the audit log, each inheriting whatever
+grant the other was given, each able to release a hold the other is mid-write
+under, and both torn down when either one goes away. That is not a degraded
+version of the guarantee, it is the hole the issued identity was introduced to
+close, reopened one level up.
+
+The cost of obeying the rule is a thread and a socket. Connections are cheap,
+each one already gets its own thread, and `tests/test_connections.py` holds two
+of them open at once and proves the four mechanisms stay apart.
 """
 
 from __future__ import annotations

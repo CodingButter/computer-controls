@@ -17,31 +17,31 @@ re-run it instead, and if a row surprises you, that is the point of it.
 
 ## Applications on the accessibility bus
 
-| Application | Toolkit | Windows | Interfaces | Depth | Nodes | Collection | Frame actions | Actionable elements | Editable | Verdict |
-|---|---|---:|---:|---:|---:|---|---:|---:|---:|---|
-| gnome-shell | clutter 46.2 | 1 | 2 | 6 | 600+ | works | 0 | 0 | 39 | walkable tree |
-| gsd-keyboard | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows |
-| gsd-color | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows |
-| gsd-media-keys | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows |
-| gsd-wacom | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows |
-| ibus-x11 | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows |
-| gsd-power | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows |
-| ibus-extension-gtk3 | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows |
-| gsd-xsettings | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows |
-| evolution-alarm-notify | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows |
-| xdg-desktop-portal-gtk | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows |
-| gjs | gtk 3.24.41 | 3 | 2 | 7 | 18 | works | 0 | 0 | 0 | shallow tree |
-| gnome-terminal-server | gtk 3.24.41 | 1 | 2 | 8 | 109 | works | 0 | 54 | 0 | walkable tree |
-| update-notifier | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows |
-| zoom | Qt 6.8.8 | 8 | 1 | 5 | 237 | no | 0 | 218 | 6 | walkable tree |
-| Google Chrome | Chromium 1.0 | 3 | 8 | 12+ | 272 | works | 2 | 269 | 1 | depth-limited |
-| xdg-desktop-portal-gnome | GTK 4.14.5 | 0 | 1 | 0 | 0 | no | 0 | 0 | 0 | no windows |
-| vesktop | Chromium 1.0 | 1 | 8 | 12+ | 30 | works | 2 | 29 | 0 | depth-limited |
-| org.gnome.Nautilus | GTK 4.14.5 | 1 | 1 | 12+ | 49 | no | 60 | 2 | 0 | frame actions |
-| update-manager | gtk 3.24.41 | 1 | 2 | 10 | 101 | works | 0 | 57 | 3 | walkable tree |
-| gnome-text-editor | GTK 4.14.5 | 1 | 1 | 12+ | 43 | no | 36 | 4 | 0 | frame actions |
-| audacity | gtk 3.24.41 | 1 | 2 | 8 | 571 | works | 0 | 390 | 10 | walkable tree |
-| code | Chromium 1.0 | 1 | 8 | 12+ | 30 | works | 2 | 30 | 0 | depth-limited |
+| Application | Toolkit | Windows | Interfaces | Depth | Nodes | Collection | Frame actions | Actionable elements | Editable | Verdict | Measured |
+|---|---|---:|---:|---:|---:|---|---:|---:|---:|---|---|
+| gnome-shell | clutter 46.2 | 1 | 2 | 6 | 600+ | works | 0 | 0 | 39 | walkable tree | 2026-08-02 |
+| gsd-keyboard | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
+| gsd-color | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
+| gsd-media-keys | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
+| gsd-wacom | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
+| ibus-x11 | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
+| gsd-power | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
+| ibus-extension-gtk3 | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
+| gsd-xsettings | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
+| evolution-alarm-notify | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
+| xdg-desktop-portal-gtk | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
+| gjs | gtk 3.24.41 | 3 | 2 | 7 | 18 | works | 0 | 0 | 0 | shallow tree | 2026-08-02 |
+| gnome-terminal-server | gtk 3.24.41 | 1 | 2 | 8 | 109 | works | 0 | 54 | 0 | walkable tree | 2026-08-02 |
+| update-notifier | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
+| zoom | Qt 6.8.8 | 8 | 1 | 5 | 237 | no | 0 | 218 | 6 | walkable tree | 2026-08-02 |
+| Google Chrome | Chromium 1.0 | 3 | 8 | 12+ | 272 | works | 2 | 269 | 1 | depth-limited | 2026-08-02 |
+| xdg-desktop-portal-gnome | GTK 4.14.5 | 0 | 1 | 0 | 0 | no | 0 | 0 | 0 | no windows | 2026-08-02 |
+| vesktop | Chromium 1.0 | 1 | 8 | 12+ | 30 | works | 2 | 29 | 0 | depth-limited | 2026-08-02 |
+| org.gnome.Nautilus | GTK 4.14.5 | 1 | 1 | 12+ | 49 | no | 60 | 2 | 0 | frame actions | 2026-08-02 |
+| update-manager | gtk 3.24.41 | 1 | 2 | 10 | 101 | works | 0 | 57 | 3 | walkable tree | 2026-08-02 |
+| gnome-text-editor | GTK 4.14.5 | 1 | 1 | 12+ | 43 | no | 36 | 4 | 0 | frame actions | 2026-08-02 |
+| audacity | gtk 3.24.41 | 1 | 2 | 8 | 571 | works | 0 | 390 | 10 | walkable tree | 2026-08-02 |
+| code | Chromium 1.0 | 1 | 8 | 12+ | 30 | works | 2 | 30 | 0 | depth-limited | 2026-08-02 |
 
 ## Column meanings
 
@@ -62,6 +62,8 @@ re-run it instead, and if a row surprises you, that is the point of it.
   one column is a statement about where they live, not about whether they exist.
 - **Editable** — elements an agent could type into.
 - **Verdict** — which of those surfaces an agent would actually drive this application by.
+  `depth-limited` is not one of them: it says the walk stopped before the application did,
+  and that the counts on that row are the probe's reach rather than the application's size.
 
 > **Every row here is measured at depth 12, the maximum a window inspection may
 > ask for, and every Chromium-family row hits it.** Walked without a limit, the
@@ -73,6 +75,8 @@ re-run it instead, and if a row surprises you, that is the point of it.
 ## What this does not say
 
 AT-SPI exposes an application's *toolkit* version, never the application's own version,
-so no version column is offered rather than one being invented. Applications not running
-at measurement time are absent, not passing: the matrix is a photograph of a desktop, and
-an application nobody had open was never asked.
+so no version column is offered rather than one being invented. An application nobody had
+open at measurement time was never asked, and is neither absent nor passing: its row stands
+with the date it was last measured on, which is what the Measured column is for. Only rows
+dated to the run described in the Environment table above were taken in that environment;
+an older row was taken in whatever the repository's history records for its own date.
