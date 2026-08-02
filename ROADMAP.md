@@ -45,6 +45,28 @@ Everything here follows from one principle, stated by the user who has to live w
 - [#10](https://github.com/CodingButter/computer-controls/issues/10) — scope chooses the brain
 - [#12](https://github.com/CodingButter/computer-controls/issues/12) — trade-offs that stop being acceptable with co-tenants
 
+## Then — one server, many clients
+
+The deployment shape the rest of the work assumes, settled in
+[#34](https://github.com/CodingButter/computer-controls/issues/34).
+
+A **server** is a machine being controlled: this daemon, an agent layer above it, a gateway above
+that — one per machine. A **client** is anything holding a server URL and a credential, and there
+are as many as there are surfaces: browser, phone, laptop, whatever comes next. The socket does
+not change. It stays local, `0600`, and nothing network-facing ever speaks to the desktop
+directly, which is what lets consent classes, element ownership, the takeover guard, value
+redaction and the audit log keep meaning exactly what they mean today. A rule enforced anywhere
+above this is a rule with a way around it.
+
+The expensive detail is one line long and lives in `transport.py`: the server layer opens **one
+connection per agent**, never one for the whole server. Identity, grants, element ownership and
+disconnect cleanup all key off the connection, so agents sharing one become one client in four
+places at once.
+
+- [#31](https://github.com/CodingButter/computer-controls/issues/31) — the reshape: a core, an agent layer, and many clients
+- [#35](https://github.com/CodingButter/computer-controls/issues/35) — the first client, and it is not this plugin
+- [#36](https://github.com/CodingButter/computer-controls/issues/36) — a stranger connects: installer, hosted client, account
+
 ## Known limits
 
 Not defects. Measured facts about what each toolkit publishes, kept open because a client author

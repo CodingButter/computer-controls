@@ -345,6 +345,19 @@ class Consent:
         What it cannot do is take back an action already handed to a toolkit.
         There is no un-click, and a stop that implied otherwise would be worse
         than no stop, because someone would rely on it.
+
+        It needs no grant to pull, which is deliberate: a stop you need
+        permission to pull is not a stop. It also revokes grants belonging to
+        clients that did not pull it, which was accepted for one reason only —
+        the only thing that could reach this socket was on the same single-user
+        machine, so the worst case was a person interrupting themselves. A
+        client holding a server URL and a credential is not on that machine.
+        That makes this a blocker on any network-facing layer rather than the
+        documented trade-off it was recorded as, and the rule that replaces it
+        cannot be written until it is settled whether one server serves one
+        person or several. Today's behaviour is asserted by
+        `tests/test_connections.py::test_a_stop_pulled_on_one_connection_revokes_the_others_grant`
+        so that changing it has to be a decision.
         """
         revoked = len(self._grants)
         self._grants.clear()
