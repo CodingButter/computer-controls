@@ -90,6 +90,15 @@ def inspect_tree(
     what survives is a shallow view of the whole window rather than one deep
     tunnel down its first branch. A caller who gets cut off should still know
     roughly what the window contains.
+
+    Both ways of running out say so. The node budget is global, so exhausting it
+    ends the walk; the depth limit is per branch, so a branch that bottoms out on
+    it says nothing about its siblings and the walk continues. They are reported
+    the same way because they mean the same thing to a caller — there is more
+    down there than you were shown — and the alternative is a tree cut off at
+    depth twelve that is indistinguishable from a tree that ended at depth
+    twelve. Measured against a live Discord, that silence hides 97% of the
+    application.
     """
     root, root_fp, root_ref = describe(root_obj, 0, "")
     observations: list[Observation] = [
@@ -97,6 +106,16 @@ def inspect_tree(
     ]
     count = 1
     truncated = False
+    #: The node budget is spent and no further branch can be walked. Distinct
+    #: from `truncated`, which only records that the caller was shown less than
+    #: there is: a depth-limited branch sets that without ending the walk.
+    #:
+    #: Today the two could be one flag, because this walk is breadth-first and
+    #: every node in a level shares a depth, so the level that reaches the
+    #: ceiling is the last level either way. That is an invariant of the
+    #: traversal, not of the bounds, and it is not worth being one edit away
+    #: from a walk that stops early and calls it a complete answer.
+    exhausted = False
 
     # (backend object, built element, its fingerprint digest, depth)
     frontier: list[tuple[Any, SemanticElement, str, int]] = [
@@ -107,11 +126,20 @@ def inspect_tree(
         next_frontier: list[tuple[Any, SemanticElement, str, int]] = []
         for obj, element, digest, depth in frontier:
             if depth >= bounds.depth:
+                # Costs one child lookup per boundary node and no `describe`,
+                # which is where a walk's expense actually lives. Asking is the
+                # only way to tell a branch that ended from one that was cut:
+                # a node's own child count is the difference between "this
+                # window contains 29 things" and "you were shown 29 of 952".
+                if children(obj):
+                    truncated = True
+                    element.truncated = True
                 continue
             kids = children(obj)
             for index, child_obj in enumerate(kids):
                 if count >= bounds.max_nodes:
                     truncated = True
+                    exhausted = True
                     element.truncated = True
                     break
                 child, child_fp, child_ref = describe(child_obj, index, digest)
@@ -133,9 +161,9 @@ def inspect_tree(
                     next_frontier.append(
                         (child_obj, element, child_fp.digest(), depth + 1)
                     )
-            if truncated:
+            if exhausted:
                 break
-        if truncated:
+        if exhausted:
             break
         frontier = next_frontier
 

@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: ceb3bbe1b961ee36
+// Protocol version: 1.0   schema sha256: a4e567b96347c643
 
 import { z } from "mastracode/plugin";
 
@@ -67,7 +67,7 @@ export const semanticElementSchema: z.ZodType<unknown> = z.lazy(() =>
     name: z.string().describe("Accessible name. Passed through the value-egress point."),
     role: z.string().describe("What kind of thing it is, in the backend's vocabulary."),
     states: z.array(z.string()),
-    truncated: z.boolean().describe("Present and true when children were withheld by a node budget. Never silently omitted.").optional(),
+    truncated: z.boolean().describe("Present and true when this element has children the walk did not return, whether because the node budget ran out or because the depth limit was reached. Never silently omitted: a subtree that was cut off must never be indistinguishable from one that ended. Drill from this element with inspectElement to see what is below it.").optional(),
     value: z.string().describe("Current value, for elements that hold one. Passed through the value-egress point.").optional(),
   }),
 );
@@ -250,7 +250,7 @@ export const inspectElementResult = z.object({
   element: semanticElementSchema,
   nodeCount: z.number().int().min(0),
   revision: z.number().int().min(0),
-  truncated: z.boolean(),
+  truncated: z.boolean().describe("True when the walk returned less than the subtree contains, whether it ran out of node budget or reached its depth limit. The elements it stopped at are marked, and are where inspectElement picks up."),
 });
 
 export const inspectWindowParams = z.object({
@@ -266,7 +266,7 @@ export const inspectWindowResult = z.object({
   backend: z.string(),
   nodeCount: z.number().int(),
   revision: z.number().int(),
-  truncated: z.boolean(),
+  truncated: z.boolean().describe("True when the walk returned less than the subtree contains, whether it ran out of node budget or reached its depth limit. The elements it stopped at are marked, and are where inspectElement picks up."),
   window: semanticElementSchema,
 });
 

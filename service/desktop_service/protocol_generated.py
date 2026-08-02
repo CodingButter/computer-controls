@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: ceb3bbe1b961ee36
+# Protocol version: 1.0   schema sha256: a4e567b96347c643
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "ceb3bbe1b961ee36"
+SCHEMA_DIGEST: Final = "a4e567b96347c643"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -1218,6 +1218,7 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 "type": "integer",
             },
             "truncated": {
+                "description": "True when the walk returned less than the subtree contains, whether it ran out of node budget or reached its depth limit. The elements it stopped at are marked, and are where inspectElement picks up.",
                 "type": "boolean",
             },
         },
@@ -1243,6 +1244,7 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 "type": "integer",
             },
             "truncated": {
+                "description": "True when the walk returned less than the subtree contains, whether it ran out of node budget or reached its depth limit. The elements it stopped at are marked, and are where inspectElement picks up.",
                 "type": "boolean",
             },
             "window": {
@@ -1928,7 +1930,7 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
                 "type": "array",
             },
             "truncated": {
-                "description": "Present and true when children were withheld by a node budget. Never silently omitted.",
+                "description": "Present and true when this element has children the walk did not return, whether because the node budget ran out or because the depth limit was reached. Never silently omitted: a subtree that was cut off must never be indistinguishable from one that ended. Drill from this element with inspectElement to see what is below it.",
                 "type": "boolean",
             },
             "value": {
