@@ -116,27 +116,35 @@ def buffer(live_window):  # noqa: F811
     text that is only ever read back truncated. Skipping costs a test run; guessing costs
     somebody their unsaved work.
     """
-    windows = server._method_list_windows({})["windows"]
-    window = next((w for w in windows if w["applicationName"] == APP), None)
-    if window is None:
+    windows = [w for w in server._method_list_windows({})["windows"] if w["applicationName"] == APP]
+    if not windows:
         pytest.skip(f"{APP} did not report a window through the handler")
 
-    element_id = _find_text_element(window["id"])
-    if element_id is None:
-        pytest.skip("no text-bearing element was reachable in this window")
-
-    # Resolved on the loop thread, like every handler that touches an element does:
-    # AT-SPI answers on the thread its main context was initialised with, and a lookup
-    # taken from anywhere else is a race that passes until the day it does not.
-    def probe():
+    # Every window of the editor is considered, not just the first one it reported.
+    # A desktop that belongs to somebody usually has a document open in it, and taking
+    # only the first window would make an untouched second one unreachable — the suite
+    # would skip while a perfectly empty buffer sat one window over.
+    def probe(element_id: str):
         obj = server._resolve_element(element_id)
         return obj, atspi.is_editable(obj), atspi.sample_values([element_id]).get(element_id)
 
-    obj, editable, existing = loop.call_on_loop(probe)
-    if not editable:
-        pytest.skip("the text element found is not editable")
-    if existing:
-        pytest.skip("this editor has a document open in it; not overwriting somebody's work")
+    occupied = 0
+    for window in windows:
+        element_id = _find_text_element(window["id"])
+        if element_id is None:
+            continue
+        obj, editable, existing = loop.call_on_loop(lambda i=element_id: probe(i))
+        if not editable:
+            continue
+        if existing:
+            occupied += 1
+            continue
+        break
+    else:
+        pytest.skip(
+            f"no empty editable buffer among {len(windows)} {APP} window(s); "
+            f"{occupied} had a document open and are not being overwritten"
+        )
 
     yield element_id, obj
 
