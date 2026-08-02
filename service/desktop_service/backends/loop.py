@@ -47,6 +47,8 @@ class DesktopLoop:
         #: learns nothing the first second could not have told it.
         self._pending: set[threading.Event] = set()
         self._stopping = False
+        #: Why the toolkit was never initialised, when it was not. `None` means it was.
+        self._bus_reason: str | None = None
 
     @property
     def is_running(self) -> bool:
@@ -81,9 +83,21 @@ class DesktopLoop:
         context.acquire()
         # Atspi.init() must run on the thread that owns the loop, because that is
         # the thread every subsequent Atspi call will be marshalled onto.
+        #
+        # Guarded, because the toolkit's way of reporting a missing accessibility
+        # bus is to abort the process. The loop still starts either way: a service
+        # with no bus reachable is a service that reports itself unavailable, not
+        # one that dies on boot and leaves its clients guessing.
+        from . import atspi as _atspi  # local: avoids an import cycle at module load
+
+        reachable, reason = _atspi.bus_reachable()
         try:
-            Atspi.init()
+            if reachable:
+                Atspi.init()
+            else:
+                log.warning("accessibility bus unavailable, not initialising Atspi: %s", reason)
         finally:
+            self._bus_reason = reason
             self._ready.set()
         try:
             loop.run()

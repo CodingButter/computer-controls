@@ -17,13 +17,14 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from typing import Any, Callable, Sequence
 
 import gi
 
 gi.require_version("Atspi", "2.0")
 
-from gi.repository import Atspi  # noqa: E402  (must follow require_version)
+from gi.repository import Atspi, Gio, GLib  # noqa: E402  (must follow require_version)
 
 from .. import model, registry  # noqa: E402
 from . import x11  # noqa: E402
@@ -31,6 +32,28 @@ from . import x11  # noqa: E402
 log = logging.getLogger(__name__)
 
 BACKEND_NAME = "atspi"
+
+# How long to wait for the session bus to say whether an accessibility bus exists.
+# Short on purpose: this runs before anything else can, and a machine that cannot
+# answer in three seconds is a machine we are going to report as unavailable.
+BUS_PROBE_TIMEOUT_MS = 3000
+
+# How long a "no bus" answer stands before it is asked again. A desktop that
+# starts after this service did is a normal thing to happen and should not need a
+# restart to be noticed; a bus-less machine should not pay a D-Bus round trip per
+# call to be told the same thing.
+BUS_RETRY_SECONDS = 5.0
+
+#: The remembered answer. `None` means nobody has asked yet.
+_bus_ok: bool | None = None
+_bus_reason: str | None = None
+_bus_asked_at: float = 0.0
+
+
+def forget_bus_answer() -> None:
+    """Drop the cached reachability answer. For tests, and for a deliberate recheck."""
+    global _bus_ok, _bus_reason, _bus_asked_at
+    _bus_ok, _bus_reason, _bus_asked_at = None, None, 0.0
 
 # Roles whose text content is worth carrying. Everything else reports no value
 # rather than a truncated slab of document.
@@ -92,14 +115,91 @@ def _safe(fn, default=None):
         return default
 
 
+def bus_reachable() -> tuple[bool, str | None]:
+    """Ask the session bus whether an accessibility bus exists, without touching Atspi.
+
+    This has to exist because of how `Atspi` fails. When there is no accessibility
+    bus to connect to, `Atspi.get_desktop(0)` does not raise — it emits a
+    `dbind-ERROR` through `g_error`, and `g_error` calls `abort()`. There is no
+    Python exception to catch: the whole process dies with a core dump, taking
+    every other client of a shared daemon with it. An `except Exception` around
+    that call is decorative, and we shipped one for months.
+
+    The same question asked over plain D-Bus fails politely: `Gio` raises
+    `GLib.Error` and the process survives. So the rule is that nothing calls into
+    `Atspi` until this has answered yes.
+
+    A yes is remembered for the life of the process. The abort happens when the
+    bridge first *connects*; once it has, a bus that later goes away surfaces as
+    ordinary D-Bus errors that `_safe` already absorbs. Re-asking would put a
+    blocking round trip on the one thread every client's calls are marshalled
+    onto — a third of a millisecond each, on tree walks that make thousands.
+    A no is remembered only briefly, because a desktop that comes up after the
+    service did should be picked up without a restart.
+    """
+    global _bus_ok, _bus_reason, _bus_asked_at
+    now = time.monotonic()
+    if _bus_ok is True:
+        return True, None
+    if _bus_ok is False and (now - _bus_asked_at) < BUS_RETRY_SECONDS:
+        return False, _bus_reason
+    ok, reason = _ask_the_bus()
+    _bus_ok, _bus_reason, _bus_asked_at = ok, reason, now
+    return ok, reason
+
+
+def _ask_the_bus() -> tuple[bool, str | None]:
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        reply = bus.call_sync(
+            "org.a11y.Bus",
+            "/org/a11y/bus",
+            "org.a11y.Bus",
+            "GetAddress",
+            None,
+            GLib.VariantType("(s)"),
+            Gio.DBusCallFlags.NONE,
+            BUS_PROBE_TIMEOUT_MS,
+            None,
+        )
+    except GLib.Error as exc:
+        return False, f"no accessibility bus: {exc.message}"
+    except Exception as exc:  # noqa: BLE001 - a broken session bus is not our bug
+        return False, f"no accessibility bus: {type(exc).__name__}: {exc}"
+    address = reply.unpack()[0]
+    if not address:
+        return False, "the session bus answered with an empty accessibility bus address"
+    return True, None
+
+
+def _desktop() -> Atspi.Accessible | None:
+    """The one door to the toolkit's root, and the only place that opens it.
+
+    Every route into AT-SPI starts by asking for the desktop, so guarding the
+    question here guards all of them at once. The first version of this guard
+    was put on `probe_desktop` alone, which read as sufficient and was not: the
+    window lookup underneath `typeText` reaches the root by another path, and a
+    bus-less machine still died — several layers below anything that looked like
+    a probe. One door, checked once, is the only shape that stays true when
+    somebody adds a fourth caller.
+    """
+    reachable, _ = bus_reachable()
+    if not reachable:
+        return None
+    return Atspi.get_desktop(0)
+
+
 def probe_desktop() -> dict[str, Any]:
     """Decide whether the accessibility bridge actually works by using it.
 
     The `toolkit-accessibility` gsetting reads `false` on this machine while the
     bridge is fully functional, so it is not consulted anywhere.
     """
+    reachable, reason = bus_reachable()
+    if not reachable:
+        return {"available": False, "reason": reason}
     try:
-        desktop = Atspi.get_desktop(0)
+        desktop = _desktop()
         if desktop is None:
             return {"available": False, "reason": "Atspi.get_desktop(0) returned None"}
         count = desktop.get_child_count()
@@ -114,7 +214,7 @@ def probe_desktop() -> dict[str, Any]:
 
 
 def _iter_desktop_apps():
-    desktop = Atspi.get_desktop(0)
+    desktop = _desktop()
     if desktop is None:
         return
     for index in range(desktop.get_child_count()):
@@ -960,6 +1060,15 @@ def watch_events(on_hint: Callable[[], None]) -> Callable[[], None]:
             log.exception("desktop event hint failed")
 
     mine: list[tuple[Atspi.EventListener, str]] = []
+    # Registering a listener connects to the bridge, and connecting to a bridge
+    # that is not there aborts the process — the same way a desktop lookup does,
+    # by a route that never asks for the desktop. Watching nothing is the honest
+    # answer on a machine with no bus: the reconciliation sweep still runs, and
+    # `getDeltaSince` still reports whatever a re-read finds.
+    reachable, reason = bus_reachable()
+    if not reachable:
+        log.warning("not watching desktop events: %s", reason)
+        return lambda: None
     for name in WATCHED_EVENTS:
         listener = Atspi.EventListener.new(deliver)
         if listener.register(name):
