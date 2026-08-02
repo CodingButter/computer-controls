@@ -608,6 +608,18 @@ def actions_of(obj: Atspi.Accessible) -> list[str]:
     return _actions_of(obj)
 
 
+def action_count_of(obj: Atspi.Accessible) -> int:
+    """How many actions an element exposes, without asking for their names.
+
+    Separate from `actions_of` because the probe asks this of every node it
+    walks: naming an action costs a round trip each, and a six-hundred-node walk
+    that wanted only the count would pay for hundreds of strings it discards.
+    """
+    if not _safe(lambda: obj.get_action_iface()):
+        return 0
+    return _safe(obj.get_n_actions, 0) or 0
+
+
 def interfaces_of(obj: Atspi.Accessible) -> list[str]:
     """Which AT-SPI interfaces this object advertises.
 

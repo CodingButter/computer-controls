@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: 6301dcd6aeced49c
+# Protocol version: 1.0   schema sha256: ceb3bbe1b961ee36
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "6301dcd6aeced49c"
+SCHEMA_DIGEST: Final = "ceb3bbe1b961ee36"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -33,7 +33,7 @@ ATTRIBUTIONS: Final[tuple[str, ...]] = ("self", "external", "unattributed")
 WAIT_CONDITIONS: Final[tuple[str, ...]] = ("window-opened", "window-closed", "element-appeared", "element-state-changed", "revision-advanced")
 
 #: The complete domain error vocabulary. Carried in the JSON-RPC error object under data.code.
-ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR")
+ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR")
 
 #: Every method mapped to the operation class it belongs to.
 OPERATION_CLASS: Final[dict[str, str]] = {
@@ -1776,6 +1776,7 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
                     "ACTION_NOT_SUPPORTED",
                     "PERMISSION_DENIED",
                     "SESSION_EXPIRED",
+                    "ELEMENT_HELD",
                     "TIMEOUT",
                     "METHOD_NOT_FOUND",
                     "INVALID_PARAMS",

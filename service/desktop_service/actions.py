@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from . import errors, settle, state
+from . import errors, holds, settle, state
 
 _action_ids = itertools.count(1)
 
@@ -168,24 +168,36 @@ def perform(
     desktop that has not launched anything yet is perfectly quiet, and an action that
     returned at that moment would report no effects and then be told, seconds later,
     that a window it caused belonged to somebody else.
+
+    Raises `ElementHeld` when the action writes into an element somebody else is
+    already writing into. See `holds.py` for why that is a refusal rather than a
+    place in a queue.
     """
-    action_id = f"act-{next(_action_ids):06d}"
-    started = time.monotonic()
+    # Ownership is taken here because here is the only place every write passes
+    # through: the handlers, the steps of a batch, and anything calling this
+    # module directly. A rule enforced anywhere above this is a rule with a way
+    # around it. It is taken before the action id, so a refused write consumes
+    # no id and never appears to have been dispatched, and it is given back as
+    # soon as the desktop has settled — the element is owned while it is being
+    # written, and not one moment longer.
+    with holds.for_write(method, target_id, client_id):
+        action_id = f"act-{next(_action_ids):06d}"
+        started = time.monotonic()
 
-    with _dispatching():
-        before = take_snapshot()
+        with _dispatching():
+            before = take_snapshot()
 
-        fallbacks: list[str] = []
-        succeeded: str | None = None
-        for attempt in attempts:
-            if attempt.run():
-                succeeded = attempt.backend
-                break
-            fallbacks.append(attempt.backend)
+            fallbacks: list[str] = []
+            succeeded: str | None = None
+            for attempt in attempts:
+                if attempt.run():
+                    succeeded = attempt.backend
+                    break
+                fallbacks.append(attempt.backend)
 
-        settlement = settle.wait_for_quiet(
-            take_snapshot, before, quiet_ms=quiet_ms, ceiling_ms=ceiling_ms, until=until
-        )
+            settlement = settle.wait_for_quiet(
+                take_snapshot, before, quiet_ms=quiet_ms, ceiling_ms=ceiling_ms, until=until
+            )
 
     log.record(
         ActionRecord(

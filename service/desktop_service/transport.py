@@ -19,7 +19,7 @@ import stat
 import threading
 from typing import Any, Callable
 
-from . import identity
+from . import holds, identity
 from .errors import (
     JSONRPC_INVALID_REQUEST,
     JSONRPC_PARSE_ERROR,
@@ -166,6 +166,10 @@ class JsonRpcServer:
         except OSError:
             pass
         finally:
+            # A client that disconnects halfway through a write is not coming
+            # back to release anything, and an element owned by a process that
+            # no longer exists is owned for the rest of the session.
+            holds.release_all(client_id)
             with self._lock:
                 self._connections.discard(conn)
             try:

@@ -82,6 +82,7 @@
         "ACTION_NOT_SUPPORTED": "The element exists but does not offer the requested action.",
         "PERMISSION_DENIED": "The caller's granted scope does not include this operation class, or the target application is blocked.",
         "SESSION_EXPIRED": "The client session's grant has expired and must be renewed. Distinct from PERMISSION_DENIED so a caller can tell 'never allowed' from 'allowed, ask again'.",
+        "ELEMENT_HELD": "Another client is writing this element and owns it until that write finishes. Carries the holder's identity, what it is doing and how long it has been at it. Not a permission answer and not a queue: the request is refused, not deferred.",
         "TIMEOUT": "The desktop did not answer within the allotted time.",
         "METHOD_NOT_FOUND": "No such method in this protocol version.",
         "INVALID_PARAMS": "The request did not satisfy this schema.",
@@ -155,7 +156,7 @@
           "enum": [
             "APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND",
             "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED",
-            "PERMISSION_DENIED", "SESSION_EXPIRED", "TIMEOUT",
+            "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "TIMEOUT",
             "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR"
           ]
         },
