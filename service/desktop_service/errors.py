@@ -30,6 +30,10 @@ class ErrorCode:
     #: "you may, but ask again" call for different behaviour from a caller: one
     #: is a wall and the other is a door that closed on a timer.
     SESSION_EXPIRED = "SESSION_EXPIRED"
+    #: Refused because somebody else is already writing this element. Not a
+    #: permission answer: the caller may write here, just not while the text of
+    #: another writer is still going in.
+    ELEMENT_HELD = "ELEMENT_HELD"
     TIMEOUT = "TIMEOUT"
     METHOD_NOT_FOUND = "METHOD_NOT_FOUND"
     INVALID_PARAMS = "INVALID_PARAMS"
@@ -149,6 +153,49 @@ class SessionExpired(DesktopError):
         if remedy:
             detail["remedy"] = remedy
         super().__init__(ErrorCode.SESSION_EXPIRED, message, detail)
+
+
+class ElementHeld(DesktopError):
+    """Refused because another writer owns this element right now.
+
+    Named rather than anonymous because the two things a caller can do about it
+    differ entirely: a field held by another agent is worth coming back to, and
+    a field held by the caller's own other worker is a bug in the caller. Both
+    answers are in `heldBy`, so neither has to be guessed at.
+
+    The holder's own name for itself travels beside its issued identity for the
+    same reason it does in the audit log — `cl-3f2a91b8` is unambiguous and
+    tells a human nothing.
+    """
+
+    def __init__(
+        self,
+        element_id: str,
+        *,
+        held_by: str = "",
+        held_by_label: str = "",
+        held_method: str = "",
+        held_for_ms: int = 0,
+    ) -> None:
+        who = held_by_label or held_by or "another caller"
+        doing = f" ({held_method})" if held_method else ""
+        detail: dict[str, Any] = {
+            "elementId": element_id,
+            "heldBy": held_by,
+            "heldMethod": held_method,
+            "heldForMs": held_for_ms,
+            "remedy": (
+                "wait for the holder to finish and write again, or write to a "
+                "different element — this element is not queued"
+            ),
+        }
+        if held_by_label:
+            detail["heldByLabel"] = held_by_label
+        super().__init__(
+            ErrorCode.ELEMENT_HELD,
+            f"Element {element_id!r} is being written by {who}{doing}",
+            detail,
+        )
 
 
 class ApplicationNotFound(DesktopError):

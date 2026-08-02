@@ -19,7 +19,7 @@ import stat
 import threading
 from typing import Any, Callable
 
-from . import identity
+from . import holds, identity
 from .errors import (
     JSONRPC_INVALID_REQUEST,
     JSONRPC_PARSE_ERROR,
@@ -145,8 +145,9 @@ class JsonRpcServer:
         # One identity per connection, minted here and held for as long as the
         # connection lasts. This is the only place it can be assigned honestly:
         # by the time a request is parsed, everything in it came from the client.
+        client_id = identity.mint()
         try:
-            with identity.bound(identity.mint()), conn.makefile("rwb") as stream:
+            with identity.bound(client_id), conn.makefile("rwb") as stream:
                 for raw in stream:
                     line = raw.decode("utf-8", errors="replace").strip()
                     if not line:
@@ -159,6 +160,10 @@ class JsonRpcServer:
         except OSError:
             pass
         finally:
+            # A client that disconnects halfway through a write is not coming
+            # back to release anything, and an element owned by a process that
+            # no longer exists is owned for the rest of the session.
+            holds.release_all(client_id)
             with self._lock:
                 self._connections.discard(conn)
             try:

@@ -71,6 +71,42 @@ accessible's D-Bus address — the owning application's bus name plus the object
 path. Every id this service hands out is derived from that pair, which is why
 references stay stable across calls and across processes without a lookup table.
 
+## Ownership of an element being written
+
+A write is not one event. Typing is a word at a time and an edit is a search, a
+deletion and an insertion, each its own trip onto the loop thread. The loop
+serializes those trips one by one and nothing else serializes the sequence, so
+two writers aimed at one field used to produce text neither asked for — and both
+were told it worked, because each one's inserts really were accepted.
+
+So an element is **owned** for the length of a write (`holds.py`). A second
+writer is refused with `ELEMENT_HELD`, which names the holder, what it is doing
+and how long it has been doing it, so the caller can decide between waiting and
+writing somewhere else. It is not a queue: a queued sentence would be applied
+minutes later to a field that has since changed.
+
+Three things follow, and each has a test that fails if it stops being true:
+
+- **Per element, never per application.** Two agents in one window is the case
+  this service exists to support; two agents in one text field is the case it
+  exists to prevent.
+- **Taken in `actions.perform`.** That is the only point every write crosses —
+  handlers, the steps of a batch, tests, and anything importing the module
+  directly. A rule enforced above it is a rule with a way around it, and a
+  client-side queue is a guarantee the caller can decline to use.
+- **Given back on completion or on the connection ending.** An element owned by
+  a process that no longer exists is owned for the rest of the session.
+
+Only the methods the protocol classes as `edit` are owned; the set is derived
+from the protocol rather than listed, so an edit method added later arrives
+owned. Focusing a window or invoking a button takes no hold — there is no
+half-finished state for a second caller to land in the middle of. Reading is
+never blocked; watching a sentence appear is the point.
+
+`release()` without a holder filter is the seam preemption needs — the trigger,
+when a person takes a field back from an agent, belongs to the user-takeover
+work and is not implemented here.
+
 ## Tests
 
 ```
