@@ -34,14 +34,14 @@ re-run it instead, and if a row surprises you, that is the point of it.
 | gnome-terminal-server | gtk 3.24.41 | 1 | 2 | 8 | 109 | works | 0 | 54 | 0 | walkable tree |
 | update-notifier | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows |
 | zoom | Qt 6.8.8 | 8 | 1 | 5 | 237 | no | 0 | 218 | 6 | walkable tree |
-| Google Chrome | Chromium 1.0 | 3 | 8 | 12+ | 281 | works | 2 | 278 | 1 | walkable tree |
+| Google Chrome | Chromium 1.0 | 3 | 8 | 12+ | 272 | works | 2 | 269 | 1 | depth-limited |
 | xdg-desktop-portal-gnome | GTK 4.14.5 | 0 | 1 | 0 | 0 | no | 0 | 0 | 0 | no windows |
-| vesktop | Chromium 1.0 | 1 | 8 | 12+ | 30 | works | 2 | 29 | 0 | shallow tree |
+| vesktop | Chromium 1.0 | 1 | 8 | 12+ | 30 | works | 2 | 29 | 0 | depth-limited |
 | org.gnome.Nautilus | GTK 4.14.5 | 1 | 1 | 12+ | 49 | no | 60 | 2 | 0 | frame actions |
 | update-manager | gtk 3.24.41 | 1 | 2 | 10 | 101 | works | 0 | 57 | 3 | walkable tree |
 | gnome-text-editor | GTK 4.14.5 | 1 | 1 | 12+ | 43 | no | 36 | 4 | 0 | frame actions |
 | audacity | gtk 3.24.41 | 1 | 2 | 8 | 571 | works | 0 | 390 | 10 | walkable tree |
-| code | Chromium 1.0 | 1 | 8 | 0 | 1 | works | 2 | 0 | 0 | opaque |
+| code | Chromium 1.0 | 1 | 8 | 12+ | 30 | works | 2 | 30 | 0 | depth-limited |
 
 ## Column meanings
 
@@ -62,6 +62,13 @@ re-run it instead, and if a row surprises you, that is the point of it.
   one column is a statement about where they live, not about whether they exist.
 - **Editable** — elements an agent could type into.
 - **Verdict** — which of those surfaces an agent would actually drive this application by.
+
+> **Every row here is measured at depth 12, the maximum a window inspection may
+> ask for, and every Chromium-family row hits it.** Walked without a limit, the
+> same applications reach 952 nodes (Discord), 662 (Chrome) and 621 (code), with
+> their deepest content at depth 29 to 34. A "depth-limited" verdict means the
+> count in this table is a property of the instrument, not of the application.
+> See `07-open-questions.md`.
 
 ## What this does not say
 
