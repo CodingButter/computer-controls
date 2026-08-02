@@ -14,7 +14,9 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+#: The gate lives at the repository root, one level above the service, because
+#: the service is no longer the only thing with a suite under it.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import conftest as gate
 from desktop_service.backends import x11
