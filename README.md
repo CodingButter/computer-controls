@@ -8,7 +8,9 @@ coordinate guessing.
 - `service/` — the Python desktop service, speaking AT-SPI2 over a Unix-socket JSON-RPC protocol
 
 Full documentation lands at the end of the project. What follows is the minimum needed to run
-this from a fresh clone.
+this from a fresh clone. If you are picking up an issue, read
+[CONTRIBUTING.md](CONTRIBUTING.md) first — it is short, and it is mostly about how to prove what
+you did from wherever you happen to be sitting.
 
 ## Local development setup
 
