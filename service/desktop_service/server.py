@@ -194,20 +194,45 @@ def _method_list_windows(params: dict[str, Any]) -> dict[str, Any]:
 MAX_DEPTH = 12
 
 #: What the cap becomes once a connection has said which applications it is
-#: watching. The shallow number was never a statement about twelve being the
-#: interesting depth — it was the only defence against a walk that starts at the
-#: desktop and does not know where it is going. An attention-scoped walk starts
-#: inside one application, and the node budget below is unchanged, so the real
-#: cost bound still holds while the arbitrary one gets out of the way. This is
-#: what makes a text editor's document buffer — which sits below twelve levels
-#: of scaffolding when counted from the frame — reachable without drilling.
+#: watching, **and the walk starts inside one of them**. The shallow number was
+#: never a statement about twelve being the interesting depth — it was the only
+#: defence against a walk that starts at the desktop and does not know where it
+#: is going. A scoped walk starts inside one application, and the node budget
+#: below is unchanged, so the real cost bound still holds while the arbitrary
+#: one gets out of the way. This is what makes a text editor's document buffer —
+#: which sits below twelve levels of scaffolding when counted from the frame —
+#: reachable without drilling.
 SCOPED_MAX_DEPTH = 64
 MAX_NODES = 1000
 MAX_QUERY_LIMIT = 200
 
 
 def _depth_ceiling(params: dict[str, Any]) -> int:
-    return attention.of(_client_id(params)).depth_ceiling(MAX_DEPTH, SCOPED_MAX_DEPTH)
+    """How deep this particular walk may go.
+
+    The lift is earned by where the walk starts, not by what the connection
+    said it was interested in. Those are the same thing exactly when the target
+    is one of the declared applications, and a connection that declares an
+    editor and then walks a browser is the case that made them different.
+
+    Attention can only ever subtract — that is the whole distinction between it
+    and the consent ceiling — so a lift granted on the strength of a
+    declaration alone would be attention adding capability, which is the one
+    thing this module says it never does. Checking the target keeps the
+    relaxation and the sentence justifying it as the same fact.
+
+    The target is resolved only for a connection that is scoped and asking for
+    the deep budget. An undeclared connection is capped at the shallow ceiling
+    whatever it names, so the lookup would be a per-call tax on a question
+    already answered.
+    """
+    focus = attention.of(_client_id(params))
+    ceiling = focus.depth_ceiling(MAX_DEPTH, SCOPED_MAX_DEPTH)
+    if ceiling == MAX_DEPTH:
+        return ceiling
+    if not focus.covers(_application_of(params)):
+        return MAX_DEPTH
+    return ceiling
 
 
 def _method_inspect_window(params: dict[str, Any]) -> dict[str, Any]:

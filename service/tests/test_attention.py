@@ -354,15 +354,76 @@ def test_the_ceiling_runs_before_attention_at_the_one_choke_point():
 # --- depth ------------------------------------------------------------------
 
 
-def test_the_depth_ceiling_lifts_only_for_a_scoped_connection(open_desktop):
+@pytest.fixture()
+def targets(monkeypatch):
+    """Window ids that resolve to an application, the way a live lookup would.
+
+    `_application_of` reaches the toolkit thread to ask what a window belongs
+    to. Answering from a table keeps these tests portable while leaving the
+    thing under test — what the ceiling does with the answer — untouched.
+    """
+    belongs = {"win-editor": "some-editor", "win-browser": "a-browser"}
+    monkeypatch.setattr(
+        server, "_application_of", lambda params: belongs.get(params.get("windowId"), "")
+    )
+    return belongs
+
+
+def test_the_depth_ceiling_lifts_only_for_a_scoped_connection(open_desktop, targets):
     """Criterion three: the budget is measured from what the client is watching."""
     declare("cl-scoped", ["some-editor"], attention.TREE)
     declare("cl-shallow", ["some-editor"], attention.SURFACE)
     declare("cl-greedy", (), attention.TREE)
-    assert server._depth_ceiling({"clientId": "cl-scoped"}) == server.SCOPED_MAX_DEPTH
-    assert server._depth_ceiling({"clientId": "cl-shallow"}) == server.MAX_DEPTH
-    assert server._depth_ceiling({"clientId": "cl-greedy"}) == server.MAX_DEPTH
-    assert server._depth_ceiling({"clientId": "cl-undeclared"}) == server.MAX_DEPTH
+    inside = {"windowId": "win-editor"}
+    assert server._depth_ceiling({"clientId": "cl-scoped", **inside}) == server.SCOPED_MAX_DEPTH
+    assert server._depth_ceiling({"clientId": "cl-shallow", **inside}) == server.MAX_DEPTH
+    assert server._depth_ceiling({"clientId": "cl-greedy", **inside}) == server.MAX_DEPTH
+    assert server._depth_ceiling({"clientId": "cl-undeclared", **inside}) == server.MAX_DEPTH
+
+
+def test_the_deep_budget_does_not_follow_a_walk_out_of_the_named_application(
+    open_desktop, targets
+):
+    """The lift is earned by where the walk starts, not by what was declared.
+
+    A connection that names an editor and then inspects a browser is asking for
+    a walk from the desktop with extra steps: nothing about that target was made
+    cheaper by the declaration. Granting it anyway would let attention — which
+    exists only to subtract — hand out capability, and would leave four
+    sentences in this codebase describing a rule nothing enforced.
+    """
+    declare("cl-scoped", ["some-editor"], attention.TREE)
+    deep = {"clientId": "cl-scoped", "windowId": "win-editor"}
+    elsewhere = {"clientId": "cl-scoped", "windowId": "win-browser"}
+    assert server._depth_ceiling(deep) == server.SCOPED_MAX_DEPTH
+    assert server._depth_ceiling(elsewhere) == server.MAX_DEPTH
+
+
+def test_a_target_the_desktop_could_not_identify_gets_the_shallow_ceiling(
+    open_desktop, targets
+):
+    """An unidentifiable target is never the one that earns the deeper budget.
+
+    Same direction as the allowlist's `_UNIDENTIFIED`: when the rule depends on
+    knowing what a call is aimed at and the desktop cannot say, the answer is
+    the restrictive one. A window that went away mid-call is not a licence.
+    """
+    declare("cl-scoped", ["some-editor"], attention.TREE)
+    assert server._depth_ceiling({"clientId": "cl-scoped", "windowId": "win-gone"}) == server.MAX_DEPTH
+    assert server._depth_ceiling({"clientId": "cl-scoped"}) == server.MAX_DEPTH
+
+
+def test_the_target_is_not_resolved_when_it_cannot_change_the_answer(open_desktop, monkeypatch):
+    """An undeclared connection pays no lookup for a ceiling already decided.
+
+    Resolving an application is a round trip to the toolkit thread. Every client
+    that predates attention is undeclared, so a lookup here would be a tax on
+    every inspection in the service to answer a question whose answer is fixed.
+    """
+    asked: list[dict] = []
+    monkeypatch.setattr(server, "_application_of", lambda params: asked.append(params) or "")
+    assert server._depth_ceiling({"clientId": "cl-undeclared", "windowId": "win-editor"}) == server.MAX_DEPTH
+    assert asked == []
 
 
 def test_both_inspection_methods_ask_for_the_same_ceiling():
