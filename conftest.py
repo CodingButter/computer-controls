@@ -16,11 +16,29 @@ desktop deselects them and says which one was missing.
 Nothing here is skipped for convenience. `--live-only` exists for the opposite
 reason: on a real desktop the interesting failures are the thirty-eight, and
 being able to run only those is what makes a live proof cheap enough to repeat.
+
+The gate sits at the repository root rather than inside ``service/`` because the
+service is no longer the only thing with tests. An option registered in a
+subdirectory is not registered at all until pytest has already parsed the
+command line, so ``pytest --no-live`` from the root — the line every issue and
+every sandboxed worktree quotes — died on its own argument. One gate at the top
+answers for every suite beneath it.
 """
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
+
+#: ``desktop_service`` and the service's own ``tests`` package used to be
+#: importable because pytest was run from inside ``service/``. Run from the
+#: root, that directory is on nobody's path, so the suites are placed here
+#: instead of depending on a working directory.
+ROOT = Path(__file__).resolve().parent
+for package_root in (ROOT / "service", ROOT / "clients" / "recorder"):
+    sys.path.insert(0, str(package_root))
 
 #: A live test is one that drives a session it did not create. The suffix is
 #: the declaration; this module turns it into a marker so that nothing depends
