@@ -92,8 +92,8 @@ def render(rows: list[dict], env: dict[str, str]) -> str:
         "",
         "## Applications on the accessibility bus",
         "",
-        "| Application | Toolkit | Windows | Interfaces | Depth | Nodes | Collection | Frame actions | Editable | Verdict |",
-        "|---|---|---:|---:|---:|---:|---|---:|---:|---|",
+        "| Application | Toolkit | Windows | Interfaces | Depth | Nodes | Collection | Frame actions | Actionable elements | Editable | Verdict |",
+        "|---|---|---:|---:|---:|---:|---|---:|---:|---:|---|",
     ]
     for row in rows:
         collection = (
@@ -107,7 +107,8 @@ def render(rows: list[dict], env: dict[str, str]) -> str:
         lines.append(
             f"| {row['name']} | {toolkit or 'unknown'} | {row['windowCount']} | "
             f"{len(row['interfaces'])} | {depth} | {nodes} | {collection} | "
-            f"{row['frameActionCount']} | {row['editableFields']} | {verdict(row)} |"
+            f"{row['frameActionCount']} | {row['actionableElements']} | "
+            f"{row['editableFields']} | {verdict(row)} |"
         )
 
     lines += ["", "## Column meanings", ""]
@@ -123,6 +124,10 @@ def render(rows: list[dict], env: dict[str, str]) -> str:
         "- **Frame actions** — named actions on the window itself. GTK4 applications put nearly",
         "  their whole menu here, which is why a near-empty element tree is not the same as an",
         "  undriveable application.",
+        "- **Actionable elements** — elements *below* the frame that expose at least one action,",
+        "  within the walk bounds above. Read it together with the previous column and never",
+        "  instead of it: a toolkit puts its actions on the frame or on its widgets, and a zero in",
+        "  one column is a statement about where they live, not about whether they exist.",
         "- **Editable** — elements an agent could type into.",
         "- **Verdict** — which of those surfaces an agent would actually drive this application by.",
         "",

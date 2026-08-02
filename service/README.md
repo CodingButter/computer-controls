@@ -74,11 +74,22 @@ references stay stable across calls and across processes without a lookup table.
 ## Tests
 
 ```
-.venv/bin/python -m pytest tests/test_transport.py tests/test_capabilities.py -q
-.venv/bin/python -m pytest tests/test_discovery_live.py -q
+.venv/bin/python -m pytest -q              # everything this machine can run
+.venv/bin/python -m pytest -q --no-live    # only the tests that need no desktop
+.venv/bin/python -m pytest -q --live-only  # only the tests that drive a real one
 ```
 
-`test_discovery_live.py` runs against whatever desktop is actually running, so it
-asserts invariants — an application has an id, a window title is stable across
-two listings — and never a fixed count. The count was 21 during planning and will
-not stay 21.
+The suite is two suites. Most of it is arithmetic — a protocol, a registry, a
+delta engine, a consent ceiling — and runs anywhere, including a container with
+no display. The rest drives whatever session is actually logged in, and any
+module whose name ends in `_live` is marked as such automatically.
+
+A run on a machine with no reachable display deselects the live tests and says
+so, rather than failing in a way that reads like a regression. The display is
+probed by connecting to it, never by reading `DISPLAY`, because a service
+started from an SSH shell inherits no `DISPLAY` and drives a desktop perfectly
+well once it has found one.
+
+The live tests assert invariants — an application has an id, a window title is
+stable across two listings — and never a fixed count. The count was 21 during
+planning and will not stay 21.

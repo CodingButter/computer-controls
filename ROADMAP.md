@@ -51,7 +51,7 @@ Not defects. Measured facts about what each toolkit publishes, kept open because
 needs to know them and because the tier ladder exists precisely for these.
 
 - [#13](https://github.com/CodingButter/computer-controls/issues/13) — Electron exposes a frame and almost nothing under it
-- [#14](https://github.com/CodingButter/computer-controls/issues/14) — Zoom exposes no actions
+- [#14](https://github.com/CodingButter/computer-controls/issues/14) — Zoom exposes one interface and no `Collection`
 - [#15](https://github.com/CodingButter/computer-controls/issues/15) — the accessibility layer cannot see a GTK4 gutter
 
 ## Later

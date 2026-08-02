@@ -48,6 +48,7 @@ def fake_backend(monkeypatch):
     monkeypatch.setattr(probe.backend, "toolkit_of", lambda obj: ("GTK", "4.14"))
     monkeypatch.setattr(probe.backend, "role_of", lambda obj: obj.role)
     monkeypatch.setattr(probe.backend, "actions_of", lambda obj: obj.actions)
+    monkeypatch.setattr(probe.backend, "action_count_of", lambda obj: len(obj.actions))
     monkeypatch.setattr(probe.backend, "children_of", children_of)
     monkeypatch.setattr(probe.backend, "_safe", lambda fn, default=None: fn())
     return state
@@ -149,6 +150,51 @@ def test_a_wide_tree_stops_at_the_node_bound_and_says_so(fake_backend):
 
     assert result["nodeLimited"] is True
     assert result["nodeCount"] <= probe.MAX_PROBE_NODES
+
+
+def test_a_toolkit_that_puts_its_actions_on_widgets_is_not_reported_as_actionless(fake_backend):
+    """The Qt shape, and the reason this measurement exists.
+
+    A frame with no actions over a tree of buttons that each have one used to
+    read as an application exposing nothing to invoke. That was the probe only
+    ever asking the frame.
+    """
+    buttons = [FakeNode(role="push button", children=[], actions=["click"]) for _ in range(3)]
+    label = FakeNode(role="label", children=[])
+    window = FakeNode(role="frame", children=buttons + [label], actions=[])
+    fake_backend.update(app=FakeNode(name="zoom"), windows=[window], interfaces=["Accessible"])
+
+    result = probe.probe_application("app-qt").to_json()
+
+    assert result["frameActionCount"] == 0
+    assert result["actionableElements"] == 3
+    assert result["elementActions"] == ["push button: click"]
+
+
+def test_the_frame_is_not_counted_twice_as_an_actionable_element(fake_backend):
+    """GTK4's menu lives on the frame, and belongs in exactly one column."""
+    window = FakeNode(role="frame", children=[], actions=["page.save", "page.print"])
+    fake_backend.update(app=FakeNode(name="editor"), windows=[window], interfaces=["Accessible"])
+
+    result = probe.probe_application("app-gtk4").to_json()
+
+    assert result["frameActionCount"] == 2
+    assert result["actionableElements"] == 0
+
+
+def test_the_action_name_sample_is_bounded_however_many_elements_carry_actions(fake_backend):
+    """Counting is per node; naming is evidence, and evidence has a budget."""
+    buttons = [
+        FakeNode(role="push button", children=[], actions=[f"act-{i}", f"act-{i}-b"])
+        for i in range(50)
+    ]
+    window = FakeNode(role="frame", children=buttons, actions=[])
+    fake_backend.update(app=FakeNode(name="busy"), windows=[window], interfaces=["Accessible"])
+
+    result = probe.probe_application("app-busy").to_json()
+
+    assert result["actionableElements"] == 50
+    assert len(result["elementActions"]) <= probe.MAX_SAMPLED_ACTIONS
 
 
 def test_editable_fields_are_counted_so_the_matrix_can_say_where_typing_is_possible(fake_backend):
