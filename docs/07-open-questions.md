@@ -72,6 +72,22 @@ walk limits as everything else.
 **Tier that picks it up** — none needed. Recorded because a reader comparing
 node counts to query latency should know why Zoom is the slow one.
 
+**Not the same finding as "Zoom exposes no actions."** That sentence was said
+once, on the strength of a `0` in the *frame actions* column, and it did not
+follow: until now the probe asked only windows what they could do and never
+asked a single element inside one. Zero frame actions is the ordinary case —
+`gnome-shell`, `gnome-terminal-server` and `update-manager` all read zero and are
+driveable — because a toolkit puts its actions on the frame, as GTK4 does, or on
+its widgets, as Qt does. The probe now counts action-bearing elements as well
+(`actionableElements`, and the `Actionable elements` column beside the frame
+one), so the question becomes a measurement instead of an inference. Run
+`tests/probe_element_actions.py zoom` from the service directory with Zoom open,
+and re-run the matrix generator: whichever way it comes back, the number is a
+number. Until then no claim about Zoom's actions belongs in this file, and the
+escalation to raw input that the old sentence implied is not earned — raw input
+is out of scope for this build by design, and would need a measured dead end
+rather than an unmeasured one.
+
 ---
 
 ## The accessibility layer cannot see a GTK4 gutter
