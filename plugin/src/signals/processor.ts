@@ -12,7 +12,7 @@
  * turn without memory-backed thread ids simply does not arm; there is nothing
  * to subscribe and nowhere to deliver.
  */
-import type { InputProcessor } from "mastracode/plugin";
+import type { InputProcessor } from "@mastra/core/processors";
 
 import { arm, type Armable } from "./arming.ts";
 

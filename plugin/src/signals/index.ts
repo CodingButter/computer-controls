@@ -5,7 +5,7 @@
  * the arming processor — two of them would mean one subscribed provider and one
  * polling provider that never learned a thread existed.
  */
-import type { InputProcessor } from "mastracode/plugin";
+import type { InputProcessor } from "@mastra/core/processors";
 
 import { DesktopSignalProvider } from "./desktop-signal-provider.ts";
 import { buildArmingProcessor } from "./processor.ts";

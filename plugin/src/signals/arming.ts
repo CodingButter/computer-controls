@@ -23,7 +23,7 @@
  * a tool is worse than one that plainly does not work, because nobody
  * investigates the second kind.
  */
-import type { InputProcessor } from "mastracode/plugin";
+import type { InputProcessor } from "@mastra/core/processors";
 
 /** The narrow slice of the provider this module drives. */
 export interface Armable {
