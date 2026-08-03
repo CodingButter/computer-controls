@@ -369,9 +369,15 @@ def _expand_neighbourhood(
             while dfrontier:
                 obj, parent_elem, parent_dig, depth = dfrontier.pop(0)
                 if depth >= descendants:
+                    # Same contract as inspect_tree (line 150-152): a node at
+                    # the depth boundary with children must say so, or a cut
+                    # subtree is indistinguishable from one that ended.
+                    if children(obj):
+                        parent_elem.truncated = True
                     continue
                 for index, child_obj in enumerate(children(obj)):
                     if not can_expand():
+                        parent_elem.truncated = True
                         break
                     child_elem, child_fp, child_ref = describe(
                         child_obj, index, parent_dig

@@ -379,3 +379,39 @@ def test_every_expanded_node_is_in_observations():
         assert ancestor.id in observed_ids
     for sib in match.siblings:
         assert sib.id in observed_ids
+
+
+def test_descendants_depth_boundary_marks_truncated():
+    """A node at the descendants depth boundary with children must say so."""
+    tree = Node("frame", "W", [
+        Node("panel", "P", [
+            Node("panel", "Child", [
+                Node("push button", "Grandchild"),
+            ]),
+        ]),
+    ])
+    found = inspection.query(
+        tree, describe=describe, children=children,
+        parent_of=parent_of, name="P", descendants=1,
+    )
+    match = found.matches[0]
+    child = match.children[0]
+    assert child.name == "Child"
+    assert child.truncated  # has children we didn't walk into
+
+
+def test_descendants_budget_cutoff_marks_truncated():
+    """Budget exhaustion mid-enumeration marks the parent element truncated."""
+    tree = Node("frame", "W", [
+        Node("panel", "P", [
+            Node("push button", f"C{i}") for i in range(5)
+        ]),
+    ])
+    found = inspection.query(
+        tree, describe=describe, children=children,
+        parent_of=parent_of, name="P", descendants=1,
+        max_expand_nodes=1,
+    )
+    match = found.matches[0]
+    assert match.truncated  # started enumerating children but ran out of budget
+    assert found.neighbourhood_truncated
