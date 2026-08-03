@@ -361,24 +361,37 @@ def test_parent_of_none_skips_ancestors_but_descendants_still_work():
 
 
 def test_every_expanded_node_is_in_observations():
-    """A returned ancestor or sibling id must resolve — it was observed."""
+    """Every id handed back must resolve later — so every node was observed.
+
+    `limit=1` stops the search at the match, which is the only arrangement that
+    actually tests expansion: nodes below the cut were never described by the
+    walk, so if expansion forgets to record one, the caller gets an id that
+    resolves to nothing. Without the limit the search has already observed the
+    whole tree and this test passes no matter what expansion does.
+
+    Ancestors are the exception no arrangement can catch: a breadth-first search
+    describes every node on the path to a match before the match itself, so an
+    ancestor is always already observed and expansion's own record of it is
+    belt-and-braces. Descendants and siblings are the ones that genuinely
+    depend on expansion recording them.
+    """
     tree = Node("frame", "W", [
         Node("panel", "Container", [
-            Node("push button", "Target"),
+            Node("push button", "Target", [Node("label", "Deep")]),
             Node("push button", "Neighbour"),
         ]),
     ])
     found = inspection.query(
         tree, describe=describe, children=children,
-        parent_of=parent_of, name="Target",
-        ancestors=2, siblings=True,
+        parent_of=parent_of, name="Target", limit=1,
+        ancestors=2, descendants=1, siblings=True,
     )
     observed_ids = {obs[0] for obs in found.observations}
     match = found.matches[0]
-    for ancestor in match.ancestry:
-        assert ancestor.id in observed_ids
-    for sib in match.siblings:
-        assert sib.id in observed_ids
+    expanded = [*match.ancestry, *match.children, *match.siblings]
+    assert [e.name for e in expanded] == ["Container", "W", "Deep", "Neighbour"]
+    for element in expanded:
+        assert element.id in observed_ids
 
 
 def test_descendants_depth_boundary_marks_truncated():
