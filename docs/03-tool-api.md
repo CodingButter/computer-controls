@@ -2,7 +2,7 @@
 
 Generated from `protocol/schema.json` — do not edit.
 Run: `node scripts/generate-tool-api-doc.mjs`
-Protocol version: 1.0   schema sha256: bfa45250563894d0
+Protocol version: 1.0   schema sha256: 6705ae8fed45c861
 
 The contract between any client and the desktop service. Frozen at 1.0. Additive changes only: new methods and new optional fields. Removing a method, renaming or removing a field, narrowing a type, changing an error code, or adding a required request field is a breaking change and requires a major version.
 
@@ -18,7 +18,7 @@ What a method does to the world. Declared here at freeze time so enforcement can
 | `submit` | Triggers an application's own action. Consequences belong to the application. |
 | `destructive` | May discard or overwrite user data, or is not reversible. |
 
-## Methods (28)
+## Methods (30)
 
 ### `auditTail`
 
@@ -546,17 +546,20 @@ Run a sequence of actions in one round trip. The token-efficiency lever: a seque
 
 **Operation class:** `observe`
 
-Find elements in a window by role, name or state. At least one filter is required.
+Find elements in a window by role, name or state. At least one filter is required. Optional ancestors/descendants/siblings expand the neighbourhood around each match after the match set is capped — how to find something in a large application without walking the whole tree.
 
 **Params**
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `ancestors` | integer | no | Expand each match upward toward the window root, returning up to this many ancestors in the element's ancestry field. Zero or absent means no ancestor expansion. Capped at 32 because a broken toolkit can hand back a non-terminating parent chain. |
 | `clientId` | string | no |  |
 | `confirm` | boolean | no | Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. |
+| `descendants` | integer | no | Expand each match downward, populating the element's children field to this many depth levels. Zero or absent means no descendant expansion. |
 | `limit` | integer | no |  |
 | `name` | string | no |  |
 | `role` | string | no |  |
+| `siblings` | boolean | no | When true, return each match's immediate neighbours (up to a per-hit cap) in the element's siblings field. |
 | `states` | string[] | no |  |
 | `windowId` | string | yes |  |
 
@@ -570,6 +573,7 @@ At least one of `role`, `name`, `states` is required.
 | `elements` | [`semanticElement`](#semanticelement)[] | yes |  |
 | `matchCount` | integer | yes |  |
 | `moreResults` | boolean | no | More matches exist than were returned — either the search was cut short or the answer hit its limit with tree left unwalked. A caller seeing this should narrow its filter rather than assume it has seen everything. |
+| `neighbourhoodTruncated` | boolean | no | Expansion was cut short by the node budget or time limit, not the search itself. Distinct from searchTruncated: the search covered the window, but some matches did not get their full neighbourhood. |
 | `revision` | integer | yes |  |
 | `searchTruncated` | boolean | yes | The search gave up before covering the window. |
 
@@ -674,6 +678,29 @@ Tell the service how hard to watch. The runtime owns cadence because the events 
 
 ---
 
+### `subscribeElement`
+
+**Operation class:** `observe`
+
+Declare intent to be told about changes to an element without holding a call open. A subscription is an observation claim, not a write claim: it does not prevent anyone else from acting on the element, and no subscription outranks the person at the keyboard. The element is resolved first — subscribing to an id that names nothing is an unkeepable promise. Subscribed elements are sampled on every observation sweep regardless of recency, because a declared intent outranks a heuristic that ranks by how recently something was touched. Over the per-connection ceiling is a refusal that names the ceiling, never a silent truncation: a service that accepts a thousand subscriptions and quietly samples the first sixteen has reinvented the current bug with better manners. A disconnecting client's subscriptions are all released, exactly as a claim is.
+
+**Params**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clientId` | string | no |  |
+| `confirm` | boolean | no |  |
+| `elementId` | string | yes |  |
+
+**Result**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `revision` | integer | yes |  |
+| `subscribed` | boolean | yes |  |
+
+---
+
 ### `typeText`
 
 **Operation class:** `edit`
@@ -693,6 +720,29 @@ Put text into an editable element the way a person would: a word at a time, at a
 | `wordsPerMinute` | integer | no | Typing speed. Defaults to a competent typist. Faster than a person can type is available and is a choice the caller makes knowingly. |
 
 **Result:** [`actionResult`](#actionresult)
+
+---
+
+### `unsubscribeElement`
+
+**Operation class:** `observe`
+
+Stop asking to be told about an element. Releasing what you do not subscribe to is not an error: the desired state is that this client watches nothing here, and it is already true. A client that disconnects is unsubscribed from everything it held.
+
+**Params**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clientId` | string | no |  |
+| `confirm` | boolean | no | Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. |
+| `elementId` | string | yes |  |
+
+**Result**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `released` | boolean | yes | True when this call ended a subscription, false when there was nothing of this client's to give up. |
+| `revision` | integer | yes |  |
 
 ---
 
@@ -815,7 +865,7 @@ The data member of a JSON-RPC error. The domain code lives here; the top-level c
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `code` | `APPLICATION_NOT_FOUND` \| `WINDOW_NOT_FOUND` \| `ELEMENT_NOT_FOUND` \| `ELEMENT_REFERENCE_STALE` \| `BACKEND_UNAVAILABLE` \| `ACTION_NOT_SUPPORTED` \| `PERMISSION_DENIED` \| `SESSION_EXPIRED` \| `ELEMENT_HELD` \| `TIMEOUT` \| `METHOD_NOT_FOUND` \| `INVALID_PARAMS` \| `INTERNAL_ERROR` | yes |  |
+| `code` | `APPLICATION_NOT_FOUND` \| `WINDOW_NOT_FOUND` \| `ELEMENT_NOT_FOUND` \| `ELEMENT_REFERENCE_STALE` \| `BACKEND_UNAVAILABLE` \| `ACTION_NOT_SUPPORTED` \| `PERMISSION_DENIED` \| `SESSION_EXPIRED` \| `ELEMENT_HELD` \| `TIMEOUT` \| `METHOD_NOT_FOUND` \| `INVALID_PARAMS` \| `INTERNAL_ERROR` \| `SUBSCRIPTION_LIMIT_REACHED` | yes |  |
 | `detail` | object | no |  |
 | `message` | string | no | Present when this error travels inside a result rather than as a JSON-RPC error. A failed step inside a batch has no top-level error member to carry its explanation, and a report that says a step failed without saying why is not worth returning. |
 
@@ -866,6 +916,7 @@ One thing on the desktop, as a caller sees it.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `actions` | string[] | yes | Action names invokable on this element. For a window this is often the application's whole command set. |
+| `ancestry` | [`semanticElement`](#semanticelement)[] | no | Ancestor chain for this element, nearest first, up to the requested depth. Present only when the caller asked for ancestor expansion. Each entry is a full element whose id is valid for getElement. |
 | `backend` | `atspi` \| `compositor` | yes |  |
 | `bounds` | [`bounds`](#bounds) | no |  |
 | `children` | [`semanticElement`](#semanticelement)[] | no |  |
@@ -873,6 +924,7 @@ One thing on the desktop, as a caller sees it.
 | `id` | string | yes | Stable reference. Valid for the service instance's lifetime. Never reused for a different element. |
 | `name` | string | yes | Accessible name. Passed through the value-egress point. |
 | `role` | string | yes | What kind of thing it is, in the backend's vocabulary. |
+| `siblings` | [`semanticElement`](#semanticelement)[] | no | Immediate neighbours of this element under the same parent, up to a per-hit cap. Present only when the caller asked for sibling expansion. |
 | `states` | string[] | yes |  |
 | `truncated` | boolean | no | Present and true when this element has children the walk did not return, whether because the node budget ran out or because the depth limit was reached. Never silently omitted: a subtree that was cut off must never be indistinguishable from one that ended. Drill from this element with inspectElement to see what is below it. |
 | `value` | string | no | Current value, for elements that hold one. Passed through the value-egress point. |
@@ -943,6 +995,7 @@ The complete domain error vocabulary. Carried in the JSON-RPC error object under
 | `SESSION_EXPIRED` | The client session's grant has expired and must be renewed. Distinct from PERMISSION_DENIED so a caller can tell 'never allowed' from 'allowed, ask again'. |
 | `ELEMENT_HELD` | Another client is writing this element and owns it until that write finishes. Carries the holder's identity, what it is doing and how long it has been at it. Not a permission answer and not a queue: the request is refused, not deferred. |
 | `CLAIM_EXPIRED` | The claim covering this write ran out before the write finished. A lease is sized from the work it was taken for, so this says the work outran its own estimate rather than that time merely passed. The element is free and nothing was rolled back: a half-written field is a real state of the world, and hiding it would be the more expensive lie. |
+| `SUBSCRIPTION_LIMIT_REACHED` | This connection already holds the maximum number of element subscriptions. Carries the ceiling, because a refusal that names the bound lets a caller choose what to release rather than guessing. |
 | `TIMEOUT` | The desktop did not answer within the allotted time. |
 | `METHOD_NOT_FOUND` | No such method in this protocol version. |
 | `INVALID_PARAMS` | The request did not satisfy this schema. |

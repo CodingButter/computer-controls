@@ -26,8 +26,9 @@ containment rule, and [`ROADMAP.md`](ROADMAP.md) has where the project is.
 | [docs/03-tool-api.md](docs/03-tool-api.md) | Every method, parameter, and error code — generated from `protocol/schema.json` so it cannot drift |
 | [docs/04-security-model.md](docs/04-security-model.md) | Operation classes, the ceiling-and-hand consent model, redaction, capture blocklist, holds, audit, emergency stop |
 | [docs/05-compatibility-matrix.md](docs/05-compatibility-matrix.md) | Measured accessibility-tree coverage across applications and toolkits |
-| [docs/06-prototype-notes.md](docs/06-prototype-notes.md) | What proved out, what was harder than expected, and the lessons worth not rediscovering |
+| [docs/06-how-a-stranger-connects.md](docs/06-how-a-stranger-connects.md) | How a machine and a client find each other, and what the daemon deliberately does not own |
 | [docs/07-open-questions.md](docs/07-open-questions.md) | Gaps this build does not close, and the deferred capability tiers |
+| [docs/08-prototype-notes.md](docs/08-prototype-notes.md) | What proved out, what was harder than expected, and the lessons worth not rediscovering |
 | [docs/proofs/](docs/proofs/) | Script-generated evidence about the real desktop — never hand-written |
 
 Everything below runs from the repository root, in order, in one shell.
