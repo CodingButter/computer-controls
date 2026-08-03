@@ -119,10 +119,15 @@ class DesktopTree:
         An `element-value-changed` names the element and its application but not
         the window it lives in; the file already knows. Merging keeps a later,
         thinner change from erasing what an earlier, fuller one established.
+
+        A thinner change always carries a fresh `lastChange` (synthesized by
+        `_document`), and `dict.update` applies the new document last, so the
+        committed `lastChange` can never go stale: it always describes the
+        change that produced this version of the file.
         """
         existing = self._read(element_path(change["elementId"]))
         document = _document(change)
-        merged = {key: value for key, value in existing.items() if key != "lastChange"}
+        merged = dict(existing)
         merged.update(document)
         return merged
 
