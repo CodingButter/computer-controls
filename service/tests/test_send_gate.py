@@ -293,6 +293,46 @@ def test_an_attestation_from_one_client_cannot_commit_as_another(desktop):
     assert "different client" in raised.value.message.lower()
 
 
+# --- composing and committing stay separate calls -------------------------
+
+
+def _commit_capable_methods() -> set[str]:
+    """Read the schema for methods that require an attestation to be presented.
+
+    Derived, never hand-listed: a later method that grows an ``attestationId``
+    parameter is a commit whether or not anyone remembers to update this test.
+    """
+    return {
+        name
+        for name, schema in server.protocol_generated.PARAMS_SCHEMA.items()
+        if "attestationId" in schema.get("required", ())
+    }
+
+
+def test_the_schema_knows_which_methods_commit():
+    assert _commit_capable_methods() == {"commitElement"}
+
+
+def test_a_batch_cannot_commit():
+    # Composing and sending are separate calls on purpose: a batch that could
+    # end in a commit would let one round trip both write a message and send
+    # it, which is the exact seam the gate exists to hold open. The batch's own
+    # step list is the door, so this reads it rather than trusting prose.
+    named = set(
+        server.protocol_generated.PARAMS_SCHEMA["performActions"]["properties"][
+            "actions"
+        ]["items"]["properties"]["method"]["enum"]
+    )
+    committing = named & _commit_capable_methods()
+    assert not committing, (
+        f"{sorted(committing)} can run as a batch step, so a single call can "
+        "compose and send — the gate is bypassed"
+    )
+    # And the server agrees with the schema: an unreachable step is dead
+    # weight, a step the schema forbids but the server dispatches is a hole.
+    assert not set(server._BATCH_METHODS) & _commit_capable_methods()
+
+
 # --- the register itself --------------------------------------------------
 
 
