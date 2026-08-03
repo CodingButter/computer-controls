@@ -56,6 +56,7 @@ import threading
 from typing import Any, Callable
 
 from . import holds, identity, send_gate
+from .protocol_generated import SCHEMA_DIGEST
 from .errors import (
     JSONRPC_INVALID_REQUEST,
     JSONRPC_PARSE_ERROR,
@@ -88,14 +89,19 @@ def daemon_socket_path() -> str:
     """
     Where a shared desktop service listens.
 
-    One name, known to every client without being told: a client that finds a
-    live service here attaches to it instead of starting a second one. That is
-    the difference between a desktop each client sees a private view of and one
-    desktop several clients agree about — two services on one desktop would
-    each hold their own element registry and their own revision counter, and an
-    element id from one would be meaningless to the other.
+    The name carries the schema digest so that a client and a daemon built from
+    the same protocol agree on one socket, while a client whose protocol differs
+    finds no socket at all and starts its own. The filesystem does the matching:
+    no version negotiation, no compatibility check — two builds that cannot
+    understand each other never meet on the same socket.
+
+    Within one build, one name is still what makes several clients agree about
+    one desktop: two services on one desktop would each hold their own element
+    registry and revision counter, and an element id from one would be
+    meaningless to the other. Digest keying preserves that while keeping
+    different builds apart.
     """
-    return default_socket_path(DAEMON_SESSION)
+    return default_socket_path(f"{DAEMON_SESSION}-{SCHEMA_DIGEST}")
 
 
 class JsonRpcServer:
@@ -120,6 +126,11 @@ class JsonRpcServer:
     @property
     def methods(self) -> list[str]:
         return sorted(self._handlers)
+
+    @property
+    def connection_count(self) -> int:
+        with self._lock:
+            return len(self._connections)
 
     def _reclaim_socket_path(self) -> None:
         """Replace a stale socket file rather than inheriting it.

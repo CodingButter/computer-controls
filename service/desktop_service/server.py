@@ -2090,6 +2090,54 @@ def _start_watching() -> None:
     loop.call_on_loop(_watcher.start_sweep)
 
 
+# --- Drain monitor --------------------------------------------------------- #
+# A superseded daemon must not be killed — a write may be mid-flight on
+# someone's screen. It stops accepting new connections (they land on the
+# new-digest socket and never reach it), finishes serving whoever is still
+# attached, and exits when the last one lets go. If nobody ever connected
+# within the startup grace, it exits on its own — nobody wanted this build.
+
+DAEMON_DRAIN_IDLE_SECS = 5
+DAEMON_STARTUP_GRACE_SECS = 30
+DAEMON_POLL_SECS = 0.5
+
+
+def _start_drain_monitor(
+    server: transport.JsonRpcServer, stop: threading.Event
+) -> threading.Thread:
+    """Exit the daemon once it has been drained or was never wanted.
+
+    The monitor polls connection count rather than hooking connect/disconnect
+    callbacks, because the exit condition is temporal — "idle for N seconds" —
+    and a callback would still need a timer.
+    """
+
+    def _monitor() -> None:
+        ever_connected = False
+        idle_since: float | None = None
+        born = time.monotonic()
+        while not stop.is_set():
+            count = server.connection_count
+            if count > 0:
+                ever_connected = True
+                idle_since = None
+            elif ever_connected:
+                if idle_since is None:
+                    idle_since = time.monotonic()
+                elif time.monotonic() - idle_since >= DAEMON_DRAIN_IDLE_SECS:
+                    stop.set()
+                    return
+            else:
+                if time.monotonic() - born >= DAEMON_STARTUP_GRACE_SECS:
+                    stop.set()
+                    return
+            stop.wait(DAEMON_POLL_SECS)
+
+    thread = threading.Thread(target=_monitor, name="desktop-drain", daemon=True)
+    thread.start()
+    return thread
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="desktop_service")
     parser.add_argument("--socket", default=None, help="Unix socket path to listen on")
@@ -2142,6 +2190,9 @@ def main(argv: list[str] | None = None) -> int:
 
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
+
+    if args.daemon:
+        _start_drain_monitor(server, stop)
 
     try:
         stop.wait()

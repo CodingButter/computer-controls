@@ -152,24 +152,6 @@ not express.
 
 ---
 
-## An attaching client cannot tell what code the daemon is running
-
-**Symptom** — the shared daemon serves the code it booted with. A client that
-attaches to a daemon started before a method existed gets `METHOD_NOT_FOUND` for
-a method its own generated protocol swears is there, and nothing in the
-handshake explains why.
-
-**Reproduce** — start the daemon, add a method, start a client without
-restarting the daemon.
-
-**Hypothesis** — none required; this is a missing field rather than a mystery.
-
-**Tier that picks it up** — the handshake. `hello` should carry the schema
-digest the daemon was built against, so a client can compare it to its own and
-say something useful instead of guessing.
-
----
-
 ## Deferred capability tiers
 
 The capability report (`getDesktopCapabilities`) declares five tiers. Three are

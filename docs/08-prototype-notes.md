@@ -137,9 +137,12 @@ the model nothing; a confidently-cropped diagnosis costs it the answer
 
 `METHOD_NOT_FOUND` from a method the client's generated protocol swears is there
 is almost always a stale daemon: the shared service serves the code it booted
-with, and a method added after it started does not exist to it
-(`07-open-questions.md:155-169`). `staleDaemonHint` compares the service's
-schema digest to the client's and appends a sentence pointing at the restart
+with, and a method added after it started does not exist to it. The socket is now
+keyed on the schema digest (`daemon-<digest>.sock`), so a client whose protocol
+differs from the running daemon never attaches to it — it finds its own socket
+and starts a matching build. `staleDaemonHint` remains as a diagnostic for the
+case where a same-digest daemon has still drifted, comparing the service's
+schema digest to the client's and appending a sentence pointing at the restart
 (`index.ts:89-92`). The code comment records this cost forty minutes once.
 
 ### Paced timeout arithmetic
