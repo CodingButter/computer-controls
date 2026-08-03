@@ -83,7 +83,12 @@ def test_no_service_module_imports_a_distribution_layer():
     ``from desktop_service.relay import X`` (qualified absolute) are caught,
     not just bare ``import relay``.
     """
-    for path in SERVICE.rglob("*.py"):
+    sources = list(SERVICE.rglob("*.py"))
+    assert sources, (
+        f"no Python modules found under {SERVICE}; the import invariant "
+        "cannot be checked — this is likely a path configuration error"
+    )
+    for path in sources:
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
