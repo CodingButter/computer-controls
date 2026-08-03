@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 2f4515d188e41214
+// Protocol version: 1.0   schema sha256: 6705ae8fed45c861
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "2f4515d188e41214" as const;
+export const SCHEMA_DIGEST = "6705ae8fed45c861" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -144,6 +144,8 @@ export interface ResponseCommon {
 export interface SemanticElement {
   /** Action names invokable on this element. For a window this is often the application's whole command set. */
   actions: string[];
+  /** Ancestor chain for this element, nearest first, up to the requested depth. Present only when the caller asked for ancestor expansion. Each entry is a full element whose id is valid for getElement. */
+  ancestry?: SemanticElement[];
   backend: "atspi" | "compositor";
   bounds?: Bounds;
   children?: SemanticElement[];
@@ -155,6 +157,8 @@ export interface SemanticElement {
   name: string;
   /** What kind of thing it is, in the backend's vocabulary. */
   role: string;
+  /** Immediate neighbours of this element under the same parent, up to a per-hit cap. Present only when the caller asked for sibling expansion. */
+  siblings?: SemanticElement[];
   states: string[];
   /** Present and true when this element has children the walk did not return, whether because the node budget ran out or because the depth limit was reached. Never silently omitted: a subtree that was cut off must never be indistinguishable from one that ended. Drill from this element with inspectElement to see what is below it. */
   truncated?: boolean;
@@ -537,14 +541,20 @@ export interface PerformActionsResult {
   revision: number;
 }
 
-/** Find elements in a window by role, name or state. At least one filter is required. (operation class: observe) */
+/** Find elements in a window by role, name or state. At least one filter is required. Optional ancestors/descendants/siblings expand the neighbourhood around each match after the match set is capped — how to find something in a large application without walking the whole tree. (operation class: observe) */
 export interface QueryElementsParams {
+  /** Expand each match upward toward the window root, returning up to this many ancestors in the element's ancestry field. Zero or absent means no ancestor expansion. Capped at 32 because a broken toolkit can hand back a non-terminating parent chain. */
+  ancestors?: number;
   clientId?: string;
   /** Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. */
   confirm?: boolean;
+  /** Expand each match downward, populating the element's children field to this many depth levels. Zero or absent means no descendant expansion. */
+  descendants?: number;
   limit?: number;
   name?: string;
   role?: string;
+  /** When true, return each match's immediate neighbours (up to a per-hit cap) in the element's siblings field. */
+  siblings?: boolean;
   states?: string[];
   windowId: string;
 }
@@ -554,6 +564,8 @@ export interface QueryElementsResult {
   matchCount: number;
   /** More matches exist than were returned — either the search was cut short or the answer hit its limit with tree left unwalked. A caller seeing this should narrow its filter rather than assume it has seen everything. */
   moreResults?: boolean;
+  /** Expansion was cut short by the node budget or time limit, not the search itself. Distinct from searchTruncated: the search covered the window, but some matches did not get their full neighbourhood. */
+  neighbourhoodTruncated?: boolean;
   revision: number;
   /** The search gave up before covering the window. */
   searchTruncated: boolean;

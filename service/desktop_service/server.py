@@ -65,6 +65,15 @@ _session = Session()
 WALK_TIMEOUT_SECONDS = 15.0
 SINGLE_ELEMENT_TIMEOUT_SECONDS = 10.0
 
+#: Expansion runs inside ``query()`` under this soft deadline, which is checked
+#: between describe calls rather than by the loop timeout: ``call_on_loop``
+#: destroys the source on expiry (loop.py:188-191), which would lose the partial
+#: answer. Twelve seconds leaves three seconds of margin under the 15s hard
+#: backstop and eight under the client's 20s request timeout.
+EXPANSION_BUDGET_SECONDS = 12.0
+MAX_SIBLINGS_PER_HIT = 10
+MAX_EXPAND_NODES = 2000
+
 
 def _require_window(window_id: str):
     window = atspi.find_window(window_id)
@@ -100,6 +109,31 @@ def _int_param(params: dict[str, Any], key: str, default: int, maximum: int) -> 
         raise InvalidParams(f"{key!r} must be at least 1", {"parameter": key, "received": value})
     # Clamped rather than rejected: a caller asking for too much gets a bounded
     # answer plus the truncation marker, which is more useful than an error.
+    return min(value, maximum)
+
+
+def _bool_param(params: dict[str, Any], key: str, default: bool = False) -> bool:
+    value = params.get(key, default)
+    if not isinstance(value, bool):
+        raise InvalidParams(
+            f"{key!r} must be a boolean", {"parameter": key, "received": type(value).__name__}
+        )
+    return value
+
+
+def _optional_int_param(
+    params: dict[str, Any], key: str, maximum: int
+) -> int:
+    """An integer that defaults to 0 (off) and rejects out-of-range values."""
+    value = params.get(key, 0)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise InvalidParams(
+            f"{key!r} must be an integer", {"parameter": key, "received": type(value).__name__}
+        )
+    if value < 0:
+        raise InvalidParams(
+            f"{key!r} must be at least 0", {"parameter": key, "received": value}
+        )
     return min(value, maximum)
 
 
@@ -286,6 +320,10 @@ def _method_query_elements(params: dict[str, Any]) -> dict[str, Any]:
             {"parameters": ["role", "name", "states"]},
         )
     limit = _int_param(params, "limit", 50, MAX_QUERY_LIMIT)
+    ancestors = _optional_int_param(params, "ancestors", inspection.MAX_ANCESTORS)
+    descendants = _optional_int_param(params, "descendants", inspection.MAX_DESCENDANTS)
+    siblings = _bool_param(params, "siblings", False)
+    wants_expansion = ancestors > 0 or descendants > 0 or siblings
 
     def work():
         window = _require_window(window_id)
@@ -293,10 +331,19 @@ def _method_query_elements(params: dict[str, Any]) -> dict[str, Any]:
             window,
             describe=atspi.describe,
             children=atspi.children_of,
+            parent_of=atspi.parent_of if wants_expansion else None,
             role=role,
             name=name,
             states=states,
             limit=limit,
+            ancestors=ancestors,
+            descendants=descendants,
+            siblings=siblings,
+            max_expand_nodes=MAX_EXPAND_NODES,
+            max_siblings_per_hit=MAX_SIBLINGS_PER_HIT,
+            deadline=time.monotonic() + EXPANSION_BUDGET_SECONDS
+            if wants_expansion
+            else None,
         )
 
     found = loop.call_on_loop(work, timeout=WALK_TIMEOUT_SECONDS)
@@ -306,6 +353,7 @@ def _method_query_elements(params: dict[str, Any]) -> dict[str, Any]:
         "matchCount": len(found.matches),
         "searchTruncated": found.truncated,
         "moreResults": found.more,
+        "neighbourhoodTruncated": found.neighbourhood_truncated,
         "revision": revision,
         "backend": atspi.BACKEND_NAME,
     }

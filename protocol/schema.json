@@ -124,6 +124,16 @@
         "actions": { "type": "array", "items": { "type": "string" }, "description": "Action names invokable on this element. For a window this is often the application's whole command set." },
         "bounds": { "$ref": "#/$defs/bounds" },
         "children": { "type": "array", "items": { "$ref": "#/$defs/semanticElement" } },
+        "ancestry": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/semanticElement" },
+          "description": "Ancestor chain for this element, nearest first, up to the requested depth. Present only when the caller asked for ancestor expansion. Each entry is a full element whose id is valid for getElement."
+        },
+        "siblings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/semanticElement" },
+          "description": "Immediate neighbours of this element under the same parent, up to a per-hit cap. Present only when the caller asked for sibling expansion."
+        },
         "truncated": { "type": "boolean", "description": "Present and true when this element has children the walk did not return, whether because the node budget ran out or because the depth limit was reached. Never silently omitted: a subtree that was cut off must never be indistinguishable from one that ended. Drill from this element with inspectElement to see what is below it." },
         "extra": {
           "type": "object",
@@ -524,7 +534,7 @@
 
     "queryElements": {
       "operationClass": "observe",
-      "summary": "Find elements in a window by role, name or state. At least one filter is required.",
+      "summary": "Find elements in a window by role, name or state. At least one filter is required. Optional ancestors/descendants/siblings expand the neighbourhood around each match after the match set is capped — how to find something in a large application without walking the whole tree.",
       "params": {
         "type": "object",
         "properties": {
@@ -533,6 +543,9 @@
           "name": { "type": "string" },
           "states": { "type": "array", "items": { "type": "string" } },
           "limit": { "type": "integer", "minimum": 1, "maximum": 200 },
+          "ancestors": { "type": "integer", "minimum": 0, "maximum": 32, "description": "Expand each match upward toward the window root, returning up to this many ancestors in the element's ancestry field. Zero or absent means no ancestor expansion. Capped at 32 because a broken toolkit can hand back a non-terminating parent chain." },
+          "descendants": { "type": "integer", "minimum": 0, "maximum": 10, "description": "Expand each match downward, populating the element's children field to this many depth levels. Zero or absent means no descendant expansion." },
+          "siblings": { "type": "boolean", "description": "When true, return each match's immediate neighbours (up to a per-hit cap) in the element's siblings field." },
           "clientId": { "type": "string" }
         },
         "required": ["windowId"],
@@ -555,6 +568,10 @@
           "moreResults": {
             "type": "boolean",
             "description": "More matches exist than were returned — either the search was cut short or the answer hit its limit with tree left unwalked. A caller seeing this should narrow its filter rather than assume it has seen everything."
+          },
+          "neighbourhoodTruncated": {
+            "type": "boolean",
+            "description": "Expansion was cut short by the node budget or time limit, not the search itself. Distinct from searchTruncated: the search covered the window, but some matches did not get their full neighbourhood."
           },
           "revision": { "type": "integer" },
           "backend": { "type": "string" }
