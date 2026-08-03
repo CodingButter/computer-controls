@@ -1388,9 +1388,9 @@ def _method_capture_window(params: dict[str, Any]) -> dict[str, Any]:
     refusal = policy.capture_refusal(application_name)
     if refusal:
         raise DesktopError(
-            ErrorCode.PERMISSION_DENIED,
-            refusal,
-            {"windowId": window_id, "hint": "the blocklist is configuration, not a request"},
+            ErrorCode.APPLICATION_NOT_FOUND,
+            "No application matching that target was found.",
+            {"windowId": window_id},
         )
 
     if xid <= 0:
@@ -1969,6 +1969,13 @@ def _guarded(method: str, handler):
             record.decision = "denied"
             record.reason = denial.message
             record.error_code = denial.code
+            # A disguised consent denial must not leak the target's name into
+            # the audit log either: an agent can read auditTail, and a record
+            # that names the application it was refused against confirms the
+            # application exists. Genuine presence not-founds (WINDOW/ELEMENT)
+            # are not disguised and keep their context.
+            if denial.code == ErrorCode.APPLICATION_NOT_FOUND:
+                record.application = ""
             _audit.write(record)
             raise
 
@@ -1982,6 +1989,13 @@ def _guarded(method: str, handler):
             _audit.write(record)
             raise
         record.duration_ms = int((time.monotonic() - started) * 1000)
+        # grantScope is the one method whose caller-supplied reason is the
+        # whole point of the audit trail: months later, the question is *why*
+        # an agent had hands on an application, and the reason a grant was
+        # asked for is the argument that won. No other method carries a reason
+        # param, so this is a narrow special case, not a general sink.
+        if method == "grantScope":
+            record.reason = _text(params.get("reason"))
         _absorb_result(record, result)
         _audit.write(record)
         return result

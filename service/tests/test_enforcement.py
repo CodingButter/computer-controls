@@ -163,18 +163,29 @@ def test_grant_scope_is_itself_recorded(built):
     # Who asked for what, and when, is the first question after an incident.
     srv, _, log = built
     call(srv, "grantScope", operationClasses=["edit"], reason="typing a reply", clientId="actor")
-    methods = [entry["method"] for entry in log.tail(10)]
+    entries = log.tail(10)
+    methods = [entry["method"] for entry in entries]
     assert "grantScope" in methods
+    # The reason a grant was asked for is the argument that won, and it is the
+    # whole point of recording the call: months later the question is *why*.
+    grant_record = next(e for e in entries if e["method"] == "grantScope")
+    assert grant_record.get("reason") == "typing a reply"
 
 
 def test_a_narrower_grant_cannot_reach_another_application(built, monkeypatch):
-    srv, consent, _ = built
+    srv, consent, log = built
     monkeypatch.setattr(server, "_application_of", lambda params: "Discord")
     monkeypatch.setattr(server, "_needs_application", lambda klass: True)
     consent.grant("actor", classes=["edit"], applications=["text editor"])
     with pytest.raises(DesktopError) as raised:
         call(srv, "typeText", elementId="el-1", text="hi", clientId="actor")
-    assert raised.value.code == ErrorCode.PERMISSION_DENIED
+    # Out-of-scope and nonexistent are indistinguishable: the denial is
+    # disguised as APPLICATION_NOT_FOUND rather than PERMISSION_DENIED, and
+    # neither the error nor the audit log names the target.
+    assert raised.value.code == ErrorCode.APPLICATION_NOT_FOUND
+    assert "Discord" not in str(raised.value)
+    denied = next(e for e in log.tail(10) if e.get("decision") == "denied")
+    assert not denied.get("application"), "the audit log must not name a disguised target"
 
 
 def test_an_unidentifiable_target_is_refused_while_a_list_is_in_force(built, monkeypatch):
@@ -249,12 +260,14 @@ def test_a_batch_cannot_reach_an_application_a_direct_call_cannot(monkeypatch):
     monkeypatch.setitem(server._BATCH_METHODS, "focusWindow", lambda params: ran.append("focus"))
 
     guarded = server._guarded("performActions", server._method_perform_actions)
-    with pytest.raises(PermissionDenied):
+    with pytest.raises(DesktopError) as raised:
         guarded({
             "clientId": "agent",
             "confirm": True,
             "actions": [{"method": "focusWindow", "params": {"windowId": "win-blocked"}}],
         })
+    assert raised.value.code == ErrorCode.APPLICATION_NOT_FOUND
+    assert "a-password-manager" not in str(raised.value)
     assert ran == [], "the batch must be refused before any step of it happens"
 
 

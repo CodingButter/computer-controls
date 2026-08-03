@@ -35,7 +35,7 @@ import time
 from dataclasses import dataclass, field, replace
 
 from . import protocol_generated
-from .errors import PermissionDenied, SessionExpired
+from .errors import DesktopError, ErrorCode, PermissionDenied, SessionExpired
 
 #: Taken from the generated protocol rather than typed here. Written by hand
 #: this list grew a `focus` class the schema has never had, which would have
@@ -220,10 +220,18 @@ class Decision:
     client_id: str
     reason: str
     application: str = ""
+    #: When set, the denial is raised as this error code instead of
+    #: PERMISSION_DENIED. An out-of-scope application must be indistinguishable
+    #: from one that was never real: a refusal names the thing refused, and
+    #: naming it confirms it exists. The disguise carries a generic message so
+    #: neither the error code nor its text leaks the target.
+    disguised_as: str = ""
 
     def raise_for_denial(self, ceiling: Ceiling, granted: frozenset[str]) -> None:
         if self.allowed:
             return
+        if self.disguised_as:
+            raise DesktopError(self.disguised_as, self.reason, {})
         raise PermissionDenied(
             self.reason,
             method=self.method,
@@ -386,7 +394,9 @@ class Consent:
         manager's window is the thing being prevented, not clicking in it.
         """
         allow = lambda reason: Decision(True, method, operation_class, client_id, reason, application)
-        deny = lambda reason: Decision(False, method, operation_class, client_id, reason, application)
+        deny = lambda reason, disguised_as="": Decision(
+            False, method, operation_class, client_id, reason, application, disguised_as
+        )
 
         if self._stopped and operation_class != "observe":
             return deny(
@@ -395,7 +405,8 @@ class Consent:
             )
         if application and not self._ceiling.permits_application(application):
             return deny(
-                f"This desktop's configuration does not expose {application!r} to a client."
+                "No application matching that target was found.",
+                disguised_as=ErrorCode.APPLICATION_NOT_FOUND,
             )
 
         grant = self._grants.get(client_id)
@@ -415,9 +426,9 @@ class Consent:
         # always about the one being touched.
         held = grant.hand_in(application) if grant else DEFAULT_CLASSES
         if held is None:
-            covers = sorted(grant.per_application) or sorted(grant.applications)
             return deny(
-                f"This client's grant covers {', '.join(covers)}, not {application!r}."
+                "No application matching that target was found.",
+                disguised_as=ErrorCode.APPLICATION_NOT_FOUND,
             )
 
         if operation_class not in held:

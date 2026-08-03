@@ -1,7 +1,7 @@
 import { createTool, defineMastraCodePlugin, z } from "@mastra/code-sdk/plugin";
 
 import { DesktopServiceError } from "./client.ts";
-import { SCHEMA_DIGEST } from "./protocol.generated.ts";
+import { OPERATION_CLASS, SCHEMA_DIGEST } from "./protocol.generated.ts";
 import * as schemas from "./schemas.generated.ts";
 import { buildPushLane } from "./signals/index.ts";
 import { DesktopSupervisor } from "./supervisor.ts";
@@ -140,15 +140,17 @@ async function request<T>(method: string, params: Record<string, unknown> = {}):
   }
 }
 
-export default defineMastraCodePlugin({
-  id: "desktop-control",
-  name: "Semantic Desktop Control",
-  version: "0.2.0",
-  description:
-    "Semantic control of Linux desktop applications through AT-SPI2 — applications, windows, elements, actions.",
-  signalProviders: [pushLane.provider],
-  processors: pushLane.processors,
-  tools: {
+/**
+ * The full catalogue of tools this plugin can mint.
+ *
+ * A tool is absent from what the agent sees when its construction-time scope
+ * does not include the tool's operation class. `desktop_grant_scope` is not
+ * here — granting is a client operation before the agent exists, never a tool
+ * the model is handed. No prompt can induce a model to call a tool it does
+ * not have. This is the only defence in the system that does not depend on a
+ * model behaving.
+ */
+const ALL_TOOLS = {
     desktop_capabilities: {
       tool: createTool({
         id: "desktop_capabilities",
@@ -440,25 +442,6 @@ export default defineMastraCodePlugin({
       }),
     },
 
-    desktop_grant_scope: {
-      tool: createTool({
-        id: "desktop_grant_scope",
-        description:
-          "Ask for permission to act. A fresh session may look at this desktop and nothing " +
-          "else; anything that changes something needs the matching operation class first. " +
-          "Ask for what the task actually needs — observe to read, edit to type into a field, " +
-          "activate to focus a window or start an application, submit to press a button that " +
-          "sends something. The grant is bounded by the user's own configuration and cannot " +
-          "exceed it: if you are refused, the error names the setting that refused you, and " +
-          "the answer is to ask the user rather than to try again. Grants expire after being " +
-          "unused for a while, and an expired one comes back as SESSION_EXPIRED, which means " +
-          "ask again rather than give up.",
-        inputSchema: schemas.grantScopeParams,
-        outputSchema: schemas.grantScopeResult,
-        execute: async (input) => await request("grantScope", { ...input }),
-      }),
-    },
-
     desktop_emergency_stop: {
       tool: createTool({
         id: "desktop_emergency_stop",
@@ -558,5 +541,77 @@ export default defineMastraCodePlugin({
         execute: async (input) => await request("getDesktopState", { ...input }),
       }),
     },
+};
+
+/** Maps each tool to the operation class of the protocol method it calls. */
+const TOOL_OPERATION_CLASS: Record<string, string> = {
+  desktop_capabilities: OPERATION_CLASS.getDesktopCapabilities,
+  desktop_set_attention: OPERATION_CLASS.setAttention,
+  desktop_list_applications: OPERATION_CLASS.listApplications,
+  desktop_list_windows: OPERATION_CLASS.listWindows,
+  desktop_inspect_window: OPERATION_CLASS.inspectWindow,
+  desktop_query_elements: OPERATION_CLASS.queryElements,
+  desktop_inspect_element: OPERATION_CLASS.inspectElement,
+  desktop_focus_window: OPERATION_CLASS.focusWindow,
+  desktop_invoke_element: OPERATION_CLASS.invokeElement,
+  desktop_set_element_value: OPERATION_CLASS.setElementValue,
+  desktop_claim_element: OPERATION_CLASS.claimElement,
+  desktop_release_element: OPERATION_CLASS.releaseElement,
+  desktop_type_text: OPERATION_CLASS.typeText,
+  desktop_edit_text: OPERATION_CLASS.editText,
+  desktop_perform_actions: OPERATION_CLASS.performActions,
+  desktop_attest_element: OPERATION_CLASS.attestElement,
+  desktop_commit_element: OPERATION_CLASS.commitElement,
+  desktop_wait_for: OPERATION_CLASS.waitFor,
+  desktop_changes_since: OPERATION_CLASS.getDeltaSince,
+  desktop_emergency_stop: OPERATION_CLASS.emergencyStop,
+  desktop_audit_tail: OPERATION_CLASS.auditTail,
+  desktop_list_installable_applications: OPERATION_CLASS.listInstallableApplications,
+  desktop_launch_application: OPERATION_CLASS.launchApplication,
+  desktop_capture_window: OPERATION_CLASS.captureWindow,
+  desktop_state: OPERATION_CLASS.getDesktopState,
+};
+
+/**
+ * Parse a comma-separated scope string into a set of operation classes.
+ *
+ * Defaults to observe-only — the same state a fresh session has always been
+ * in before any grant — so a plugin loaded with no config behaves exactly as
+ * it did before.
+ */
+function parseScopeClasses(raw: string | boolean | undefined): Set<string> {
+  const text = typeof raw === "string" ? raw : "";
+  const parts = text
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0);
+  return parts.length > 0 ? new Set(parts) : new Set(["observe"]);
+}
+
+export default defineMastraCodePlugin({
+  id: "desktop-control",
+  name: "Semantic Desktop Control",
+  version: "0.2.0",
+  description:
+    "Semantic control of Linux desktop applications through AT-SPI2 — applications, windows, elements, actions.",
+  signalProviders: [pushLane.provider],
+  processors: pushLane.processors,
+  config: {
+    scope: {
+      type: "string",
+      label: "Operation scope",
+      description:
+        "Comma-separated operation classes this agent may use (observe, edit, activate, submit, destructive). " +
+        "Tools outside this scope are absent, not disabled.",
+      default: "observe",
+    },
+  },
+  tools: (context) => {
+    const scope = parseScopeClasses(context.config?.scope);
+    return Object.fromEntries(
+      Object.entries(ALL_TOOLS).filter(([name]) =>
+        scope.has(TOOL_OPERATION_CLASS[name] ?? ""),
+      ),
+    );
   },
 });
