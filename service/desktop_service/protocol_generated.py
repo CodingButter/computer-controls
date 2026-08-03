@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: bfa45250563894d0
+# Protocol version: 1.0   schema sha256: d4e734462762ec8e
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "bfa45250563894d0"
+SCHEMA_DIGEST: Final = "d4e734462762ec8e"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -37,9 +37,11 @@ ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUN
 
 #: Every method mapped to the operation class it belongs to.
 OPERATION_CLASS: Final[dict[str, str]] = {
+    "attestElement": "observe",
     "auditTail": "observe",
     "captureWindow": "observe",
     "claimElement": "edit",
+    "commitElement": "destructive",
     "editText": "edit",
     "emergencyStop": "observe",
     "focusWindow": "activate",
@@ -69,6 +71,25 @@ OPERATION_CLASS: Final[dict[str, str]] = {
 
 #: Request schema per method, used to reject malformed calls at the boundary.
 PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
+    "attestElement": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "elementId": {
+                "description": "The field whose contents are being attested for a later commit.",
+                "type": "string",
+            },
+        },
+        "required": [
+            "elementId",
+        ],
+        "type": "object",
+    },
     "auditTail": {
         "additionalProperties": False,
         "properties": {
@@ -148,6 +169,39 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         },
         "required": [
             "elementId",
+        ],
+        "type": "object",
+    },
+    "commitElement": {
+        "additionalProperties": False,
+        "properties": {
+            "action": {
+                "description": "The action to trigger, as reported in the element's actions list. Not an index: indices move. When omitted, the element's first action is used.",
+                "type": "string",
+            },
+            "attestationId": {
+                "description": "The attestation returned by attestElement for this field. One attestation admits one commit; a second commit with the same id is refused.",
+                "type": "string",
+            },
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "elementId": {
+                "description": "The field whose attested contents are being sent.",
+                "type": "string",
+            },
+            "settleMs": {
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "elementId",
+            "attestationId",
         ],
         "type": "object",
     },
@@ -888,6 +942,25 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
 }
 
 RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
+    "attestElement": {
+        "additionalProperties": False,
+        "properties": {
+            "attestationId": {
+                "description": "Identifies this attestation. Present it to commitElement within its TTL; one attestation admits exactly one commit.",
+                "type": "string",
+            },
+            "expiresInMs": {
+                "description": "How long before the attestation must be retaken. A stale attestation is not reusable.",
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "attestationId",
+            "expiresInMs",
+        ],
+        "type": "object",
+    },
     "auditTail": {
         "additionalProperties": False,
         "properties": {
@@ -983,6 +1056,9 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             "revision",
         ],
         "type": "object",
+    },
+    "commitElement": {
+        "$ref": "#/$defs/actionResult",
     },
     "editText": {
         "$ref": "#/$defs/actionResult",

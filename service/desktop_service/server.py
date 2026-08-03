@@ -34,6 +34,7 @@ from . import (
     protocol_generated,
     redaction,
     security,
+    send_gate,
     state,
     waitfor,
     watch,
@@ -1000,6 +1001,132 @@ def _method_perform_actions(params: dict[str, Any]) -> dict[str, Any]:
     return {**outcome, "revision": _registry.revision}
 
 
+def _method_attest_element(params: dict[str, Any]) -> dict[str, Any]:
+    """Snapshot a field's contents so a later commit can prove they have not moved.
+
+    The evidence is the field's own text read by the service, stored in the send
+    gate under the caller's identity. The text never leaves the register except
+    through redeem, and is never written to any persistent sink. A field whose
+    contents even the accessibility layer cannot read — password bullets — has
+    nothing to attest against, and is refused rather than recording a mask that
+    no honest comparison could match.
+    """
+    element_id = _str_param(params, "elementId", required=True)
+
+    def read_text() -> str | None:
+        obj = _resolve_element(element_id)
+        return atspi.read_for_attest(obj)
+
+    text = loop.call_on_loop(read_text, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
+    if text is None:
+        raise DesktopError(
+            ErrorCode.ACTION_NOT_SUPPORTED,
+            f"Element {element_id!r} masks its contents or has no readable text, "
+            "so there is nothing to attest that a later commit could compare against.",
+            {"elementId": element_id},
+        )
+
+    attestation_id, expires_in_ms = send_gate.attest(
+        client_id=_client_id(params),
+        element_id=element_id,
+        text=text,
+    )
+    return {"attestationId": attestation_id, "expiresInMs": expires_in_ms}
+
+
+def _method_commit_element(params: dict[str, Any]) -> dict[str, Any]:
+    """Send what was attested.
+
+    Re-reads the field and refuses if it no longer matches what attestElement
+    recorded. If it matches, triggers the element's own action. Success is
+    asserted from the observed effect — the field is now empty, meaning it
+    transmitted — not from the action call returning true. A field that the
+    action was called on but which still contains its contents afterwards is a
+    commit that did not send, reported as failure regardless of what the action
+    call returned.
+    """
+    element_id = _str_param(params, "elementId", required=True)
+    attestation_id = _str_param(params, "attestationId", required=True)
+    action_name = _str_param(params, "action")
+
+    # Redeem before anything else: one attestation admits one commit, and a
+    # verification failure spends it too, because the caller must re-attest
+    # regardless of why the field moved.
+    expected_text = send_gate.redeem(
+        client_id=_client_id(params),
+        attestation_id=attestation_id,
+        element_id=element_id,
+    )
+
+    def verify_and_act() -> bool:
+        def work() -> bool:
+            obj = _resolve_element(element_id)
+            current = atspi.read_for_attest(obj)
+            if current != expected_text:
+                raise DesktopError(
+                    ErrorCode.PERMISSION_DENIED,
+                    f"The contents of {element_id!r} have changed since "
+                    f"attestation {attestation_id!r}. Refusing to commit: "
+                    "what would be sent is not what was approved. "
+                    "Re-attest and commit again.",
+                    {"elementId": element_id, "attestationId": attestation_id},
+                )
+            available = atspi.actions_of(obj)
+            chosen = action_name or (available[0] if available else "")
+            if not chosen:
+                raise DesktopError(
+                    ErrorCode.ACTION_NOT_SUPPORTED,
+                    f"Element {element_id!r} exposes no action to commit with.",
+                    {"elementId": element_id, "availableActions": available},
+                )
+            if chosen not in available:
+                raise DesktopError(
+                    ErrorCode.ACTION_NOT_SUPPORTED,
+                    f"Element {element_id!r} does not expose an action named "
+                    f"{chosen!r}",
+                    {"elementId": element_id, "availableActions": available},
+                )
+            return atspi.do_action(obj, chosen)
+
+        return loop.call_on_loop(work, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
+
+    result = actions.perform(
+        "commitElement",
+        element_id,
+        [actions.Attempt("accessibility", verify_and_act)],
+        _snapshot,
+        _action_log,
+        client_id=_client_id(params),
+        scope=_element_scope(element_id),
+        **_settle_bounds(params),
+    )
+
+    # The action call returned; now verify the effect. The one thing that
+    # matters is whether the field actually transmitted: a composer that is now
+    # empty sent its message, and one that still holds its contents did not —
+    # regardless of what do_action returned. The "4" foot-gun lives here: the
+    # synth reported success, the field was not cleared, and only an effect
+    # check catches it.
+    if result.get("ok"):
+
+        def read_after() -> str | None:
+            obj = _resolve_element(element_id)
+            return atspi.read_for_attest(obj)
+
+        remaining = loop.call_on_loop(read_after, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
+        if remaining:
+            result["ok"] = False
+            result["progress"] = {
+                "effect": "field-still-populated",
+                "detail": (
+                    "The action call returned successfully but the field still "
+                    "contains its contents. The message may not have transmitted."
+                ),
+            }
+
+    return result
+
+
 def _method_wait_for(params: dict[str, Any]) -> dict[str, Any]:
     condition = waitfor.Condition(
         kind=_str_param(params, "condition", required=True),
@@ -1775,6 +1902,8 @@ def build_server(socket_path: str) -> JsonRpcServer:
     server.register("inspectElement", _method_inspect_element)
     server.register("focusWindow", _method_focus_window)
     server.register("invokeElement", _method_invoke_element)
+    server.register("attestElement", _method_attest_element)
+    server.register("commitElement", _method_commit_element)
     server.register("claimElement", _method_claim_element)
     server.register("releaseElement", _method_release_element)
     server.register("setElementValue", _method_set_element_value)

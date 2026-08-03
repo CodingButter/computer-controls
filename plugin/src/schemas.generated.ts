@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: bfa45250563894d0
+// Protocol version: 1.0   schema sha256: d4e734462762ec8e
 
 import { z } from "@mastra/code-sdk/plugin";
 
@@ -82,6 +82,16 @@ export const semanticElementSchema: z.ZodType<unknown> = z.lazy(() =>
   }),
 );
 
+export const attestElementParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  elementId: z.string().describe("The field whose contents are being attested for a later commit."),
+});
+export const attestElementResult = z.object({
+  attestationId: z.string().describe("Identifies this attestation. Present it to commitElement within its TTL; one attestation admits exactly one commit."),
+  expiresInMs: z.number().int().min(0).describe("How long before the attestation must be retaken. A stale attestation is not reusable."),
+});
+
 export const auditTailParams = z.object({
   clientId: z.string().optional(),
   confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
@@ -127,6 +137,16 @@ export const claimElementResult = z.object({
   claim: elementClaimSchema,
   revision: z.number().int().min(0),
 });
+
+export const commitElementParams = z.object({
+  action: z.string().describe("The action to trigger, as reported in the element's actions list. Not an index: indices move. When omitted, the element's first action is used.").optional(),
+  attestationId: z.string().describe("The attestation returned by attestElement for this field. One attestation admits one commit; a second commit with the same id is refused."),
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  elementId: z.string().describe("The field whose attested contents are being sent."),
+  settleMs: z.number().int().min(0).max(10000).optional(),
+});
+export const commitElementResult = z.record(z.string(), z.unknown());
 
 export const editTextParams = z.object({
   clientId: z.string().optional(),

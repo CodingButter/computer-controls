@@ -877,6 +877,22 @@ def is_editable(obj: Atspi.Accessible) -> bool:
     return bool(_safe(lambda: obj.get_editable_text_iface()))
 
 
+def read_for_attest(obj: Atspi.Accessible) -> str | None:
+    """The field's raw text for attestation, or None when the field is masked.
+
+    Attestation stores what the service can see right now, so a later commit
+    can prove it has not changed. A field whose contents even this service
+    cannot read — a password entry handing the accessibility layer bullets —
+    has nothing to attest against, so None means the caller should refuse rather
+    than store a mask that no honest comparison could match.
+    """
+    role = _safe(obj.get_role_name, "") or ""
+    text = _text_value(obj, role)
+    if text and set(text) <= _MASK_CHARACTERS:
+        return None
+    return text
+
+
 def text_matches(obj: Atspi.Accessible, expected: str, exact: bool) -> str:
     """Does the field now say what it was supposed to say?
 

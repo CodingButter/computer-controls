@@ -53,7 +53,7 @@ import stat
 import threading
 from typing import Any, Callable
 
-from . import holds, identity
+from . import holds, identity, send_gate
 from .errors import (
     JSONRPC_INVALID_REQUEST,
     JSONRPC_PARSE_ERROR,
@@ -204,6 +204,7 @@ class JsonRpcServer:
             # back to release anything, and an element owned by a process that
             # no longer exists is owned for the rest of the session.
             holds.release_all(client_id)
+            send_gate.release_client(client_id)
             with self._lock:
                 self._connections.discard(conn)
             try:
