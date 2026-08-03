@@ -78,22 +78,35 @@ def test_no_service_module_imports_a_distribution_layer():
     An import of `relay` or `account_service` would mean the daemon had grown a
     dependency on a layer that sits above it. The import check is structural —
     it walks the AST of every module under `desktop_service/` — so it catches a
-    seam before the code that uses it has been written.
+    seam before the code that uses it has been written. Every segment of every
+    import path is checked, so ``from .relay import X`` (relative) and
+    ``from desktop_service.relay import X`` (qualified absolute) are caught,
+    not just bare ``import relay``.
     """
-    for path in SERVICE.rglob("*.py"):
+    sources = list(SERVICE.rglob("*.py"))
+    assert sources, (
+        f"no Python modules found under {SERVICE}; the import invariant "
+        "cannot be checked — this is likely a path configuration error"
+    )
+    for path in sources:
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                roots = [alias.name.split(".")[0] for alias in node.names]
+                modules = [alias.name for alias in node.names]
             elif isinstance(node, ast.ImportFrom):
-                if node.level:  # a sibling module in this package
-                    continue
-                roots = [(node.module or "").split(".")[0]]
+                if node.module:
+                    modules = [node.module]
+                elif node.level:
+                    # ``from . import relay`` — the name is a sibling module
+                    modules = [alias.name for alias in node.names]
+                else:
+                    modules = []
             else:
                 continue
-            for root in roots:
-                lower = root.lower()
-                assert not any(frag in lower for frag in FORBIDDEN_FRAGMENTS), (
-                    f"{path.name} imports '{root}', which names a distribution concern; "
-                    "the daemon hosts no such layer"
-                )
+            for module in modules:
+                for segment in module.split("."):
+                    lower = segment.lower()
+                    assert not any(frag in lower for frag in FORBIDDEN_FRAGMENTS), (
+                        f"{path.name} imports '{module}', which names a "
+                        "distribution concern; the daemon hosts no such layer"
+                    )
