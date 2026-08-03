@@ -2,7 +2,7 @@
 
 Generated from `protocol/schema.json` — do not edit.
 Run: `node scripts/generate-tool-api-doc.mjs`
-Protocol version: 1.0   schema sha256: 6705ae8fed45c861
+Protocol version: 1.0   schema sha256: 9ffcc3f641ed0521
 
 The contract between any client and the desktop service. Frozen at 1.0. Additive changes only: new methods and new optional fields. Removing a method, renaming or removing a field, narrowing a type, changing an error code, or adding a required request field is a breaking change and requires a major version.
 
@@ -18,7 +18,30 @@ What a method does to the world. Declared here at freeze time so enforcement can
 | `submit` | Triggers an application's own action. Consequences belong to the application. |
 | `destructive` | May discard or overwrite user data, or is not reversible. |
 
-## Methods (30)
+## Methods (32)
+
+### `attestElement`
+
+**Operation class:** `observe`
+
+Read and record what is in a field right now, so a later commitElement can refuse if it has changed. The evidence is the field's own contents read by the service — the caller writes the argument (which element), never the evidence (what text). A masked field, whose contents even the accessibility layer cannot read, is refused: there is nothing to attest that a later commit could compare against. Composing is not sending, and this call authorises nothing: it takes a snapshot, and the snapshot is only as good as the moment it was taken.
+
+**Params**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clientId` | string | no |  |
+| `confirm` | boolean | no |  |
+| `elementId` | string | yes | The field whose contents are being attested for a later commit. |
+
+**Result**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `attestationId` | string | yes | Identifies this attestation. Present it to commitElement within its TTL; one attestation admits exactly one commit. |
+| `expiresInMs` | integer | yes | How long before the attestation must be retaken. A stale attestation is not reusable. |
+
+---
 
 ### `auditTail`
 
@@ -102,6 +125,27 @@ Take exclusive write ownership of one element for a bounded time, across as many
 |---|---|---|---|
 | `claim` | [`elementClaim`](#elementclaim) | yes |  |
 | `revision` | integer | yes |  |
+
+---
+
+### `commitElement`
+
+**Operation class:** `destructive`
+
+Send what was attested. Re-reads the field and refuses if it no longer matches what attestElement recorded; if it matches, triggers the element's own action. Success is asserted from the observed effect — the field is now empty, meaning it transmitted — not from the action call returning true. A field that the action was called on but which still contains its contents afterwards is a commit that did not send, reported as failure regardless of what the action call returned. The thing that would have caught the original incident: a keystroke that typed a character instead of pressing Return leaves the field non-empty, and that is the failure this reports.
+
+**Params**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `action` | string | no | The action to trigger, as reported in the element's actions list. Not an index: indices move. When omitted, the element's first action is used. |
+| `attestationId` | string | yes | The attestation returned by attestElement for this field. One attestation admits one commit; a second commit with the same id is refused. |
+| `clientId` | string | no |  |
+| `confirm` | boolean | no |  |
+| `elementId` | string | yes | The field whose attested contents are being sent. |
+| `settleMs` | integer | no |  |
+
+**Result:** [`actionResult`](#actionresult)
 
 ---
 
