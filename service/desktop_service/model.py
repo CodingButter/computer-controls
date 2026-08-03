@@ -130,6 +130,14 @@ class SemanticElement:
     actions: list[str] = field(default_factory=list)
     bounds: dict[str, int] | None = None
     children: list["SemanticElement"] = field(default_factory=list)
+    #: Ancestor chain for this element, nearest first, when the caller asked for
+    #: ancestor expansion. Shallow entries — no recursive children populated —
+    #: so an ancestor reads as a path to the root, not a second subtree.
+    ancestry: list["SemanticElement"] = field(default_factory=list)
+    #: Immediate neighbours under the same parent, when the caller asked for
+    #: sibling expansion. Capped per hit so a list with hundreds of rows does
+    #: not flood the answer.
+    siblings: list["SemanticElement"] = field(default_factory=list)
     backend_reference: dict[str, Any] = field(default_factory=dict)
     # Backend-specific surplus, namespaced by backend name so two backends can
     # both contribute without colliding: {"atspi": {...}}.
@@ -199,6 +207,10 @@ class SemanticElement:
             payload["bounds"] = self.bounds
         if self.children:
             payload["children"] = [child.to_json() for child in self.children]
+        if self.ancestry:
+            payload["ancestry"] = [ancestor.to_json() for ancestor in self.ancestry]
+        if self.siblings:
+            payload["siblings"] = [sibling.to_json() for sibling in self.siblings]
         if self.extra:
             payload["extra"] = self.extra
         if self.truncated:
