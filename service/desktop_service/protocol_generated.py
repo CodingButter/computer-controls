@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: bfa45250563894d0
+# Protocol version: 1.0   schema sha256: f4e410b8c138758e
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "bfa45250563894d0"
+SCHEMA_DIGEST: Final = "f4e410b8c138758e"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -643,12 +643,24 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             },
         ],
         "properties": {
+            "ancestors": {
+                "description": "Expand each match upward toward the window root, returning up to this many ancestors in the element's ancestry field. Zero or absent means no ancestor expansion. Capped at 32 because a broken toolkit can hand back a non-terminating parent chain.",
+                "maximum": 32,
+                "minimum": 0,
+                "type": "integer",
+            },
             "clientId": {
                 "type": "string",
             },
             "confirm": {
                 "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
                 "type": "boolean",
+            },
+            "descendants": {
+                "description": "Expand each match downward, populating the element's children field to this many depth levels. Zero or absent means no descendant expansion.",
+                "maximum": 10,
+                "minimum": 0,
+                "type": "integer",
             },
             "limit": {
                 "maximum": 200,
@@ -660,6 +672,10 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             },
             "role": {
                 "type": "string",
+            },
+            "siblings": {
+                "description": "When true, return each match's immediate neighbours (up to a per-hit cap) in the element's siblings field.",
+                "type": "boolean",
             },
             "states": {
                 "items": {
@@ -1552,6 +1568,10 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 "description": "More matches exist than were returned — either the search was cut short or the answer hit its limit with tree left unwalked. A caller seeing this should narrow its filter rather than assume it has seen everything.",
                 "type": "boolean",
             },
+            "neighbourhoodTruncated": {
+                "description": "Expansion was cut short by the node budget or time limit, not the search itself. Distinct from searchTruncated: the search covered the window, but some matches did not get their full neighbourhood.",
+                "type": "boolean",
+            },
             "revision": {
                 "type": "integer",
             },
@@ -2031,6 +2051,13 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
                 },
                 "type": "array",
             },
+            "ancestry": {
+                "description": "Ancestor chain for this element, nearest first, up to the requested depth. Present only when the caller asked for ancestor expansion. Each entry is a full element whose id is valid for getElement.",
+                "items": {
+                    "$ref": "#/$defs/semanticElement",
+                },
+                "type": "array",
+            },
             "backend": {
                 "enum": [
                     "atspi",
@@ -2064,6 +2091,13 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
             "role": {
                 "description": "What kind of thing it is, in the backend's vocabulary.",
                 "type": "string",
+            },
+            "siblings": {
+                "description": "Immediate neighbours of this element under the same parent, up to a per-hit cap. Present only when the caller asked for sibling expansion.",
+                "items": {
+                    "$ref": "#/$defs/semanticElement",
+                },
+                "type": "array",
             },
             "states": {
                 "items": {
