@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: bfa45250563894d0
+# Protocol version: 1.0   schema sha256: 6705ae8fed45c861
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "bfa45250563894d0"
+SCHEMA_DIGEST: Final = "6705ae8fed45c861"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -33,7 +33,7 @@ ATTRIBUTIONS: Final[tuple[str, ...]] = ("self", "external", "unattributed")
 WAIT_CONDITIONS: Final[tuple[str, ...]] = ("window-opened", "window-closed", "element-appeared", "element-state-changed", "revision-advanced")
 
 #: The complete domain error vocabulary. Carried in the JSON-RPC error object under data.code.
-ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "CLAIM_EXPIRED", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR")
+ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "CLAIM_EXPIRED", "SUBSCRIPTION_LIMIT_REACHED", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR")
 
 #: Every method mapped to the operation class it belongs to.
 OPERATION_CLASS: Final[dict[str, str]] = {
@@ -63,7 +63,9 @@ OPERATION_CLASS: Final[dict[str, str]] = {
     "setAttention": "observe",
     "setElementValue": "edit",
     "setObservationMode": "observe",
+    "subscribeElement": "observe",
     "typeText": "edit",
+    "unsubscribeElement": "observe",
     "waitFor": "observe",
 }
 
@@ -643,12 +645,24 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             },
         ],
         "properties": {
+            "ancestors": {
+                "description": "Expand each match upward toward the window root, returning up to this many ancestors in the element's ancestry field. Zero or absent means no ancestor expansion. Capped at 32 because a broken toolkit can hand back a non-terminating parent chain.",
+                "maximum": 32,
+                "minimum": 0,
+                "type": "integer",
+            },
             "clientId": {
                 "type": "string",
             },
             "confirm": {
                 "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
                 "type": "boolean",
+            },
+            "descendants": {
+                "description": "Expand each match downward, populating the element's children field to this many depth levels. Zero or absent means no descendant expansion.",
+                "maximum": 10,
+                "minimum": 0,
+                "type": "integer",
             },
             "limit": {
                 "maximum": 200,
@@ -660,6 +674,10 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             },
             "role": {
                 "type": "string",
+            },
+            "siblings": {
+                "description": "When true, return each match's immediate neighbours (up to a per-hit cap) in the element's siblings field.",
+                "type": "boolean",
             },
             "states": {
                 "items": {
@@ -794,6 +812,24 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "subscribeElement": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+        },
+        "required": [
+            "elementId",
+        ],
+        "type": "object",
+    },
     "typeText": {
         "additionalProperties": False,
         "properties": {
@@ -830,6 +866,25 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         "required": [
             "elementId",
             "text",
+        ],
+        "type": "object",
+    },
+    "unsubscribeElement": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+        },
+        "required": [
+            "elementId",
         ],
         "type": "object",
     },
@@ -1552,6 +1607,10 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 "description": "More matches exist than were returned — either the search was cut short or the answer hit its limit with tree left unwalked. A caller seeing this should narrow its filter rather than assume it has seen everything.",
                 "type": "boolean",
             },
+            "neighbourhoodTruncated": {
+                "description": "Expansion was cut short by the node budget or time limit, not the search itself. Distinct from searchTruncated: the search covered the window, but some matches did not get their full neighbourhood.",
+                "type": "boolean",
+            },
             "revision": {
                 "type": "integer",
             },
@@ -1658,8 +1717,43 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "subscribeElement": {
+        "additionalProperties": False,
+        "properties": {
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "subscribed": {
+                "type": "boolean",
+            },
+        },
+        "required": [
+            "subscribed",
+            "revision",
+        ],
+        "type": "object",
+    },
     "typeText": {
         "$ref": "#/$defs/actionResult",
+    },
+    "unsubscribeElement": {
+        "additionalProperties": False,
+        "properties": {
+            "released": {
+                "description": "True when this call ended a subscription, false when there was nothing of this client's to give up.",
+                "type": "boolean",
+            },
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "released",
+            "revision",
+        ],
+        "type": "object",
     },
     "waitFor": {
         "additionalProperties": False,
@@ -1925,6 +2019,7 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
                     "METHOD_NOT_FOUND",
                     "INVALID_PARAMS",
                     "INTERNAL_ERROR",
+                    "SUBSCRIPTION_LIMIT_REACHED",
                 ],
                 "type": "string",
             },
@@ -2031,6 +2126,13 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
                 },
                 "type": "array",
             },
+            "ancestry": {
+                "description": "Ancestor chain for this element, nearest first, up to the requested depth. Present only when the caller asked for ancestor expansion. Each entry is a full element whose id is valid for getElement.",
+                "items": {
+                    "$ref": "#/$defs/semanticElement",
+                },
+                "type": "array",
+            },
             "backend": {
                 "enum": [
                     "atspi",
@@ -2064,6 +2166,13 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
             "role": {
                 "description": "What kind of thing it is, in the backend's vocabulary.",
                 "type": "string",
+            },
+            "siblings": {
+                "description": "Immediate neighbours of this element under the same parent, up to a per-hit cap. Present only when the caller asked for sibling expansion.",
+                "items": {
+                    "$ref": "#/$defs/semanticElement",
+                },
+                "type": "array",
             },
             "states": {
                 "items": {

@@ -9,7 +9,7 @@ coordinate guessing.
 - `protocol/` — `schema.json`, the single source of truth for that protocol. The TypeScript and
   Python bindings are both generated from it, and neither is edited by hand
 - `scripts/` — the binding generator, its regeneration check, and the scripts that produce proofs
-- `docs/` — research findings, architecture, tool API, security model, prototype notes, the compatibility matrix, the open-questions log, and `docs/proofs/`
+- `docs/` — research findings, architecture, tool API, security model, prototype notes, the distribution ruling, the compatibility matrix, the open-questions log, and `docs/proofs/`
 
 If you are picking up an issue, read [CONTRIBUTING.md](CONTRIBUTING.md) first — it is short, and
 it is mostly about how to prove what you did from wherever you happen to be sitting. For depth,
