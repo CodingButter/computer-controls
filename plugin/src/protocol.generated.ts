@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: bfa45250563894d0
+// Protocol version: 1.0   schema sha256: 2f4515d188e41214
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "bfa45250563894d0" as const;
+export const SCHEMA_DIGEST = "2f4515d188e41214" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -34,8 +34,8 @@ export type WaitCondition = "window-opened" | "window-closed" | "element-appeare
 export const WAIT_CONDITION_VALUES: readonly WaitCondition[] = ["window-opened", "window-closed", "element-appeared", "element-state-changed", "revision-advanced"];
 
 /** The complete domain error vocabulary. Carried in the JSON-RPC error object under data.code. */
-export type ErrorCode = "APPLICATION_NOT_FOUND" | "WINDOW_NOT_FOUND" | "ELEMENT_NOT_FOUND" | "ELEMENT_REFERENCE_STALE" | "BACKEND_UNAVAILABLE" | "ACTION_NOT_SUPPORTED" | "PERMISSION_DENIED" | "SESSION_EXPIRED" | "ELEMENT_HELD" | "CLAIM_EXPIRED" | "TIMEOUT" | "METHOD_NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL_ERROR";
-export const ERROR_CODE_VALUES: readonly ErrorCode[] = ["APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "CLAIM_EXPIRED", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR"];
+export type ErrorCode = "APPLICATION_NOT_FOUND" | "WINDOW_NOT_FOUND" | "ELEMENT_NOT_FOUND" | "ELEMENT_REFERENCE_STALE" | "BACKEND_UNAVAILABLE" | "ACTION_NOT_SUPPORTED" | "PERMISSION_DENIED" | "SESSION_EXPIRED" | "ELEMENT_HELD" | "CLAIM_EXPIRED" | "SUBSCRIPTION_LIMIT_REACHED" | "TIMEOUT" | "METHOD_NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL_ERROR";
+export const ERROR_CODE_VALUES: readonly ErrorCode[] = ["APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "CLAIM_EXPIRED", "SUBSCRIPTION_LIMIT_REACHED", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR"];
 
 /** The result of one action, including the effects it was seen to have. A caller that reads this does not need to re-inspect. */
 export interface ActionResult {
@@ -104,7 +104,7 @@ export interface ElementClaim {
 
 /** The data member of a JSON-RPC error. The domain code lives here; the top-level code stays a reserved JSON-RPC number. */
 export interface ErrorData {
-  code: "APPLICATION_NOT_FOUND" | "WINDOW_NOT_FOUND" | "ELEMENT_NOT_FOUND" | "ELEMENT_REFERENCE_STALE" | "BACKEND_UNAVAILABLE" | "ACTION_NOT_SUPPORTED" | "PERMISSION_DENIED" | "SESSION_EXPIRED" | "ELEMENT_HELD" | "TIMEOUT" | "METHOD_NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL_ERROR";
+  code: "APPLICATION_NOT_FOUND" | "WINDOW_NOT_FOUND" | "ELEMENT_NOT_FOUND" | "ELEMENT_REFERENCE_STALE" | "BACKEND_UNAVAILABLE" | "ACTION_NOT_SUPPORTED" | "PERMISSION_DENIED" | "SESSION_EXPIRED" | "ELEMENT_HELD" | "TIMEOUT" | "METHOD_NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL_ERROR" | "SUBSCRIPTION_LIMIT_REACHED";
   detail?: Record<string, unknown>;
   /** Present when this error travels inside a result rather than as a JSON-RPC error. A failed step inside a batch has no top-level error member to carry its explanation, and a report that says a step failed without saying why is not worth returning. */
   message?: string;
@@ -623,6 +623,17 @@ export interface SetObservationModeResult {
   revision: number;
 }
 
+/** Declare intent to be told about changes to an element without holding a call open. A subscription is an observation claim, not a write claim: it does not prevent anyone else from acting on the element, and no subscription outranks the person at the keyboard. The element is resolved first — subscribing to an id that names nothing is an unkeepable promise. Subscribed elements are sampled on every observation sweep regardless of recency, because a declared intent outranks a heuristic that ranks by how recently something was touched. Over the per-connection ceiling is a refusal that names the ceiling, never a silent truncation: a service that accepts a thousand subscriptions and quietly samples the first sixteen has reinvented the current bug with better manners. A disconnecting client's subscriptions are all released, exactly as a claim is. (operation class: observe) */
+export interface SubscribeElementParams {
+  clientId?: string;
+  confirm?: boolean;
+  elementId: string;
+}
+export interface SubscribeElementResult {
+  revision: number;
+  subscribed: boolean;
+}
+
 /** Put text into an editable element the way a person would: a word at a time, at a typist's speed, through the same editable-text interface dictation software uses. Prefer setElementValue for a form field nobody is watching; prefer this for anything a human will read as it arrives, and for applications that listen for edits rather than for their field being replaced. (operation class: edit) */
 export interface TypeTextParams {
   clientId?: string;
@@ -637,6 +648,19 @@ export interface TypeTextParams {
   wordsPerMinute?: number;
 }
 export type TypeTextResult = ActionResult;
+
+/** Stop asking to be told about an element. Releasing what you do not subscribe to is not an error: the desired state is that this client watches nothing here, and it is already true. A client that disconnects is unsubscribed from everything it held. (operation class: observe) */
+export interface UnsubscribeElementParams {
+  clientId?: string;
+  /** Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. */
+  confirm?: boolean;
+  elementId: string;
+}
+export interface UnsubscribeElementResult {
+  /** True when this call ended a subscription, false when there was nothing of this client's to give up. */
+  released: boolean;
+  revision: number;
+}
 
 /** Wait for a semantic condition. Replaces sleeping in the model's context: the waiting happens in the service and returns the moment the condition holds. (operation class: observe) */
 export interface WaitForParams {
@@ -663,7 +687,7 @@ export interface WaitForResult {
   waitedMs: number;
 }
 
-export type MethodName = "auditTail" | "captureWindow" | "claimElement" | "editText" | "emergencyStop" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "grantScope" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "releaseElement" | "setAttention" | "setElementValue" | "setObservationMode" | "typeText" | "waitFor";
+export type MethodName = "auditTail" | "captureWindow" | "claimElement" | "editText" | "emergencyStop" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "grantScope" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "releaseElement" | "setAttention" | "setElementValue" | "setObservationMode" | "subscribeElement" | "typeText" | "unsubscribeElement" | "waitFor";
 
 export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   auditTail: "observe",
@@ -692,7 +716,9 @@ export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   setAttention: "observe",
   setElementValue: "edit",
   setObservationMode: "observe",
+  subscribeElement: "observe",
   typeText: "edit",
+  unsubscribeElement: "observe",
   waitFor: "observe",
 };
 
@@ -723,6 +749,8 @@ export interface MethodMap {
   setAttention: { params: SetAttentionParams; result: SetAttentionResult };
   setElementValue: { params: SetElementValueParams; result: SetElementValueResult };
   setObservationMode: { params: SetObservationModeParams; result: SetObservationModeResult };
+  subscribeElement: { params: SubscribeElementParams; result: SubscribeElementResult };
   typeText: { params: TypeTextParams; result: TypeTextResult };
+  unsubscribeElement: { params: UnsubscribeElementParams; result: UnsubscribeElementResult };
   waitFor: { params: WaitForParams; result: WaitForResult };
 }

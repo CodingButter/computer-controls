@@ -38,6 +38,10 @@ class ErrorCode:
     #: claim for. Nothing is in the way — the element is free — so this is a
     #: report about an estimate rather than a refusal about a conflict.
     CLAIM_EXPIRED = "CLAIM_EXPIRED"
+    #: Refused because this connection already holds the per-connection ceiling of
+    #: element subscriptions. The ceiling is carried in the detail, because a
+    #: refusal that names the bound lets a caller choose what to release.
+    SUBSCRIPTION_LIMIT_REACHED = "SUBSCRIPTION_LIMIT_REACHED"
     TIMEOUT = "TIMEOUT"
     METHOD_NOT_FOUND = "METHOD_NOT_FOUND"
     INVALID_PARAMS = "INVALID_PARAMS"
