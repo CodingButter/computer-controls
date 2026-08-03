@@ -7,6 +7,8 @@ live behaviour is covered by `test_inspect_live.py`.
 
 from __future__ import annotations
 
+import time
+
 from desktop_service import inspect as inspection
 from desktop_service.model import SemanticElement
 from desktop_service.registry import Fingerprint
@@ -17,6 +19,9 @@ class Node:
         self.role = role
         self.name = name
         self.children = children or []
+        self.parent: Node | None = None
+        for child in self.children:
+            child.parent = self
 
 
 def describe(node: Node, index: int, parent_digest: str):
@@ -32,6 +37,10 @@ def describe(node: Node, index: int, parent_digest: str):
 
 def children(node: Node) -> list[Node]:
     return node.children
+
+
+def parent_of(node: Node) -> Node | None:
+    return node.parent
 
 
 def chain(depth: int) -> Node:
@@ -236,3 +245,186 @@ def test_query_search_is_bounded_and_reports_truncation():
     assert found.matches == []
     assert found.truncated
     assert found.more
+
+
+# ---------------------------------------------------------------------------
+# Neighbourhood expansion (issue #43)
+# ---------------------------------------------------------------------------
+
+def test_expansion_defaults_off_is_invisible_to_existing_callers():
+    """No expansion params, no change to the result at all."""
+    tree = Node("frame", "W", [Node("push button", "B")])
+    found = inspection.query(
+        tree, describe=describe, children=children, role="push button"
+    )
+    match = found.matches[0]
+    assert match.ancestry == []
+    assert match.siblings == []
+    assert match.children == []
+    assert not found.neighbourhood_truncated
+
+
+def test_ancestors_returned_nearest_first():
+    """The first entry in ancestry is the immediate parent, not the root."""
+    tree = chain(3)  # frame → level-3 → level-2 → level-1 → button "Deep"
+    found = inspection.query(
+        tree, describe=describe, children=children,
+        parent_of=parent_of, name="Deep", ancestors=2,
+    )
+    match = found.matches[0]
+    assert [a.name for a in match.ancestry] == ["level-3", "level-2"]
+
+
+def test_descendants_populate_children_to_depth():
+    """descendants=N fills element.children recursively to N levels."""
+    tree = Node("frame", "W", [
+        Node("panel", "P", [
+            Node("push button", "C1"),
+            Node("panel", "C2", [
+                Node("push button", "GC"),
+            ]),
+        ]),
+    ])
+    found = inspection.query(
+        tree, describe=describe, children=children,
+        parent_of=parent_of, name="P", descendants=2,
+    )
+    match = found.matches[0]
+    child_names = [c.name for c in match.children]
+    assert child_names == ["C1", "C2"]
+    gc = [c for c in match.children if c.name == "C2"][0]
+    assert [c.name for c in gc.children] == ["GC"]
+
+
+def test_siblings_listed_without_the_match_itself():
+    tree = Node("frame", "W", [
+        Node("push button", f"B{i}") for i in range(5)
+    ])
+    found = inspection.query(
+        tree, describe=describe, children=children,
+        parent_of=parent_of, name="B2", siblings=True,
+    )
+    match = found.matches[0]
+    sib_names = [s.name for s in match.siblings]
+    assert "B2" not in sib_names
+    assert {"B0", "B1", "B3", "B4"} == set(sib_names)
+
+
+def test_sibling_cap_is_enforced():
+    """A list with 50 siblings must not produce 50 entries."""
+    tree = Node("frame", "W", [
+        Node("push button", f"B{i}") for i in range(50)
+    ])
+    found = inspection.query(
+        tree, describe=describe, children=children,
+        parent_of=parent_of, name="B0", siblings=True,
+        max_siblings_per_hit=5,
+    )
+    match = found.matches[0]
+    assert len(match.siblings) <= 5
+
+
+def test_expand_budget_exhaustion_marks_neighbourhood_truncated():
+    tree = chain(5)
+    found = inspection.query(
+        tree, describe=describe, children=children,
+        parent_of=parent_of, name="Deep", ancestors=5,
+        max_expand_nodes=1,
+    )
+    # Only one node could be described before the budget ran out.
+    assert found.neighbourhood_truncated
+
+
+def test_expired_deadline_returns_matches_but_no_expansion():
+    tree = chain(3)
+    found = inspection.query(
+        tree, describe=describe, children=children,
+        parent_of=parent_of, name="Deep", ancestors=3,
+        deadline=time.monotonic() - 1,
+    )
+    assert len(found.matches) == 1
+    assert found.matches[0].ancestry == []
+    assert found.neighbourhood_truncated
+
+
+def test_parent_of_none_skips_ancestors_but_descendants_still_work():
+    tree = Node("frame", "W", [
+        Node("panel", "P", [Node("push button", "C")]),
+    ])
+    found = inspection.query(
+        tree, describe=describe, children=children,
+        parent_of=None, name="P", ancestors=2, descendants=1,
+    )
+    match = found.matches[0]
+    assert match.ancestry == []
+    assert [c.name for c in match.children] == ["C"]
+
+
+def test_every_expanded_node_is_in_observations():
+    """Every id handed back must resolve later — so every node was observed.
+
+    `limit=1` stops the search at the match, which is the only arrangement that
+    actually tests expansion: nodes below the cut were never described by the
+    walk, so if expansion forgets to record one, the caller gets an id that
+    resolves to nothing. Without the limit the search has already observed the
+    whole tree and this test passes no matter what expansion does.
+
+    Ancestors are the exception no arrangement can catch: a breadth-first search
+    describes every node on the path to a match before the match itself, so an
+    ancestor is always already observed and expansion's own record of it is
+    belt-and-braces. Descendants and siblings are the ones that genuinely
+    depend on expansion recording them.
+    """
+    tree = Node("frame", "W", [
+        Node("panel", "Container", [
+            Node("push button", "Target", [Node("label", "Deep")]),
+            Node("push button", "Neighbour"),
+        ]),
+    ])
+    found = inspection.query(
+        tree, describe=describe, children=children,
+        parent_of=parent_of, name="Target", limit=1,
+        ancestors=2, descendants=1, siblings=True,
+    )
+    observed_ids = {obs[0] for obs in found.observations}
+    match = found.matches[0]
+    expanded = [*match.ancestry, *match.children, *match.siblings]
+    assert [e.name for e in expanded] == ["Container", "W", "Deep", "Neighbour"]
+    for element in expanded:
+        assert element.id in observed_ids
+
+
+def test_descendants_depth_boundary_marks_truncated():
+    """A node at the descendants depth boundary with children must say so."""
+    tree = Node("frame", "W", [
+        Node("panel", "P", [
+            Node("panel", "Child", [
+                Node("push button", "Grandchild"),
+            ]),
+        ]),
+    ])
+    found = inspection.query(
+        tree, describe=describe, children=children,
+        parent_of=parent_of, name="P", descendants=1,
+    )
+    match = found.matches[0]
+    child = match.children[0]
+    assert child.name == "Child"
+    assert child.truncated  # has children we didn't walk into
+
+
+def test_descendants_budget_cutoff_marks_truncated():
+    """Budget exhaustion mid-enumeration marks the parent element truncated."""
+    tree = Node("frame", "W", [
+        Node("panel", "P", [
+            Node("push button", f"C{i}") for i in range(5)
+        ]),
+    ])
+    found = inspection.query(
+        tree, describe=describe, children=children,
+        parent_of=parent_of, name="P", descendants=1,
+        max_expand_nodes=1,
+    )
+    match = found.matches[0]
+    assert match.truncated  # started enumerating children but ran out of budget
+    assert found.neighbourhood_truncated

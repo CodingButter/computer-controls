@@ -29,6 +29,7 @@ from . import (
     holds,
     identity,
     inspect as inspection,
+    model,
     policy,
     presence,
     protocol_generated,
@@ -36,12 +37,13 @@ from . import (
     security,
     send_gate,
     state,
+    subscriptions,
     waitfor,
     watch,
 )
 from .backends import atspi, capture, launcher, loop, session_env, x11
 from .errors import DesktopError, ErrorCode, InvalidParams
-from .registry import ElementRegistry
+from .registry import ElementRegistry, ElementReferenceStale
 from .session import Session
 from . import transport
 from .transport import JsonRpcServer, default_socket_path
@@ -63,6 +65,15 @@ _session = Session()
 #: so the caller receives a structured TIMEOUT naming what timed out.
 WALK_TIMEOUT_SECONDS = 15.0
 SINGLE_ELEMENT_TIMEOUT_SECONDS = 10.0
+
+#: Expansion runs inside ``query()`` under this soft deadline, which is checked
+#: between describe calls rather than by the loop timeout: ``call_on_loop``
+#: destroys the source on expiry (loop.py:188-191), which would lose the partial
+#: answer. Twelve seconds leaves three seconds of margin under the 15s hard
+#: backstop and eight under the client's 20s request timeout.
+EXPANSION_BUDGET_SECONDS = 12.0
+MAX_SIBLINGS_PER_HIT = 10
+MAX_EXPAND_NODES = 2000
 
 
 def _require_window(window_id: str):
@@ -99,6 +110,31 @@ def _int_param(params: dict[str, Any], key: str, default: int, maximum: int) -> 
         raise InvalidParams(f"{key!r} must be at least 1", {"parameter": key, "received": value})
     # Clamped rather than rejected: a caller asking for too much gets a bounded
     # answer plus the truncation marker, which is more useful than an error.
+    return min(value, maximum)
+
+
+def _bool_param(params: dict[str, Any], key: str, default: bool = False) -> bool:
+    value = params.get(key, default)
+    if not isinstance(value, bool):
+        raise InvalidParams(
+            f"{key!r} must be a boolean", {"parameter": key, "received": type(value).__name__}
+        )
+    return value
+
+
+def _optional_int_param(
+    params: dict[str, Any], key: str, maximum: int
+) -> int:
+    """An integer that defaults to 0 (off) and rejects out-of-range values."""
+    value = params.get(key, 0)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise InvalidParams(
+            f"{key!r} must be an integer", {"parameter": key, "received": type(value).__name__}
+        )
+    if value < 0:
+        raise InvalidParams(
+            f"{key!r} must be at least 0", {"parameter": key, "received": value}
+        )
     return min(value, maximum)
 
 
@@ -285,6 +321,10 @@ def _method_query_elements(params: dict[str, Any]) -> dict[str, Any]:
             {"parameters": ["role", "name", "states"]},
         )
     limit = _int_param(params, "limit", 50, MAX_QUERY_LIMIT)
+    ancestors = _optional_int_param(params, "ancestors", inspection.MAX_ANCESTORS)
+    descendants = _optional_int_param(params, "descendants", inspection.MAX_DESCENDANTS)
+    siblings = _bool_param(params, "siblings", False)
+    wants_expansion = ancestors > 0 or descendants > 0 or siblings
 
     def work():
         window = _require_window(window_id)
@@ -292,10 +332,19 @@ def _method_query_elements(params: dict[str, Any]) -> dict[str, Any]:
             window,
             describe=atspi.describe,
             children=atspi.children_of,
+            parent_of=atspi.parent_of if wants_expansion else None,
             role=role,
             name=name,
             states=states,
             limit=limit,
+            ancestors=ancestors,
+            descendants=descendants,
+            siblings=siblings,
+            max_expand_nodes=MAX_EXPAND_NODES,
+            max_siblings_per_hit=MAX_SIBLINGS_PER_HIT,
+            deadline=time.monotonic() + EXPANSION_BUDGET_SECONDS
+            if wants_expansion
+            else None,
         )
 
     found = loop.call_on_loop(work, timeout=WALK_TIMEOUT_SECONDS)
@@ -305,6 +354,7 @@ def _method_query_elements(params: dict[str, Any]) -> dict[str, Any]:
         "matchCount": len(found.matches),
         "searchTruncated": found.truncated,
         "moreResults": found.more,
+        "neighbourhoodTruncated": found.neighbourhood_truncated,
         "revision": revision,
         "backend": atspi.BACKEND_NAME,
     }
@@ -437,6 +487,59 @@ _deltas = deltas.DeltaEngine(_action_log, advance=_registry.bump)
 VALUE_WATCH_LIMIT = 16
 
 
+def _probe_stale_subscriptions(
+    previous: state.Snapshot, current: state.Snapshot
+) -> list[dict[str, Any]]:
+    """Detect subscribed elements that have gone since the last sample.
+
+    Only ids present in the previous snapshot but absent from the current one
+    are candidates — probing an element on its first sighting would report
+    'gone' for something that was merely slow to arrive. The probe resolves
+    the ambiguity the diff engine refuses to: ``sample_values`` returns empty
+    for both unreachable and never-touched elements, but the registry's
+    fingerprint check fails only when the element has actually changed identity
+    or become unreachable.
+    """
+    subscribed = subscriptions.all_ids()
+    if not subscribed:
+        return []
+
+    candidates = [
+        eid for eid in subscribed
+        if eid in previous.values and eid not in current.values
+    ]
+    if not candidates:
+        return []
+
+    stale: list[dict[str, Any]] = []
+    for eid in candidates:
+        gone = False
+        try:
+            _registry.resolve(eid)
+            if atspi.lookup(eid) is None:
+                gone = True
+        except ElementReferenceStale:
+            gone = True
+
+        if gone:
+            owner = current.owners.get(eid) or previous.owners.get(eid) or ("", "")
+            stale.append(
+                {
+                    "kind": "element-stale",
+                    "elementId": eid,
+                    "applicationId": owner[0] or None,
+                    "applicationName": owner[1] or None,
+                    "summary": model.egress_value(
+                        "a subscribed element is no longer reachable",
+                        field=model.SUMMARY,
+                        element_id=eid,
+                    ),
+                }
+            )
+            subscriptions.purge(eid)
+    return stale
+
+
 def _observe() -> tuple[state.Snapshot, list[dict[str, Any]]]:
     """Look at the desktop once, fold it in, and report what that changed.
 
@@ -449,15 +552,30 @@ def _observe() -> tuple[state.Snapshot, list[dict[str, Any]]]:
     empty list of effects. Both halves of that sentence were true and together they read
     as a lie — the field really had changed, and the only way to know it was to read the
     value back by hand.
+
+    The watch set is the union of the recency heuristic and declared subscriptions: an
+    element somebody subscribed to is sampled regardless of how recently it was touched,
+    because a declared intent outranks a heuristic. A subscribed element that was sampled
+    before but is missing now may have gone, and is probed rather than left to silence.
     """
-    watched = _registry.recent(VALUE_WATCH_LIMIT, roles=atspi.TEXT_VALUE_ROLES)
+    watched = list(
+        set(_registry.recent(VALUE_WATCH_LIMIT, roles=atspi.TEXT_VALUE_ROLES))
+        | subscriptions.all_ids()
+    )
 
     def look():
         return atspi.list_windows(), atspi.sample_values(watched), atspi.owners_of(watched)
 
+    previous = _deltas.current
     windows, values, owners = loop.call_on_loop(look, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
     snapshot = state.snapshot_from_windows(_registry.revision, windows, values, owners)
-    return snapshot, _deltas.observe(snapshot)
+    changes = _deltas.observe(snapshot)
+
+    stale = _probe_stale_subscriptions(previous, _deltas.current)
+    if stale:
+        changes.extend(_deltas.report(stale))
+
+    return _deltas.current, changes
 
 
 def _snapshot() -> state.Snapshot:
@@ -1561,6 +1679,34 @@ def _method_release_element(params: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _method_subscribe_element(params: dict[str, Any]) -> dict[str, Any]:
+    """Declare that this connection wants to be told about this element.
+
+    A subscription is an observation claim, not a write claim: it changes who is
+    watching, not who may touch. Subscribing to an id that names nothing is an
+    unkeepable promise, so the element is resolved first — the way a claim is.
+
+    Over the ceiling is a refusal that names the ceiling, never a silent
+    truncation: a service that accepted a thousand subscriptions and quietly
+    sampled the first sixteen would have reinvented the bug this method exists
+    to fix.
+    """
+    _resolve_element(_str_param(params, "elementId"))
+    subscriptions.declare(_client_id(params), _str_param(params, "elementId"))
+    return {"subscribed": True, "revision": _registry.revision}
+
+
+def _method_unsubscribe_element(params: dict[str, Any]) -> dict[str, Any]:
+    """Drop this connection's subscription to an element.
+
+    Releasing what you do not subscribe to is not an error, for the same reason
+    releasing an unclaimed element is not: the connection ends up in the right
+    state either way.
+    """
+    released = subscriptions.release(_client_id(params), _str_param(params, "elementId"))
+    return {"released": released, "revision": _registry.revision}
+
+
 def _method_set_attention(params: dict[str, Any]) -> dict[str, Any]:
     """Record what this connection is looking at.
 
@@ -1870,8 +2016,12 @@ def build_server(socket_path: str) -> JsonRpcServer:
     # Attention dies with the connection that declared it. Identities are never
     # reused, so a survivor could not be inherited by a later client — it would
     # just accumulate, one entry per connection, in a process meant to run for
-    # weeks.
-    base = JsonRpcServer(socket_path, on_disconnect=attention.forget)
+    # weeks. Subscriptions die with their connection for the same reason.
+    def _on_disconnect(client_id: str) -> None:
+        attention.forget(client_id)
+        subscriptions.forget(client_id)
+
+    base = JsonRpcServer(socket_path, on_disconnect=_on_disconnect)
 
     class _ValidatingServer:
         """Registers every handler behind its schema check."""
@@ -1906,6 +2056,8 @@ def build_server(socket_path: str) -> JsonRpcServer:
     server.register("commitElement", _method_commit_element)
     server.register("claimElement", _method_claim_element)
     server.register("releaseElement", _method_release_element)
+    server.register("subscribeElement", _method_subscribe_element)
+    server.register("unsubscribeElement", _method_unsubscribe_element)
     server.register("setElementValue", _method_set_element_value)
     server.register("typeText", _method_type_text)
     server.register("editText", _method_edit_text)

@@ -552,6 +552,16 @@ def children_of(obj: Atspi.Accessible) -> list[Atspi.Accessible]:
     return kids
 
 
+def parent_of(obj: Atspi.Accessible) -> Atspi.Accessible | None:
+    """The parent accessible, or None at the root.
+
+    Callers that walk upward cap the chain themselves — see
+    ``MAX_ANCESTOR_WALK`` for the broken-toolkit hazard that makes that cap
+    non-negotiable.
+    """
+    return _safe(obj.get_parent)
+
+
 def find_window(win_id: str) -> Atspi.Accessible | None:
     """Locate a window by id, preferring the live object table.
 

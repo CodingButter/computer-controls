@@ -17,7 +17,9 @@ local for much longer: the shape this project is heading for is one server per
 machine — this daemon, an agent layer above it, a gateway above that — and many
 clients holding nothing but a server URL and a credential. Nothing
 network-facing ever speaks to the desktop directly, which is the entire reason
-the guarantees below this line keep their meaning.
+the guarantees below this line keep their meaning. The full ruling on how a
+client reaches that server — the tiers, the constraints, what the daemon is not
+— is in `docs/06-how-a-stranger-connects.md`.
 
 So the rule for whatever opens this socket on their behalf: **one connection per
 agent, never one for the server.** The connection is not a transport detail

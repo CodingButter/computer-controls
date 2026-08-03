@@ -16,6 +16,7 @@ the caller now believes.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any, Callable
 
 from .model import SemanticElement
@@ -26,6 +27,14 @@ Observation = tuple[str, str, dict[str, Any], Fingerprint]
 
 DEFAULT_DEPTH = 3
 DEFAULT_MAX_NODES = 200
+
+#: Mirrors atspi.MAX_ANCESTOR_WALK — a broken toolkit can hand back a parent
+#: chain that never terminates, and the walk must stop before the loop thread
+#: does.
+MAX_ANCESTORS = 32
+MAX_DESCENDANTS = 10
+DEFAULT_MAX_EXPAND_NODES = 2000
+DEFAULT_MAX_SIBLINGS_PER_HIT = 10
 
 
 @dataclass
@@ -45,6 +54,10 @@ class QueryResult:
     #: There are more matches to be had — either because the search was cut
     #: short or because the answer hit its limit with tree still unwalked.
     more: bool
+    #: Expansion was cut short by the node budget or time limit, not the search.
+    #: Distinct from `truncated`: the search covered the window, but some
+    #: matches did not get their full neighbourhood.
+    neighbourhood_truncated: bool = False
 
 
 @dataclass
@@ -75,6 +88,9 @@ Describe = Callable[[Any, int, str], tuple[SemanticElement, Fingerprint, dict[st
 
 # Yields a backend object's children.
 Children = Callable[[Any], list[Any]]
+
+# Returns a backend object's parent, or None at the root.
+ParentOf = Callable[[Any], Any | None]
 
 
 def inspect_tree(
@@ -177,19 +193,37 @@ def query(
     *,
     describe: Describe,
     children: Children,
+    parent_of: ParentOf | None = None,
     role: str | None = None,
     name: str | None = None,
     states: frozenset[str] = frozenset(),
     limit: int = 50,
     max_nodes: int = 2000,
+    ancestors: int = 0,
+    descendants: int = 0,
+    siblings: bool = False,
+    max_expand_nodes: int = DEFAULT_MAX_EXPAND_NODES,
+    max_siblings_per_hit: int = DEFAULT_MAX_SIBLINGS_PER_HIT,
+    deadline: float | None = None,
 ) -> "QueryResult":
     """Find matching elements without building a tree.
 
     Returns a flat list, because a query's answer is "these elements", not "here
     is the shape of the window". `max_nodes` bounds the search itself so a query
     against a pathological tree terminates; `limit` bounds the answer.
+
+    When ``ancestors``, ``descendants`` or ``siblings`` is set, each match is
+    expanded *after* the match set is capped by ``limit``: the ancestor chain is
+    walked up, the descendant subtree walked down, and immediate siblings
+    listed. Expansion shares a node budget (``max_expand_nodes``) and an
+    optional wall-clock ``deadline``; hitting either sets
+    ``neighbourhood_truncated`` so the caller knows the neighbourhood is
+    partial, not the search. Expansion runs after ``limit`` caps the match set,
+    so the bound is ``limit × neighbourhood``, not application size.
     """
     matches: list[SemanticElement] = []
+    match_objs: list[Any] = []
+    match_digests: list[str] = []
     observations: list[Observation] = []
     searched = 0
     truncated = False
@@ -209,15 +243,27 @@ def query(
         observations.append(
             (element.id, element.backend, reference, fingerprint)
         )
+        digest = fingerprint.digest()
         if _matches(element, role, needle, states):
             matches.append(element)
-        digest = fingerprint.digest()
+            match_objs.append(obj)
+            match_digests.append(digest)
         for child_index, child in enumerate(children(obj)):
             frontier.append((child, child_index, digest))
 
     more = truncated or (len(matches) >= limit and bool(frontier))
+    neighbourhood_truncated = _expand_neighbourhood(
+        matches, match_objs, match_digests, observations,
+        describe=describe, children=children, parent_of=parent_of,
+        ancestors=ancestors, descendants=descendants, siblings=siblings,
+        max_expand_nodes=max_expand_nodes,
+        max_siblings_per_hit=max_siblings_per_hit,
+        deadline=deadline,
+    )
     return QueryResult(
-        matches=matches, observations=observations, truncated=truncated, more=more
+        matches=matches, observations=observations,
+        truncated=truncated, more=more,
+        neighbourhood_truncated=neighbourhood_truncated,
     )
 
 
@@ -234,3 +280,157 @@ def _matches(
     if states and not states.issubset(set(element.states)):
         return False
     return True
+
+
+def _sibling_index(obj: Any, parent_of: ParentOf, children: Children) -> int:
+    """The position of *obj* among its parent's children, or 0 at the root."""
+    parent = parent_of(obj)
+    if parent is None:
+        return 0
+    for i, child in enumerate(children(parent)):
+        if child is obj:
+            return i
+    return 0
+
+
+def _expand_neighbourhood(
+    matches: list[SemanticElement],
+    match_objs: list[Any],
+    match_digests: list[str],
+    observations: list[Observation],
+    *,
+    describe: Describe,
+    children: Children,
+    parent_of: ParentOf | None,
+    ancestors: int,
+    descendants: int,
+    siblings: bool,
+    max_expand_nodes: int,
+    max_siblings_per_hit: int,
+    deadline: float | None,
+) -> bool:
+    """Expand ancestors, descendants and siblings around each match.
+
+    Runs *after* the match set is capped by ``limit``, so the cost scales with
+    the answer size, not the application size. Returns ``True`` when the node
+    budget or deadline was hit before every match was fully expanded.
+    """
+    if not matches or (ancestors == 0 and descendants == 0 and not siblings):
+        return False
+
+    expanded = 0
+    neighbourhood_truncated = False
+
+    def can_expand() -> bool:
+        nonlocal neighbourhood_truncated
+        if expanded >= max_expand_nodes or (
+            deadline is not None and monotonic() >= deadline
+        ):
+            neighbourhood_truncated = True
+            return False
+        return True
+
+    for match, match_obj, match_digest in zip(matches, match_objs, match_digests):
+        # --- Ancestors ---
+        if ancestors > 0 and parent_of is not None:
+            chain: list[Any] = []
+            node = match_obj
+            for _ in range(ancestors):
+                parent = parent_of(node)
+                if parent is None:
+                    break
+                chain.append(parent)
+                node = parent
+            # Describe root-ward so each ancestor's parent_digest threads from
+            # the one above it. The topmost ancestor gets "" — its own parent
+            # is outside the chain, and the atspi backend re-derives the digest
+            # from the object itself regardless (atspi.py:528-531).
+            described: list[tuple[SemanticElement, Fingerprint]] = []
+            prev_digest = ""
+            for obj in reversed(chain):
+                if not can_expand():
+                    break
+                idx = _sibling_index(obj, parent_of, children)
+                elem, fp, ref = describe(obj, idx, prev_digest)
+                expanded += 1
+                observations.append((elem.id, elem.backend, ref, fp))
+                described.append((elem, fp))
+                prev_digest = fp.digest()
+            match.ancestry = [e for e, _ in reversed(described)]
+
+        if neighbourhood_truncated:
+            break
+
+        # --- Descendants ---
+        if descendants > 0:
+            dfrontier: list[tuple[Any, SemanticElement, str, int]] = [
+                (match_obj, match, match_digest, 0)
+            ]
+            while dfrontier:
+                obj, parent_elem, parent_dig, depth = dfrontier.pop(0)
+                if depth >= descendants:
+                    # Same contract as inspect_tree (line 150-152): a node at
+                    # the depth boundary with children must say so, or a cut
+                    # subtree is indistinguishable from one that ended.
+                    if children(obj):
+                        parent_elem.truncated = True
+                    continue
+                for index, child_obj in enumerate(children(obj)):
+                    if not can_expand():
+                        parent_elem.truncated = True
+                        break
+                    child_elem, child_fp, child_ref = describe(
+                        child_obj, index, parent_dig
+                    )
+                    expanded += 1
+                    observations.append(
+                        (child_elem.id, child_elem.backend, child_ref, child_fp)
+                    )
+                    parent_elem.children.append(child_elem)
+                    dfrontier.append(
+                        (child_obj, child_elem, child_fp.digest(), depth + 1)
+                    )
+                if neighbourhood_truncated:
+                    break
+
+        if neighbourhood_truncated:
+            break
+
+        # --- Siblings ---
+        if siblings and parent_of is not None:
+            parent_obj = parent_of(match_obj)
+            if parent_obj is not None:
+                # Describe the parent once to obtain the digest every sibling
+                # shares. The atspi backend re-derives identity from the object,
+                # so this produces the same id whether or not the parent was
+                # visited during the search.
+                if not can_expand():
+                    break
+                p_idx = _sibling_index(parent_obj, parent_of, children)
+                _p_elem, p_fp, p_ref = describe(parent_obj, p_idx, "")
+                expanded += 1
+                observations.append(
+                    (_p_elem.id, _p_elem.backend, p_ref, p_fp)
+                )
+                p_digest = p_fp.digest()
+
+                sib_count = 0
+                for index, sib_obj in enumerate(children(parent_obj)):
+                    if sib_obj is match_obj:
+                        continue
+                    if sib_count >= max_siblings_per_hit:
+                        break
+                    if not can_expand():
+                        break
+                    sib_elem, sib_fp, sib_ref = describe(sib_obj, index, p_digest)
+                    expanded += 1
+                    observations.append(
+                        (sib_elem.id, sib_elem.backend, sib_ref, sib_fp)
+                    )
+                    match.siblings.append(sib_elem)
+                    sib_count += 1
+
+        if neighbourhood_truncated:
+            break
+
+    return neighbourhood_truncated
