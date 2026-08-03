@@ -377,6 +377,40 @@ export default defineMastraCodePlugin({
       }),
     },
 
+    desktop_attest_element: {
+      tool: createTool({
+        id: "desktop_attest_element",
+        description:
+          "Snapshot a field's contents so a later desktop_commit_element can prove they have not " +
+          "changed before sending. Composing is not sending: this call authorises nothing, it " +
+          "takes a picture of what is in the field right now. The service reads the text itself " +
+          "— you supply which element, never what text. A field whose contents the accessibility " +
+          "layer cannot read (a password field showing bullets) is refused: there is nothing to " +
+          "attest that a later commit could compare against. Present the returned attestationId " +
+          "to desktop_commit_element within its TTL; one attestation admits exactly one commit.",
+        inputSchema: schemas.attestElementParams,
+        outputSchema: schemas.attestElementResult,
+        execute: async (input) => await request("attestElement", { ...input }),
+      }),
+    },
+
+    desktop_commit_element: {
+      tool: createTool({
+        id: "desktop_commit_element",
+        description:
+          "Send what was attested. Re-reads the field and refuses if it no longer matches what " +
+          "desktop_attest_element recorded — naming the difference, never repairing it. If it " +
+          "matches, triggers the element's own action. Success is asserted from the observed " +
+          "effect — the field is now empty, meaning it transmitted — not from the action call " +
+          "returning true. A field that the action was called on but which still contains its " +
+          "contents afterwards is a commit that did not send, reported as failure regardless of " +
+          "what the action call returned. Requires confirm: true.",
+        inputSchema: schemas.commitElementParams,
+        outputSchema: schemas.commitElementResult,
+        execute: async (input) => await request("commitElement", { ...input }),
+      }),
+    },
+
     desktop_wait_for: {
       tool: createTool({
         id: "desktop_wait_for",

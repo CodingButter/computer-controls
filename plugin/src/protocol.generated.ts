@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 6705ae8fed45c861
+// Protocol version: 1.0   schema sha256: 9ffcc3f641ed0521
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "6705ae8fed45c861" as const;
+export const SCHEMA_DIGEST = "9ffcc3f641ed0521" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -167,6 +167,20 @@ export interface SemanticElement {
 }
 
 /** Every method, its operation class, and its request and response shapes. */
+/** Read and record what is in a field right now, so a later commitElement can refuse if it has changed. The evidence is the field's own contents read by the service — the caller writes the argument (which element), never the evidence (what text). A masked field, whose contents even the accessibility layer cannot read, is refused: there is nothing to attest that a later commit could compare against. Composing is not sending, and this call authorises nothing: it takes a snapshot, and the snapshot is only as good as the moment it was taken. (operation class: observe) */
+export interface AttestElementParams {
+  clientId?: string;
+  confirm?: boolean;
+  /** The field whose contents are being attested for a later commit. */
+  elementId: string;
+}
+export interface AttestElementResult {
+  /** Identifies this attestation. Present it to commitElement within its TTL; one attestation admits exactly one commit. */
+  attestationId: string;
+  /** How long before the attestation must be retaken. A stale attestation is not reusable. */
+  expiresInMs: number;
+}
+
 /** The most recent entries from this service's audit log, including the calls that were refused. Refusals are the half worth reading: an agent that tried to close a window and was told no is a fact about the agent, and it is invisible in a record of what succeeded. Entries carry what was done and to which application, never the contents of anything read or typed. (operation class: observe) */
 export interface AuditTailParams {
   clientId?: string;
@@ -224,6 +238,20 @@ export interface ClaimElementResult {
   claim: ElementClaim;
   revision: number;
 }
+
+/** Send what was attested. Re-reads the field and refuses if it no longer matches what attestElement recorded; if it matches, triggers the element's own action. Success is asserted from the observed effect — the field is now empty, meaning it transmitted — not from the action call returning true. A field that the action was called on but which still contains its contents afterwards is a commit that did not send, reported as failure regardless of what the action call returned. The thing that would have caught the original incident: a keystroke that typed a character instead of pressing Return leaves the field non-empty, and that is the failure this reports. (operation class: destructive) */
+export interface CommitElementParams {
+  /** The action to trigger, as reported in the element's actions list. Not an index: indices move. When omitted, the element's first action is used. */
+  action?: string;
+  /** The attestation returned by attestElement for this field. One attestation admits one commit; a second commit with the same id is refused. */
+  attestationId: string;
+  clientId?: string;
+  confirm?: boolean;
+  /** The field whose attested contents are being sent. */
+  elementId: string;
+  settleMs?: number;
+}
+export type CommitElementResult = ActionResult;
 
 /** Replace or remove part of an editable element's text, addressed by the text itself rather than by character offsets. Editing at this layer is a splice — a range is removed and something is put in its place in one operation — because there is no keyboard here and nothing to press backspace on. An offset computed from a field somebody has since typed into points at the wrong characters; text that has moved is simply not found, which is a refusal instead of a wrong edit. (operation class: edit) */
 export interface EditTextParams {
@@ -699,12 +727,14 @@ export interface WaitForResult {
   waitedMs: number;
 }
 
-export type MethodName = "auditTail" | "captureWindow" | "claimElement" | "editText" | "emergencyStop" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "grantScope" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "releaseElement" | "setAttention" | "setElementValue" | "setObservationMode" | "subscribeElement" | "typeText" | "unsubscribeElement" | "waitFor";
+export type MethodName = "attestElement" | "auditTail" | "captureWindow" | "claimElement" | "commitElement" | "editText" | "emergencyStop" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "grantScope" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "releaseElement" | "setAttention" | "setElementValue" | "setObservationMode" | "subscribeElement" | "typeText" | "unsubscribeElement" | "waitFor";
 
 export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
+  attestElement: "observe",
   auditTail: "observe",
   captureWindow: "observe",
   claimElement: "edit",
+  commitElement: "destructive",
   editText: "edit",
   emergencyStop: "observe",
   focusWindow: "activate",
@@ -735,9 +765,11 @@ export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
 };
 
 export interface MethodMap {
+  attestElement: { params: AttestElementParams; result: AttestElementResult };
   auditTail: { params: AuditTailParams; result: AuditTailResult };
   captureWindow: { params: CaptureWindowParams; result: CaptureWindowResult };
   claimElement: { params: ClaimElementParams; result: ClaimElementResult };
+  commitElement: { params: CommitElementParams; result: CommitElementResult };
   editText: { params: EditTextParams; result: EditTextResult };
   emergencyStop: { params: EmergencyStopParams; result: EmergencyStopResult };
   focusWindow: { params: FocusWindowParams; result: FocusWindowResult };
