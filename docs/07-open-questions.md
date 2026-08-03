@@ -167,3 +167,95 @@ restarting the daemon.
 **Tier that picks it up** — the handshake. `hello` should carry the schema
 digest the daemon was built against, so a client can compare it to its own and
 say something useful instead of guessing.
+
+---
+
+## Deferred capability tiers
+
+The capability report (`getDesktopCapabilities`) declares five tiers. Three are
+deferred by scope — available `false` with a reason, never omitted — so a caller
+can tell the difference between "this desktop cannot do that" and "this build
+does not do that yet" (`capabilities.py:11-14`). These are recorded here as open
+questions because each is a known limit with a stated path forward, not a gap
+left by accident.
+
+### app-native — application-specific integrations
+
+**Status** — unavailable, deferred by scope (`capabilities.py:113-121`).
+
+**Reason** — no browser DevTools Protocol adapter, Firefox remote protocol
+adapter, or application D-Bus adapter is implemented in this build.
+
+**What it would unlock** — per-application semantics deeper than the
+accessibility tree offers: a web page's live DOM (not its a11y projection),
+an editor's document model, a media player's playlist as a first-class object.
+
+**Why it is deferred** — each application is its own integration, with its own
+transport and its own stability characteristics. The accessibility tier already
+reaches into every one of these applications; app-native tiers would reach
+*deeper* in a few, at the cost of one integration per application rather than
+one backend per desktop. The architecture reserves the slot
+(`capabilities.py:113-121`) so adding an adapter later is additive, not a new
+vocabulary.
+
+### compositor — Wayland portal-based control
+
+**Status** — partially available. X11 window management works; Wayland does not
+(`capabilities.py:136-153`).
+
+**Reason on Wayland** — "session display server is 'wayland': X11 window
+management is unavailable and the Wayland portal path is deferred by scope"
+(`capabilities.py:140-145`). The `waylandPortals` detail is `false` with reason
+"deferred by scope: portal-based control is not implemented in this build"
+(`capabilities.py:148-151`).
+
+**What it would unlock** — `focusWindow`, `launchApplication`, and window
+enumeration on Wayland sessions, which the X11 backend cannot reach.
+
+**Why it is deferred** — Wayland's security model requires the Hyper+Xdg portals
+for anything another process does with a window, and the portal API is a
+different transport from X11. The backend boundary (`backends/`) exists so a
+Wayland backend can be added without touching the protocol, and `ROADMAP.md`'s
+platform rule holds: "a test fails if a toolkit import appears above it" — i.e.
+backend code stays under `backends/`.
+
+### vision — OCR
+
+**Status** — window capture works (subject to the capture blocklist); screen
+capture is out of scope by design; OCR is unavailable (`capabilities.py:154-171`).
+
+**Reason for OCR** — "deferred by scope: no OCR engine is bundled with this
+build" (`capabilities.py:167-168`).
+
+**Reason for screen capture** — "out of scope by design: captures are addressed
+by window id, so a caller can never ask for the screen and never receive
+somebody else's window in the frame" (`capabilities.py:161-166`). This is a
+design constraint, not a deferral — it will not be filled in later.
+
+**What OCR would unlock** — reading text from a region the accessibility tree
+does not model: a canvas, a rendered gutter (`07-open-questions.md` §3, the
+GTK4 gutter), or a proprietary widget that draws without composing accessible
+children.
+
+**Why it is deferred** — bundling an OCR engine is a dependency and a model
+choice (Tesseract, a cloud API, or a local vision-language model are different
+decisions with different trust profiles). The `captureWindow` method already
+hands the image to the model, which can read it; a bundled OCR engine would
+duplicate that capability for the one case where the model is not in the loop.
+
+### raw-input — synthetic pointer and keyboard input
+
+**Status** — unavailable, out of scope by design (`capabilities.py:172-177`).
+
+**Reason** — `/dev/uinput` existence and writability checks, plus
+`xdotool`/`ydotool`/`wmctrl` on PATH, plus "raw input is out of scope for this
+build by design" (`capabilities.py:86-96`).
+
+**Why it is out of scope** — this is not a deferral; it is the project's
+governing constraint. `ROADMAP.md` states the rule: "a semantic desktop, never
+a remote shell." Synthetic input bypasses the consent ceiling, the holds
+registry, and the redaction layer — it types into whatever has focus, including
+a window the user walled off. The accessibility tier's `typeText` and
+`setElementValue` go through the same security model as every other method, and
+that is the point. Raw input is the thing this project exists to replace, not to
+provide.

@@ -9,13 +9,27 @@ coordinate guessing.
 - `protocol/` — `schema.json`, the single source of truth for that protocol. The TypeScript and
   Python bindings are both generated from it, and neither is edited by hand
 - `scripts/` — the binding generator, its regeneration check, and the scripts that produce proofs
-- `docs/` — the compatibility matrix, the distribution ruling, the open-questions log, and `docs/proofs/`
+- `docs/` — research findings, architecture, tool API, security model, prototype notes, the distribution ruling, the compatibility matrix, the open-questions log, and `docs/proofs/`
 
 If you are picking up an issue, read [CONTRIBUTING.md](CONTRIBUTING.md) first — it is short, and
 it is mostly about how to prove what you did from wherever you happen to be sitting. For depth,
 [`protocol/README.md`](protocol/README.md) has the wire contract and what counts as a breaking
 change, [`service/README.md`](service/README.md) has the threading contract and the `gi`
 containment rule, and [`ROADMAP.md`](ROADMAP.md) has where the project is.
+
+### Documentation set
+
+| Document | What it covers |
+|----------|----------------|
+| [docs/01-research-findings.md](docs/01-research-findings.md) | AT-SPI2 research: the accessibility bus, tree traversal, querying, pointer-free actions, editable text, reference lifetimes, per-toolkit exposure |
+| [docs/02-architecture-proposal.md](docs/02-architecture-proposal.md) | The load-bearing decision: why a signal provider that pushes deltas, not an MCP request/response server |
+| [docs/03-tool-api.md](docs/03-tool-api.md) | Every method, parameter, and error code — generated from `protocol/schema.json` so it cannot drift |
+| [docs/04-security-model.md](docs/04-security-model.md) | Operation classes, the ceiling-and-hand consent model, redaction, capture blocklist, holds, audit, emergency stop |
+| [docs/05-compatibility-matrix.md](docs/05-compatibility-matrix.md) | Measured accessibility-tree coverage across applications and toolkits |
+| [docs/06-how-a-stranger-connects.md](docs/06-how-a-stranger-connects.md) | How a machine and a client find each other, and what the daemon deliberately does not own |
+| [docs/07-open-questions.md](docs/07-open-questions.md) | Gaps this build does not close, and the deferred capability tiers |
+| [docs/08-prototype-notes.md](docs/08-prototype-notes.md) | What proved out, what was harder than expected, and the lessons worth not rediscovering |
+| [docs/proofs/](docs/proofs/) | Script-generated evidence about the real desktop — never hand-written |
 
 Everything below runs from the repository root, in order, in one shell.
 
