@@ -29,18 +29,20 @@ from . import (
     holds,
     identity,
     inspect as inspection,
+    model,
     policy,
     presence,
     protocol_generated,
     redaction,
     security,
     state,
+    subscriptions,
     waitfor,
     watch,
 )
 from .backends import atspi, capture, launcher, loop, session_env, x11
 from .errors import DesktopError, ErrorCode, InvalidParams
-from .registry import ElementRegistry
+from .registry import ElementRegistry, ElementReferenceStale
 from .session import Session
 from . import transport
 from .transport import JsonRpcServer, default_socket_path
@@ -484,6 +486,59 @@ _deltas = deltas.DeltaEngine(_action_log, advance=_registry.bump)
 VALUE_WATCH_LIMIT = 16
 
 
+def _probe_stale_subscriptions(
+    previous: state.Snapshot, current: state.Snapshot
+) -> list[dict[str, Any]]:
+    """Detect subscribed elements that have gone since the last sample.
+
+    Only ids present in the previous snapshot but absent from the current one
+    are candidates — probing an element on its first sighting would report
+    'gone' for something that was merely slow to arrive. The probe resolves
+    the ambiguity the diff engine refuses to: ``sample_values`` returns empty
+    for both unreachable and never-touched elements, but the registry's
+    fingerprint check fails only when the element has actually changed identity
+    or become unreachable.
+    """
+    subscribed = subscriptions.all_ids()
+    if not subscribed:
+        return []
+
+    candidates = [
+        eid for eid in subscribed
+        if eid in previous.values and eid not in current.values
+    ]
+    if not candidates:
+        return []
+
+    stale: list[dict[str, Any]] = []
+    for eid in candidates:
+        gone = False
+        try:
+            _registry.resolve(eid)
+            if atspi.lookup(eid) is None:
+                gone = True
+        except ElementReferenceStale:
+            gone = True
+
+        if gone:
+            owner = current.owners.get(eid) or previous.owners.get(eid) or ("", "")
+            stale.append(
+                {
+                    "kind": "element-stale",
+                    "elementId": eid,
+                    "applicationId": owner[0] or None,
+                    "applicationName": owner[1] or None,
+                    "summary": model.egress_value(
+                        "a subscribed element is no longer reachable",
+                        field=model.SUMMARY,
+                        element_id=eid,
+                    ),
+                }
+            )
+            subscriptions.purge(eid)
+    return stale
+
+
 def _observe() -> tuple[state.Snapshot, list[dict[str, Any]]]:
     """Look at the desktop once, fold it in, and report what that changed.
 
@@ -496,15 +551,30 @@ def _observe() -> tuple[state.Snapshot, list[dict[str, Any]]]:
     empty list of effects. Both halves of that sentence were true and together they read
     as a lie — the field really had changed, and the only way to know it was to read the
     value back by hand.
+
+    The watch set is the union of the recency heuristic and declared subscriptions: an
+    element somebody subscribed to is sampled regardless of how recently it was touched,
+    because a declared intent outranks a heuristic. A subscribed element that was sampled
+    before but is missing now may have gone, and is probed rather than left to silence.
     """
-    watched = _registry.recent(VALUE_WATCH_LIMIT, roles=atspi.TEXT_VALUE_ROLES)
+    watched = list(
+        set(_registry.recent(VALUE_WATCH_LIMIT, roles=atspi.TEXT_VALUE_ROLES))
+        | subscriptions.all_ids()
+    )
 
     def look():
         return atspi.list_windows(), atspi.sample_values(watched), atspi.owners_of(watched)
 
+    previous = _deltas.current
     windows, values, owners = loop.call_on_loop(look, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
     snapshot = state.snapshot_from_windows(_registry.revision, windows, values, owners)
-    return snapshot, _deltas.observe(snapshot)
+    changes = _deltas.observe(snapshot)
+
+    stale = _probe_stale_subscriptions(previous, _deltas.current)
+    if stale:
+        changes.extend(_deltas.report(stale))
+
+    return _deltas.current, changes
 
 
 def _snapshot() -> state.Snapshot:
@@ -1482,6 +1552,34 @@ def _method_release_element(params: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _method_subscribe_element(params: dict[str, Any]) -> dict[str, Any]:
+    """Declare that this connection wants to be told about this element.
+
+    A subscription is an observation claim, not a write claim: it changes who is
+    watching, not who may touch. Subscribing to an id that names nothing is an
+    unkeepable promise, so the element is resolved first — the way a claim is.
+
+    Over the ceiling is a refusal that names the ceiling, never a silent
+    truncation: a service that accepted a thousand subscriptions and quietly
+    sampled the first sixteen would have reinvented the bug this method exists
+    to fix.
+    """
+    _resolve_element(_str_param(params, "elementId"))
+    subscriptions.declare(_client_id(params), _str_param(params, "elementId"))
+    return {"subscribed": True, "revision": _registry.revision}
+
+
+def _method_unsubscribe_element(params: dict[str, Any]) -> dict[str, Any]:
+    """Drop this connection's subscription to an element.
+
+    Releasing what you do not subscribe to is not an error, for the same reason
+    releasing an unclaimed element is not: the connection ends up in the right
+    state either way.
+    """
+    released = subscriptions.release(_client_id(params), _str_param(params, "elementId"))
+    return {"released": released, "revision": _registry.revision}
+
+
 def _method_set_attention(params: dict[str, Any]) -> dict[str, Any]:
     """Record what this connection is looking at.
 
@@ -1791,8 +1889,12 @@ def build_server(socket_path: str) -> JsonRpcServer:
     # Attention dies with the connection that declared it. Identities are never
     # reused, so a survivor could not be inherited by a later client — it would
     # just accumulate, one entry per connection, in a process meant to run for
-    # weeks.
-    base = JsonRpcServer(socket_path, on_disconnect=attention.forget)
+    # weeks. Subscriptions die with their connection for the same reason.
+    def _on_disconnect(client_id: str) -> None:
+        attention.forget(client_id)
+        subscriptions.forget(client_id)
+
+    base = JsonRpcServer(socket_path, on_disconnect=_on_disconnect)
 
     class _ValidatingServer:
         """Registers every handler behind its schema check."""
@@ -1825,6 +1927,8 @@ def build_server(socket_path: str) -> JsonRpcServer:
     server.register("invokeElement", _method_invoke_element)
     server.register("claimElement", _method_claim_element)
     server.register("releaseElement", _method_release_element)
+    server.register("subscribeElement", _method_subscribe_element)
+    server.register("unsubscribeElement", _method_unsubscribe_element)
     server.register("setElementValue", _method_set_element_value)
     server.register("typeText", _method_type_text)
     server.register("editText", _method_edit_text)

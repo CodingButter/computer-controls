@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: f4e410b8c138758e
+// Protocol version: 1.0   schema sha256: 6705ae8fed45c861
 
 import { z } from "@mastra/code-sdk/plugin";
 
@@ -25,7 +25,7 @@ export const observedEffectsSchema = z.object({
 });
 
 export const errorDataSchema = z.object({
-  code: z.enum(["APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR"]),
+  code: z.enum(["APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR", "SUBSCRIPTION_LIMIT_REACHED"]),
   detail: z.record(z.string(), z.unknown()).optional(),
   message: z.string().describe("Present when this error travels inside a result rather than as a JSON-RPC error. A failed step inside a batch has no top-level error member to carry its explanation, and a report that says a step failed without saying why is not worth returning.").optional(),
 });
@@ -453,6 +453,16 @@ export const setObservationModeResult = z.object({
   revision: z.number().int(),
 });
 
+export const subscribeElementParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  elementId: z.string(),
+});
+export const subscribeElementResult = z.object({
+  revision: z.number().int().min(0),
+  subscribed: z.boolean(),
+});
+
 export const typeTextParams = z.object({
   clientId: z.string().optional(),
   confirm: z.boolean().optional(),
@@ -463,6 +473,16 @@ export const typeTextParams = z.object({
   wordsPerMinute: z.number().int().min(10).max(220).describe("Typing speed. Defaults to a competent typist. Faster than a person can type is available and is a choice the caller makes knowingly.").optional(),
 });
 export const typeTextResult = z.record(z.string(), z.unknown());
+
+export const unsubscribeElementParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+  elementId: z.string(),
+});
+export const unsubscribeElementResult = z.object({
+  released: z.boolean().describe("True when this call ended a subscription, false when there was nothing of this client's to give up."),
+  revision: z.number().int().min(0),
+});
 
 export const waitForParams = z.object({
   clientId: z.string().optional(),
