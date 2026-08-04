@@ -1,0 +1,26 @@
+{
+  "name": "@codingbutter/computer-controls-client",
+  "version": "0.1.0",
+  "description": "The local hub's sign-in surface: your own Anthropic and OpenAI accounts, the Factory way",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "hono": "4.12.33"
+  },
+  "peerDependencies": {
+    "@mastra/code-sdk": "1.1.1",
+    "@mastra/core": "1.55.0"
+  },
+  "devDependencies": {
+    "@mastra/code-sdk": "1.1.1",
+    "@mastra/core": "1.55.0",
+    "@types/node": "^26.1.2",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

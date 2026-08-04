@@ -1,0 +1,18 @@
+# Same answer the plugin package gives, for the same reason: pnpm refuses to
+# finish an install that silently skipped a dependency's build script, and an
+# unanswered package fails `pnpm install` outright.
+#
+# Every one of these arrives underneath `@mastra/core` and belongs to a feature
+# this package does not touch: model providers, browser automation, an ONNX
+# runtime, protobuf codegen. Their builds compile native binaries we never load.
+#
+# So: build nothing. If a future dependency genuinely needs its build to run,
+# flip that one entry and say why.
+allowBuilds:
+  '@google/genai': false
+  agent-browser: false
+  bufferutil: false
+  edgedriver: false
+  geckodriver: false
+  onnxruntime-node: false
+  protobufjs: false
