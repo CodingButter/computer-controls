@@ -5,7 +5,7 @@ applications, windows, dialogs, buttons, text fields — instead of screenshots,
 coordinate guessing.
 
 - `plugin/` — the TypeScript Mastra Code plugin (`codingbutter.desktop-control`)
-- `client/` — the local hub's own surface. Today: signing in with your own Anthropic and OpenAI accounts
+- `client/` — the local hub you run on your own machine, and how you sign it in to your model accounts
 - `service/` — the Python desktop service, speaking AT-SPI2 over a Unix-socket JSON-RPC protocol
 - `protocol/` — `schema.json`, the single source of truth for that protocol. The TypeScript and
   Python bindings are both generated from it, and neither is edited by hand

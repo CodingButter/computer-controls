@@ -8,16 +8,16 @@ importers:
 
   .:
     dependencies:
-      hono:
-        specifier: 4.12.33
-        version: 4.12.33
-    devDependencies:
       '@mastra/code-sdk':
         specifier: 1.1.1
         version: 1.1.1(bufferutil@4.1.0)(debug@4.4.3(supports-color@7.2.0))(express@5.2.1(supports-color@7.2.0))(playwright-core@1.62.1)(supports-color@7.2.0)
       '@mastra/core':
         specifier: 1.55.0
         version: 1.55.0(ai@6.0.240(zod@4.4.3))(bufferutil@4.1.0)(express@5.2.1(supports-color@7.2.0))(supports-color@7.2.0)(zod@4.4.3)
+      hono:
+        specifier: ^4.12.33
+        version: 4.12.33
+    devDependencies:
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
