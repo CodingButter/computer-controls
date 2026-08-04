@@ -1,0 +1,22 @@
+{
+  "name": "@codingbutter/client",
+  "version": "0.1.0",
+  "description": "The local hub's browser-facing pieces; today, the voice lane",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@mastra/core": "1.55.0",
+    "@mastra/voice-openai": "^0.13.0"
+  },
+  "devDependencies": {
+    "@mastra/code-sdk": "1.1.1",
+    "@types/node": "^26.1.2",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
