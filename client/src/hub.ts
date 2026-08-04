@@ -5,6 +5,7 @@ import { createAgentTurn } from "./chat.ts";
 import type { AgentTurn, HubSession } from "./chat.ts";
 import type { ClientConfig } from "./config.ts";
 import { registerDesktopPlugin } from "./desktop-plugin.ts";
+import { HANDS_OFF_TOOL_NAMES, hubWorkspace, listSessionTools } from "./toolbox.ts";
 
 /** The browser is one caller, so its turns share one session and one thread history. */
 const BROWSER_RESOURCE_ID = "local-browser";
@@ -33,6 +34,18 @@ export async function prepareHub(config: ClientConfig) {
     // sandbox fleet to isolate a session into: isolation here is the daemon's
     // consent ceiling, which is what the plugin's scope configures.
     disableGithubSignals: true,
+    // Which is why the coding runtime's hands come off. The daemon is the only
+    // door onto this machine that the hub is allowed to knock on; a shell, a
+    // file write, or a language-server spawn would be a second door, opening
+    // without a scope check and without an audit line. See ./toolbox.ts.
+    workspace: hubWorkspace,
+    disabledTools: HANDS_OFF_TOOL_NAMES,
+    // Both of these read this machine's coding-agent config and turn it into
+    // effects: MCP servers mint tools of unknown reach, hooks run shell
+    // commands around tool calls. Neither passes through the daemon, so
+    // neither belongs to a session mounted at an observe-shaped scope.
+    disableMcp: true,
+    disableHooks: true,
   });
 
   let pending: Promise<HubSession> | undefined;
@@ -55,8 +68,15 @@ export async function prepareHub(config: ClientConfig) {
     modeDefaults: base.effectiveDefaults,
   });
 
-  const status = (): ClientStatus => ({
-    tools: Object.keys(base.pluginTools).sort(),
+  /**
+   * Health answers with the toolbox the session is actually holding, minting
+   * the session if the browser has not spoken yet. Reporting the plugin
+   * catalogue instead would have made the badge a description of what was
+   * mounted rather than of what the model can reach — which is exactly the gap
+   * a stripped session has to be able to prove closed.
+   */
+  const status = async (): Promise<ClientStatus> => ({
+    tools: await listSessionTools({ controller: base.controller, session: await getSession() }),
     desktopScope: config.desktopScope,
   });
 

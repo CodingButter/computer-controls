@@ -13,7 +13,8 @@ export type ClientStatus = {
 export type AppDeps = {
   chat: AgentTurn;
   uiRoot: string;
-  status: () => ClientStatus;
+  /** Asked per probe rather than captured at boot: the toolbox is the session's, so only the session can answer. */
+  status: () => Promise<ClientStatus>;
   /**
    * The provider sign-in surface (routes plus the settings section). Optional
    * only so tests that are not about sign-in can boot without it; the entry
@@ -37,10 +38,10 @@ export type AppDeps = {
 export function buildApp(deps: AppDeps): Hono {
   const app = new Hono();
 
-  app.get("/api/health", (c) =>
+  app.get("/api/health", async (c) =>
     c.json({
       ok: true,
-      ...deps.status(),
+      ...(await deps.status()),
       ...(deps.voice
         ? {
             voice: deps.voice.reason
