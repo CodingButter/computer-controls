@@ -19,8 +19,8 @@ cd service
 A test is in the live lane because of **what it asserts**, never because of what it is called. If
 it asks a question only a running desktop can answer — is this window focused, did the toolkit
 accept this text, does this application expose actions — it is a live test and it carries the
-marker. `service/conftest.py` applies the marker to `*_live.py` modules automatically; anything
-else that needs a desktop marks itself, and says why in the reason.
+marker. The repository-root `conftest.py` applies the marker to `*_live.py` modules
+automatically; anything else that needs a desktop marks itself, and says why in the reason.
 
 So:
 
@@ -31,11 +31,12 @@ So:
   portable half green and say plainly, in the PR body, what you could not run. Somebody with a
   desktop runs the other half. Writing a live test you cannot execute is a *contribution*, not a
   failure — that is how the deletion proof landed.
-- **If it needs a human at the keyboard**, it is a third lane, off by default, opted into with an
-  explicit environment variable ([#33](https://github.com/CodingButter/computer-controls/issues/33)
-  — the marker is designed, not yet built; until it is, such a proof lives in `scripts/` where
-  pytest does not collect it). It must never gate a PR. A test that can only pass when a specific
-  person is at a specific machine is a test that fails for everybody else forever.
+- **If it needs a human at the keyboard**, it is a third lane: mark it `@pytest.mark.human` and it
+  is deselected everywhere by default, including on the desktop machine, stating that it needs a
+  person. `DESKTOP_HUMAN_PRESENT=1 .venv/bin/python -m pytest -q` is the only thing that selects
+  it — set inline on the invocation, never exported from a shell rc, where it would be on silently
+  forever. It must never gate a PR. A test that can only pass when a specific person is at a
+  specific machine is a test that fails for everybody else forever.
 
 ## One writer for the protocol
 

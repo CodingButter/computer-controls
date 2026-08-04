@@ -124,8 +124,11 @@ service/.venv/bin/python -m pytest -q --no-live service/tests
 # the half that drives whatever desktop session is actually logged in
 service/.venv/bin/python -m pytest -q --live-only service/tests
 
-# everything this machine can run
+# everything this machine can run unattended
 service/.venv/bin/python -m pytest -q service/tests
+
+# and the handful that need somebody at the keyboard, which nothing else runs
+DESKTOP_HUMAN_PRESENT=1 service/.venv/bin/python -m pytest -q service/tests
 
 # the checked-in bindings still match protocol/schema.json
 node scripts/generate-protocol.test.mjs
@@ -135,6 +138,13 @@ Any test module whose name ends in `_live` is marked live automatically, and any
 needs a desktop carries the marker itself. A machine with no reachable desktop deselects those
 and says so, rather than failing in a way that reads like a regression — and the desktop is
 probed by connecting to it, never by reading `DISPLAY`.
+
+Tests marked `human` are a third lane, for the ones that need a hand on the keyboard rather than
+just a screen — the live lane runs unattended at four in the morning, so a display is never taken
+as evidence that anybody is watching it. They are deselected everywhere by default, including on
+this desktop, and say so; `DESKTOP_HUMAN_PRESENT=1` selects them. Set it **inline on the
+invocation, never in a shell rc** — exported once it is on silently forever, which is the exact
+failure the lane exists to prevent.
 
 The plugin's own lanes are `pnpm -C plugin test` and `pnpm -C plugin typecheck`, and
 `pnpm -C plugin install` is the only thing either one needs.
