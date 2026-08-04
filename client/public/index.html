@@ -115,19 +115,50 @@
         }
       }
 
+      // What the voice routes say when they refuse. They answer JSON on every
+      // path, but a proxy in front of them might not, so the raw body is the
+      // last resort rather than a crash.
+      async function failureReason(res) {
+        const body = await res.text();
+        try {
+          const parsed = JSON.parse(body);
+          return parsed.error ?? parsed.message ?? body;
+        } catch {
+          return body || `The voice route answered ${res.status}.`;
+        }
+      }
+
+      let lastSpeakFailure;
+
       async function speak(text) {
-        // The words already reached the conversation; losing the audio is a
-        // shrug, not an error worth interrupting anyone over.
+        // The words already reached the conversation; only the audio was lost.
+        // That is still worth one sentence: a button that silently does nothing
+        // is indistinguishable from a broken one, and the usual cause — an
+        // OpenAI account with no credits — is fixable by the person reading it.
+        // Said once per distinct reason, so a dry wallet explains itself rather
+        // than nagging.
         try {
           const res = await fetch(`${VOICE_BASE}/speak`, {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ text, speakerId: "nova" }),
           });
-          if (!res.ok) return;
+          if (!res.ok) {
+            noteSpeakFailure(await failureReason(res));
+            return;
+          }
+          lastSpeakFailure = undefined;
           const audio = new Audio(URL.createObjectURL(await res.blob()));
           await audio.play().catch(() => {});
-        } catch {}
+        } catch (error) {
+          noteSpeakFailure(String(error));
+        }
+      }
+
+      function noteSpeakFailure(reason) {
+        if (reason === lastSpeakFailure) return;
+        lastSpeakFailure = reason;
+        say("agent", `The answer was not spoken aloud. ${reason}`, true);
       }
 
       form.addEventListener("submit", async (event) => {
@@ -186,8 +217,11 @@
         body.set("options", JSON.stringify({ filetype }));
         try {
           const res = await fetch(`${VOICE_BASE}/listen`, { method: "POST", body });
+          // Read the status before the body: a refusal that is not JSON would
+          // otherwise surface as a parse error about the explanation instead of
+          // the explanation.
+          if (!res.ok) throw new Error(await failureReason(res));
           const heard = await res.json();
-          if (!res.ok) throw new Error(heard.error ?? `HTTP ${res.status}`);
           const transcript = (heard.text ?? "").trim();
           if (!transcript) {
             // An empty turn is worse than a failed one: the agent would
