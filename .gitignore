@@ -14,6 +14,9 @@ __pycache__/
 # The hub's own plugin registry: derived from the allowlist on every boot
 .mastracode-hub/
 
+# Filler clips synthesized on this machine's boot — re-derived, never shipped
+.mastracode/orb-clips/
+
 # Plan copies generated for reading — never committed
 /PLAN-*.md
 .mastracode/*.md

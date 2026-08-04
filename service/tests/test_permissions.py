@@ -12,6 +12,8 @@ the client side, where the hub appends the line to the reply.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from desktop_service import attention, security, server
@@ -316,3 +318,30 @@ def test_an_unarmed_registry_passes_everything_through(tmp_path):
     assert registry.permits("anything")
     assert registry.permits("google-chrome")
     assert registry.permits("")
+
+
+def test_per_application_ceiling_denies_even_when_registry_is_unarmed(
+    desktop, monkeypatch
+):
+    """The ceiling's per-application mode is not bypassed by an unarmed registry.
+
+    When the user sets permissionsMode to per-application in their config and has
+    not yet opened the permissions page, the registry is unarmed — but the ceiling
+    denies everything (empty list + per-application mode). The _withheld fast-path
+    must not short-circuit past the ceiling in this state.
+    """
+    ceiling = security.Ceiling(
+        classes=frozenset(security.OPERATION_CLASSES),
+        applications=frozenset(),
+        permissions_mode=security.PER_APPLICATION_MODE,
+    )
+    registry = security.PermissionRegistry(path=Path("/dev/null"))
+    assert not registry.armed
+
+    previous = server._consent
+    server._consent = security.Consent(ceiling, registry=registry)
+    try:
+        apps = server._method_list_applications({"clientId": "test"})
+        assert apps["applications"] == []
+    finally:
+        server._consent = previous
