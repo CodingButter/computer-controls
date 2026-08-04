@@ -691,9 +691,16 @@ def rediscover(
 # --- Acting -------------------------------------------------------------------
 #
 # Three primitives, and nothing else. Every action the protocol offers is one of
-# these or a batch of them. Notably absent: anything that synthesizes a keystroke or
-# moves a pointer. Setting a text field means handing the text to the toolkit, not
-# typing it at the window and hoping focus was where we thought it was.
+# these or a batch of them. Notably absent: anything that moves a pointer. Setting a
+# text field means handing the text to the toolkit, not typing it at the window and
+# hoping focus was where we thought it was.
+#
+# Keystroke synthesis is the one deliberate exception, added below and used by exactly
+# one method. It exists because some elements are on this bus, report themselves
+# editable, and offer no interface to write through — a Discord composer is readable
+# and unwritable at the same time. The exception is narrow on purpose: it is never a
+# fallback the other primitives reach for, only an escalation a caller asks for by
+# name, having already been refused by the honest path.
 
 
 def grab_focus(obj: Atspi.Accessible) -> bool:
@@ -839,6 +846,116 @@ def select_text(obj: Atspi.Accessible, start: int, end: int) -> bool:
     if _safe(lambda: Atspi.Text.get_n_selections(obj), 0):
         _safe(lambda: Atspi.Text.remove_selection(obj, 0), False)
     return bool(_safe(lambda: Atspi.Text.add_selection(obj, start, end), False))
+
+
+# --- Keystroke synthesis ------------------------------------------------------
+#
+# One function per synthesis type, which is the whole design. `generate_keyboard_event`
+# takes an integer whose meaning is decided by the synth type sitting beside it: a
+# KEYSYM for one, a hardware KEYCODE for another. Nothing checks that the caller meant
+# the one it passed. Handing it the Return keysym (0xff0d) with a press-release type
+# does not fail — it reads the number as a keycode, finds whatever key that happens to
+# be on this keyboard, and types a "4". It returns true. This cost an afternoon.
+#
+# So there is no general "send a key" function here to get that wrong with. Each entry
+# point names its unit in its own name and hard-codes the matching synth type, which
+# makes the confusion unrepresentable rather than merely documented.
+
+#: The keysym range that equals its Unicode codepoint. X11 keysyms for printable
+#: Latin-1 are numerically identical to their characters, which is why `ord` is the
+#: whole conversion below. Above this the correspondence stops, and a character that
+#: cannot be named honestly is refused rather than typed as the wrong glyph.
+_LATIN1_PRINTABLE = (0x20, 0x7E, 0xA0, 0xFF)
+
+
+def keysym_for(char: str) -> int | None:
+    """The keysym that types this character, or None if we cannot say.
+
+    None is a refusal, not a fallback. The alternative — sending a best-effort
+    keysym for a character outside the range that maps cleanly — puts a wrong
+    glyph in somebody's message box and reports success, and the read-back would
+    have to catch it after the fact if it could be read back at all.
+
+    Newline is refused by this range, and that is worth stating out loud because
+    it is load-bearing rather than incidental. In the applications this tier
+    exists for, Return is not a character — it is the send button. A tier whose
+    whole job is typing into a chat composer must not be able to post to it by
+    passing "\\n" in a string, and committing a message is a separate act behind
+    its own gate.
+    """
+    point = ord(char)
+    low_start, low_end, high_start, high_end = _LATIN1_PRINTABLE
+    if low_start <= point <= low_end or high_start <= point <= high_end:
+        return point
+    return None
+
+
+def type_keysym(keysym: int) -> bool:
+    """Type one character, addressed by KEYSYM.
+
+    Wherever the keyboard focus is. That is the cost of this whole tier and the
+    reason the method that calls it takes focus first and says which window it
+    raised: this call has no target and cannot be given one.
+    """
+    return bool(
+        _safe(
+            lambda: Atspi.generate_keyboard_event(keysym, None, Atspi.KeySynthType.SYM),
+            False,
+        )
+    )
+
+
+def press_keycode(keycode: int) -> bool:
+    """Hold a key down, addressed by hardware KEYCODE. Pairs with `release_keycode`.
+
+    Separate from release so a modifier can span other keys — which is the only
+    reason a keycode path exists here at all, since a keysym cannot be held.
+    """
+    return bool(
+        _safe(
+            lambda: Atspi.generate_keyboard_event(keycode, None, Atspi.KeySynthType.PRESS),
+            False,
+        )
+    )
+
+
+def release_keycode(keycode: int) -> bool:
+    """Let a held key back up, addressed by hardware KEYCODE."""
+    return bool(
+        _safe(
+            lambda: Atspi.generate_keyboard_event(keycode, None, Atspi.KeySynthType.RELEASE),
+            False,
+        )
+    )
+
+
+#: X11 hardware keycodes for the keys the clear-the-field sequence presses. These are
+#: keycodes and not keysyms because a modifier has to be held across another key, and
+#: holding is a keycode operation. They are stable across ordinary layouts — a layout
+#: remaps which symbol a key produces, not which key sits in the physical position —
+#: but this is a hardware assumption, and the read-back is what catches it being wrong.
+CTRL_L_KEYCODE = 37
+A_KEYCODE = 38
+BACKSPACE_KEYCODE = 22
+
+
+def clear_field_by_keystrokes() -> bool:
+    """Select all and delete it, the way a person clears a field they cannot empty.
+
+    There is no EditableText interface here to hand an empty string to — that is
+    the entire premise of this tier — so clearing is select-all followed by a
+    delete, with the modifier released even if the keys in between failed. A
+    control key left stuck down turns every subsequent keystroke into a shortcut.
+    """
+    if not press_keycode(CTRL_L_KEYCODE):
+        return False
+    try:
+        chord = press_keycode(A_KEYCODE) and release_keycode(A_KEYCODE)
+    finally:
+        released = release_keycode(CTRL_L_KEYCODE)
+    if not (chord and released):
+        return False
+    return press_keycode(BACKSPACE_KEYCODE) and release_keycode(BACKSPACE_KEYCODE)
 
 
 def find_range(obj: Atspi.Accessible, needle: str) -> tuple[int, int] | None:

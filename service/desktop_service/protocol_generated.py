@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: bfa45250563894d0
+# Protocol version: 1.0   schema sha256: e16c1fef044c1ae0
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "bfa45250563894d0"
+SCHEMA_DIGEST: Final = "e16c1fef044c1ae0"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -63,6 +63,7 @@ OPERATION_CLASS: Final[dict[str, str]] = {
     "setAttention": "observe",
     "setElementValue": "edit",
     "setObservationMode": "observe",
+    "typeKeystrokes": "edit",
     "typeText": "edit",
     "waitFor": "observe",
 }
@@ -588,6 +589,7 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                                 "invokeElement",
                                 "setElementValue",
                                 "typeText",
+                                "typeKeystrokes",
                                 "editText",
                             ],
                             "type": "string",
@@ -791,6 +793,45 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         },
         "required": [
             "mode",
+        ],
+        "type": "object",
+    },
+    "typeKeystrokes": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+            "replace": {
+                "description": "Clear the field first by selecting all and deleting, since there is no editable-text interface to empty directly. Defaults to false, which appends.",
+                "type": "boolean",
+            },
+            "settleMs": {
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer",
+            },
+            "text": {
+                "description": "What to type. Bounded for the same reason as typeText: the call is held open while it types, and a caller cannot wait forever. Characters outside printable Latin-1 are refused rather than typed as the wrong glyph.",
+                "maxLength": 4000,
+                "type": "string",
+            },
+            "wordsPerMinute": {
+                "description": "Typing speed. Defaults to a competent typist. Unlike typeText this is not only presentation: keys arrive at an application one at a time through the X server, and an application that is busy drops the ones it was not ready for.",
+                "maximum": 220,
+                "minimum": 10,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "elementId",
+            "text",
         ],
         "type": "object",
     },
@@ -1657,6 +1698,9 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             "revision",
         ],
         "type": "object",
+    },
+    "typeKeystrokes": {
+        "$ref": "#/$defs/actionResult",
     },
     "typeText": {
         "$ref": "#/$defs/actionResult",

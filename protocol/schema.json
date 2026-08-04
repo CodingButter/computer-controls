@@ -724,6 +724,26 @@
       "result": { "$ref": "#/$defs/actionResult" }
     },
 
+    "typeKeystrokes": {
+      "operationClass": "edit",
+      "summary": "Type into an element through synthetic keyboard events when the editable-text interface that typeText and setElementValue use is unavailable. The element is on the accessibility bus and its text can be read back, but it offers no way to write through it — a Discord composer, a browser input that only listens to key events. This is a deliberate escalation, not a fallback: the caller tried the accessible write and it refused, and the cost of typing at a window is that focus must be where the caller believes it is. Requires focus and reports which window it raised. Success is the field reading back what was typed, verified the same way as typeText.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "elementId": { "type": "string" },
+          "text": { "type": "string", "maxLength": 4000, "description": "What to type. Bounded for the same reason as typeText: the call is held open while it types, and a caller cannot wait forever. Characters outside printable Latin-1 are refused rather than typed as the wrong glyph." },
+          "wordsPerMinute": { "type": "integer", "minimum": 10, "maximum": 220, "description": "Typing speed. Defaults to a competent typist. Unlike typeText this is not only presentation: keys arrive at an application one at a time through the X server, and an application that is busy drops the ones it was not ready for." },
+          "replace": { "type": "boolean", "description": "Clear the field first by selecting all and deleting, since there is no editable-text interface to empty directly. Defaults to false, which appends." },
+          "settleMs": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "confirm": { "type": "boolean" },
+          "clientId": { "type": "string" }
+        },
+        "required": ["elementId", "text"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/actionResult" }
+    },
+
     "editText": {
       "operationClass": "edit",
       "summary": "Replace or remove part of an editable element's text, addressed by the text itself rather than by character offsets. Editing at this layer is a splice — a range is removed and something is put in its place in one operation — because there is no keyboard here and nothing to press backspace on. An offset computed from a field somebody has since typed into points at the wrong characters; text that has moved is simply not found, which is a refusal instead of a wrong edit.",
@@ -758,7 +778,7 @@
             "items": {
               "type": "object",
               "properties": {
-                "method": { "type": "string", "enum": ["focusWindow", "invokeElement", "setElementValue", "typeText", "editText"], "description": "Which call this step is. Widened when typing arrived: focus a window and then type into it is the sequence somebody writing a message actually wants, and splitting it across two calls leaves a gap in which the desktop can change underneath the second one." },
+                "method": { "type": "string", "enum": ["focusWindow", "invokeElement", "setElementValue", "typeText", "typeKeystrokes", "editText"], "description": "Which call this step is. Widened when typing arrived: focus a window and then type into it is the sequence somebody writing a message actually wants, and splitting it across two calls leaves a gap in which the desktop can change underneath the second one." },
                 "params": { "type": "object", "additionalProperties": true }
               },
               "required": ["method", "params"],

@@ -17,31 +17,31 @@ re-run it instead, and if a row surprises you, that is the point of it.
 
 ## Applications on the accessibility bus
 
-| Application | Toolkit | Windows | Interfaces | Depth | Nodes | Collection | Frame actions | Actionable elements | Editable | Verdict | Measured |
-|---|---|---:|---:|---:|---:|---|---:|---:|---:|---|---|
-| gnome-shell | clutter 46.2 | 1 | 2 | 6 | 600+ | works | 0 | 0 | 39 | walkable tree | 2026-08-02 |
-| gsd-keyboard | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
-| gsd-color | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
-| gsd-media-keys | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
-| gsd-wacom | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
-| ibus-x11 | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
-| gsd-power | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
-| ibus-extension-gtk3 | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
-| gsd-xsettings | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
-| evolution-alarm-notify | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
-| xdg-desktop-portal-gtk | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
-| gjs | gtk 3.24.41 | 3 | 2 | 7 | 18 | works | 0 | 0 | 0 | shallow tree | 2026-08-02 |
-| gnome-terminal-server | gtk 3.24.41 | 1 | 2 | 8 | 109 | works | 0 | 54 | 0 | walkable tree | 2026-08-02 |
-| update-notifier | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | no windows | 2026-08-02 |
-| zoom | Qt 6.8.8 | 8 | 1 | 5 | 237 | no | 0 | 218 | 6 | walkable tree | 2026-08-02 |
-| Google Chrome | Chromium 1.0 | 3 | 8 | 12+ | 272 | works | 2 | 269 | 1 | depth-limited | 2026-08-02 |
-| xdg-desktop-portal-gnome | GTK 4.14.5 | 0 | 1 | 0 | 0 | no | 0 | 0 | 0 | no windows | 2026-08-02 |
-| vesktop | Chromium 1.0 | 1 | 8 | 12+ | 30 | works | 2 | 29 | 0 | depth-limited | 2026-08-02 |
-| org.gnome.Nautilus | GTK 4.14.5 | 1 | 1 | 12+ | 49 | no | 60 | 2 | 0 | frame actions | 2026-08-02 |
-| update-manager | gtk 3.24.41 | 1 | 2 | 10 | 101 | works | 0 | 57 | 3 | walkable tree | 2026-08-02 |
-| gnome-text-editor | GTK 4.14.5 | 1 | 1 | 12+ | 43 | no | 36 | 4 | 0 | frame actions | 2026-08-02 |
-| audacity | gtk 3.24.41 | 1 | 2 | 8 | 571 | works | 0 | 390 | 10 | walkable tree | 2026-08-02 |
-| code | Chromium 1.0 | 1 | 8 | 12+ | 30 | works | 2 | 30 | 0 | depth-limited | 2026-08-02 |
+| Application | Toolkit | Windows | Interfaces | Depth | Nodes | Collection | Frame actions | Actionable elements | Editable | Write tier | Verdict | Measured |
+|---|---|---:|---:|---:|---:|---|---:|---:|---:|---|---|---|
+| gnome-shell | clutter 46.2 | 1 | 2 | 6 | 600+ | works | 0 | 0 | 39 | not measured | walkable tree | 2026-08-02 |
+| gsd-keyboard | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | not measured | no windows | 2026-08-02 |
+| gsd-color | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | not measured | no windows | 2026-08-02 |
+| gsd-media-keys | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | not measured | no windows | 2026-08-02 |
+| gsd-wacom | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | not measured | no windows | 2026-08-02 |
+| ibus-x11 | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | not measured | no windows | 2026-08-02 |
+| gsd-power | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | not measured | no windows | 2026-08-02 |
+| ibus-extension-gtk3 | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | not measured | no windows | 2026-08-02 |
+| gsd-xsettings | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | not measured | no windows | 2026-08-02 |
+| evolution-alarm-notify | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | not measured | no windows | 2026-08-02 |
+| xdg-desktop-portal-gtk | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | not measured | no windows | 2026-08-02 |
+| gjs | gtk 3.24.41 | 3 | 2 | 7 | 18 | works | 0 | 0 | 0 | not measured | shallow tree | 2026-08-02 |
+| gnome-terminal-server | gtk 3.24.41 | 1 | 2 | 8 | 109 | works | 0 | 54 | 0 | not measured | walkable tree | 2026-08-02 |
+| update-notifier | gtk 3.24.41 | 0 | 2 | 0 | 0 | works | 0 | 0 | 0 | not measured | no windows | 2026-08-02 |
+| zoom | Qt 6.8.8 | 8 | 1 | 5 | 237 | no | 0 | 218 | 6 | not measured | walkable tree | 2026-08-02 |
+| Google Chrome | Chromium 1.0 | 3 | 8 | 12+ | 272 | works | 2 | 269 | 1 | not measured | depth-limited | 2026-08-02 |
+| xdg-desktop-portal-gnome | GTK 4.14.5 | 0 | 1 | 0 | 0 | no | 0 | 0 | 0 | not measured | no windows | 2026-08-02 |
+| vesktop | Chromium 1.0 | 1 | 8 | 12+ | 30 | works | 2 | 29 | 0 | not measured | depth-limited | 2026-08-02 |
+| org.gnome.Nautilus | GTK 4.14.5 | 1 | 1 | 12+ | 49 | no | 60 | 2 | 0 | not measured | frame actions | 2026-08-02 |
+| update-manager | gtk 3.24.41 | 1 | 2 | 10 | 101 | works | 0 | 57 | 3 | not measured | walkable tree | 2026-08-02 |
+| gnome-text-editor | GTK 4.14.5 | 1 | 1 | 12+ | 43 | no | 36 | 4 | 0 | not measured | frame actions | 2026-08-02 |
+| audacity | gtk 3.24.41 | 1 | 2 | 8 | 571 | works | 0 | 390 | 10 | not measured | walkable tree | 2026-08-02 |
+| code | Chromium 1.0 | 1 | 8 | 12+ | 30 | works | 2 | 30 | 0 | not measured | depth-limited | 2026-08-02 |
 
 ## Column meanings
 
@@ -60,7 +60,14 @@ re-run it instead, and if a row surprises you, that is the point of it.
   within the walk bounds above. Read it together with the previous column and never
   instead of it: a toolkit puts its actions on the frame or on its widgets, and a zero in
   one column is a statement about where they live, not about whether they exist.
-- **Editable** — elements an agent could type into.
+- **Editable** — elements whose role says text goes in them.
+- **Write tier** — which channel that text would have to arrive by. `accessibility` is
+  the toolkit's own editable-text interface, which addresses the element and needs no
+  focus. `keystrokes` means those fields advertise no such interface, so the only way in
+  is typing at the focused window — readable, describable, and unwritable by the honest
+  path. `both` means the application has some of each. `none found` is a statement about
+  the walk, not the application: no editable field was reached within the bounds above,
+  which on a depth-limited row means it sits deeper than the probe goes.
 - **Verdict** — which of those surfaces an agent would actually drive this application by.
   `depth-limited` is not one of them: it says the walk stopped before the application did,
   and that the counts on that row are the probe's reach rather than the application's size.

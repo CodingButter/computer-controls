@@ -88,8 +88,20 @@ def test_releasing_everything_a_client_held_leaves_other_clients_alone() -> None
 
 
 def test_the_owned_methods_are_the_ones_that_write_text() -> None:
-    """Derived from the protocol, so a later edit method arrives owned."""
-    assert holds.WRITE_METHODS == {"typeText", "editText", "setElementValue"}
+    """Derived from the protocol, so a later edit method arrives owned.
+
+    `typeKeystrokes` is the later edit method, and it is listed here because it
+    arrived owned rather than because anything was added to make it so. A write
+    channel that skipped this registry would be a hole in the middle of it, and
+    the one that types at a window instead of into an element is the last one
+    that should be allowed through it unnoticed.
+    """
+    assert holds.WRITE_METHODS == {
+        "typeText",
+        "typeKeystrokes",
+        "editText",
+        "setElementValue",
+    }
 
 
 def test_a_method_that_does_not_write_takes_no_hold() -> None:

@@ -85,6 +85,23 @@ def _without_the_measured_column(text: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _without_the_write_tier_column(text: str) -> str:
+    """The same document as a version that predates the write-tier column wrote it."""
+
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if not line.startswith("| Application |"):
+            continue
+        at = _cells(line).index("Write tier")
+        for offset, row in enumerate(lines[index:]):
+            if not row.startswith("|"):
+                break
+            cells = _cells(row)
+            lines[index + offset] = "| " + " | ".join(cells[:at] + cells[at + 1 :]) + " |"
+        break
+    return "\n".join(lines) + "\n"
+
+
 def _measured_row(**overrides: Any) -> dict[str, Any]:
     """A probe result shaped as `probe.ApplicationProbe.to_json` returns it."""
 
@@ -103,6 +120,7 @@ def _measured_row(**overrides: Any) -> dict[str, Any]:
         "frameActionCount": 0,
         "actionableElements": 54,
         "editableFields": 0,
+        "writableFields": 0,
     }
     row.update(overrides)
     return row
@@ -165,6 +183,35 @@ class TestVerdict:
         assert generator.verdict(_measured_row(nodeCount=18)) == "shallow tree"
         assert generator.verdict(_measured_row(nodeCount=1)) == "opaque"
         assert generator.verdict(_measured_row(windowCount=0, nodeCount=0)) == "no windows"
+
+
+class TestWriteTier:
+    """Which channel an application's text would have to arrive by.
+
+    The column exists because a count of editable fields was being read as a
+    count of writable ones, and for the applications that matter most those are
+    different numbers.
+    """
+
+    def test_fields_with_an_interface_read_as_the_honest_channel(self) -> None:
+        assert generator.write_tier(_measured_row(editableFields=3, writableFields=3)) == "accessibility"
+
+    def test_fields_without_one_read_as_keystrokes(self) -> None:
+        """Editable to look at, unwritable in practice. The whole reason for the tier."""
+
+        assert generator.write_tier(_measured_row(editableFields=1, writableFields=0)) == "keystrokes"
+
+    def test_an_application_with_some_of_each_says_so(self) -> None:
+        assert generator.write_tier(_measured_row(editableFields=4, writableFields=1)) == "both"
+
+    def test_finding_nothing_is_about_the_walk_rather_than_the_application(self) -> None:
+        """A composer deeper than the probe reaches is not a composer that is absent."""
+
+        assert generator.write_tier(_measured_row(editableFields=0, writableFields=0)) == "none found"
+
+    def test_the_committed_matrix_carries_the_column(self) -> None:
+        rows = _table(MATRIX.read_text())
+        assert all("Write tier" in row for row in rows)
 
 
 class TestDepthCeilingNote:
@@ -273,6 +320,29 @@ class TestReadingBackAnOlderDocument:
         assert len(rows) >= 20
         for name, cells in rows.items():
             assert cells[-1] == "2026-08-02", name
+
+    def test_a_column_added_since_leaves_the_other_cells_where_they_were(self, tmp_path: Path) -> None:
+        """The migration that a positional read would have got wrong.
+
+        `Write tier` was inserted in the middle of the table, not appended. Read
+        by position, every cell after it in an older document would be filed
+        under its neighbour's meaning — verdicts becoming dates, counts becoming
+        verdicts — and the row would still look plausible.
+        """
+
+        out = tmp_path / "matrix.md"
+        out.write_text(_without_the_write_tier_column(MATRIX.read_text()))
+
+        rows = generator.parse_existing(out.read_text())
+        assert len(rows) >= 20
+        for name, cells in rows.items():
+            recorded = dict(zip(generator.COLUMNS, cells))
+            assert recorded["Write tier"] == generator.UNMEASURED, name
+            assert recorded["Measured"] == "2026-08-02", name
+            assert recorded["Verdict"] in {
+                "no windows", "opaque", "shallow tree",
+                "walkable tree", "frame actions", "depth-limited",
+            }, name
 
     def test_a_row_it_cannot_read_is_an_error_not_a_deletion(self, tmp_path: Path) -> None:
         """A swallowed parse error is the original bug wearing a different hat."""

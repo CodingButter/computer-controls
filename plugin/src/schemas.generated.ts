@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: bfa45250563894d0
+// Protocol version: 1.0   schema sha256: e16c1fef044c1ae0
 
 import { z } from "@mastra/code-sdk/plugin";
 
@@ -367,7 +367,7 @@ export const listWindowsResult = z.object({
 
 export const performActionsParams = z.object({
   actions: z.array(z.object({
-    method: z.enum(["focusWindow", "invokeElement", "setElementValue", "typeText", "editText"]).describe("Which call this step is. Widened when typing arrived: focus a window and then type into it is the sequence somebody writing a message actually wants, and splitting it across two calls leaves a gap in which the desktop can change underneath the second one."),
+    method: z.enum(["focusWindow", "invokeElement", "setElementValue", "typeText", "typeKeystrokes", "editText"]).describe("Which call this step is. Widened when typing arrived: focus a window and then type into it is the sequence somebody writing a message actually wants, and splitting it across two calls leaves a gap in which the desktop can change underneath the second one."),
     params: z.record(z.string(), z.unknown()),
   })),
   clientId: z.string().optional(),
@@ -446,6 +446,17 @@ export const setObservationModeResult = z.object({
   reconcileIntervalMs: z.number().int(),
   revision: z.number().int(),
 });
+
+export const typeKeystrokesParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  elementId: z.string(),
+  replace: z.boolean().describe("Clear the field first by selecting all and deleting, since there is no editable-text interface to empty directly. Defaults to false, which appends.").optional(),
+  settleMs: z.number().int().min(0).max(10000).optional(),
+  text: z.string().max(4000).describe("What to type. Bounded for the same reason as typeText: the call is held open while it types, and a caller cannot wait forever. Characters outside printable Latin-1 are refused rather than typed as the wrong glyph."),
+  wordsPerMinute: z.number().int().min(10).max(220).describe("Typing speed. Defaults to a competent typist. Unlike typeText this is not only presentation: keys arrive at an application one at a time through the X server, and an application that is busy drops the ones it was not ready for.").optional(),
+});
+export const typeKeystrokesResult = z.record(z.string(), z.unknown());
 
 export const typeTextParams = z.object({
   clientId: z.string().optional(),

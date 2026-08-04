@@ -72,6 +72,21 @@ describe("typing and editing", () => {
     expect(editing.safeParse({ elementId: "el-1", find: "old words" }).success).toBe(true);
   });
 
+  it("offers the keystroke escalation and describes it as one", () => {
+    expect(Object.keys(tools)).toEqual(expect.arrayContaining(["desktop_type_keystrokes"]));
+    const description = tools.desktop_type_keystrokes.tool.description;
+    // A model that reads this as another way to type will use it as one, and the
+    // whole difference between the two is a cost the model has to be told about.
+    expect(description).toMatch(/only after/i);
+    expect(description).toMatch(/focus/i);
+  });
+
+  it("bounds keystroke typing the same way, and cannot be handed a newline", () => {
+    const keystrokes = schemaOf("desktop_type_keystrokes");
+    expect(keystrokes.safeParse({ elementId: "el-1", text: "x".repeat(9000) }).success).toBe(false);
+    expect(keystrokes.safeParse({ elementId: "el-1", text: "hello" }).success).toBe(true);
+  });
+
   it("tells the model that a stopped call is still a result", () => {
     expect(tools.desktop_type_text.tool.description).toMatch(/progress/i);
     expect(tools.desktop_type_text.tool.description).toMatch(/read back/i);

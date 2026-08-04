@@ -16,15 +16,30 @@ from desktop_service import probe
 class FakeNode:
     """An accessible that answers exactly as much as it is told to."""
 
-    def __init__(self, role="filler", name="", children=None, actions=(), raises=False):
+    def __init__(
+        self,
+        role="filler",
+        name="",
+        children=None,
+        actions=(),
+        raises=False,
+        editable_text=False,
+    ):
         self.role = role
         self._name = name
         self._children = children
         self.actions = list(actions)
         self.raises = raises
+        self.editable_text = editable_text
 
     def get_name(self):
         return self._name
+
+    def get_editable_text_iface(self):
+        # Off unless a test says otherwise, because the interesting element —
+        # the one the keystroke tier exists for — is the one that looks editable
+        # and offers nothing to write through.
+        return self if self.editable_text else None
 
     def get_process_id(self):
         return 4242
@@ -198,9 +213,30 @@ def test_the_action_name_sample_is_bounded_however_many_elements_carry_actions(f
 
 
 def test_editable_fields_are_counted_so_the_matrix_can_say_where_typing_is_possible(fake_backend):
-    entry = FakeNode(role="entry", children=[])
+    entry = FakeNode(role="entry", children=[], editable_text=True)
     label = FakeNode(role="label", children=[])
     window = FakeNode(role="frame", children=[entry, label])
     fake_backend.update(app=FakeNode(name="form"), windows=[window], interfaces=["Accessible"])
 
-    assert probe.probe_application("app-form").to_json()["editableFields"] == 1
+    result = probe.probe_application("app-form").to_json()
+    assert result["editableFields"] == 1
+    assert result["writableFields"] == 1
+
+
+def test_a_field_that_is_editable_and_offers_no_way_in_is_counted_apart(fake_backend):
+    """The Discord composer, which is why the two counts are two counts.
+
+    Its role says entry and its states say editable, so every count that stopped
+    at the role reported a field an agent could type into. It advertises no
+    editable-text interface, so the honest write refuses it, and the matrix said
+    it was writable right up until this number existed to disagree.
+    """
+
+    composer = FakeNode(role="entry", children=[])
+    settings = FakeNode(role="entry", children=[], editable_text=True)
+    window = FakeNode(role="frame", children=[composer, settings])
+    fake_backend.update(app=FakeNode(name="chat"), windows=[window], interfaces=["Accessible"])
+
+    result = probe.probe_application("app-chat").to_json()
+    assert result["editableFields"] == 2
+    assert result["writableFields"] == 1
