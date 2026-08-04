@@ -8,6 +8,13 @@ export type ClientStatus = {
   tools: string[];
   /** Operation scope the desktop plugin was mounted at. */
   desktopScope: string;
+  /**
+   * Which plugins the hub let in and which it found installed on this machine
+   * and turned away. Reported as a pair on purpose: a plugin in neither list is
+   * one that is not installed, and that is a different fact from one that was
+   * declined.
+   */
+  plugins: { admitted: string[]; refused: string[] };
 };
 
 export type AppDeps = {
