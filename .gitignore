@@ -7,6 +7,9 @@ __pycache__/
 # Session artifacts — plans, progress, proofs, and the machine-local plugin registry
 .mastracode/plans/
 .mastracode/plugins/
+# The hub keeps the runtime's settings under its own root rather than the
+# machine's shared one (client/src/hub.ts); what lands there is local state.
+.mastracode/settings.json
 
 # The hub's own plugin registry: derived from the allowlist on every boot
 .mastracode-hub/

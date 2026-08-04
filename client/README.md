@@ -25,6 +25,17 @@ credential store (`auth.json`), so a machine that can run the TUI can run this.
 | `COMCON_DESKTOP_SCOPE` | `observe` | Operation classes the desktop plugin may mint tools for. |
 | `COMCON_PLUGIN_HOME` | your home | Where the hub looks for plugins already installed on this machine. |
 | `COMCON_PLUGIN_ALLOWLIST` | — | Extra plugin ids to admit, comma-separated. Extends the built-in list; cannot empty it. |
+| `COMCON_MODEL_MINIMAL` | declared pack | Re-points the cheapest tier. Set but empty is an error, not a fallback. |
+| `COMCON_MODEL_STANDARD` | declared pack | Re-points the tier a chat turn runs on. |
+| `COMCON_MODEL_HEAVY` | declared pack | Re-points the tier a dangerous or sprawling scope asks for. |
+
+The models are declared in `src/model-pack.ts`, not inherited. The coding
+runtime underneath would otherwise answer "which model holds the desktop" out of
+this machine's saved settings, or out of whatever pack it shipped with — values
+nobody here chose, and either can move without anybody editing this repository.
+The pack is keyed by the plugin's brain tiers (`minimal`, `standard`, `heavy`),
+so re-pointing a tier re-points everything that resolves against it, and
+`/api/health` reports the model a turn will actually run on.
 
 The scope is written into the plugin registry on every boot, so the door the
 agent finds is the one this process configured — not one a previous run left
@@ -52,6 +63,7 @@ refused; a plugin in neither list is one that is not installed here.
 | `src/index.ts` | The entry. Constructs `new Mastra(...)` as a literal export, because the deployer's Babel plugin only recognises a config it can find in the AST. |
 | `src/hub.ts` | Assembly: admit the plugins, prepare the controller mount, mint the browser's session, build the chat turn. |
 | `src/chat.ts` | One turn: a message in, the agent's answer out, over the headless `runMC` API. |
+| `src/model-pack.ts` | The declared models, one per brain tier, and the modes they are pinned to. |
 | `src/app.ts` | Three routes — health, chat, and the page. |
 | `src/ui.ts` | The static lane: one directory served as an SPA, with anything that escapes it refused. |
 | `src/plugins.ts` | The allowlist: reads what is installed on the machine, mounts only what is admitted. |

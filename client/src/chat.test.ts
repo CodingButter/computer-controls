@@ -39,7 +39,7 @@ beforeAll(async () => {
   const chat = createAgentTurn({
     controller: hub.base.controller,
     getSession: hub.getSession,
-    modeDefaults: hub.base.effectiveDefaults,
+    model: hub.modelPack.models.standard,
     run: ((options: Record<string, unknown>) => {
       received.push(options as never);
       return {
