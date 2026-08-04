@@ -62,13 +62,47 @@ export interface LocalEar {
  */
 export type IntentClass = "question" | "command" | "small-talk" | "bare-wake";
 
-/** The cheap ear's verdict on one utterance. */
+/**
+ * How the person sounded, coarsely (#106).
+ *
+ * Four buckets, because the only consumer is a colour and a colour cannot
+ * express more than that honestly. This is not an emotional model of a person;
+ * it is the tone of one utterance, guessed cheaply, thrown away immediately.
+ *
+ * It rides the classifier pass that already runs. No second model, no second
+ * inference, nothing added to the latency in front of a person waiting to be
+ * heard — if it were not free, it would not be worth having.
+ */
+export type Sentiment = "frustrated" | "excited" | "calm" | "neutral";
+
+/** The resting label, and what anything unrecognised falls back to. */
+export const DEFAULT_SENTIMENT: Sentiment = "neutral";
+
+export const SENTIMENTS: readonly Sentiment[] = [
+  "frustrated",
+  "excited",
+  "calm",
+  "neutral",
+];
+
+/**
+ * The cheap ear's verdict on one utterance.
+ *
+ * `sentiment` is the most private thing in this type. It is a guess about how
+ * somebody feels, which nobody asked to have made and nobody can correct. It is
+ * therefore never persisted, never sent to the realtime provider, and never
+ * written to the thread the agent keeps: it exists to tint a sphere and it lives
+ * exactly as long as those pixels do. See `orb.ts`, which emits it and then
+ * deliberately forgets it.
+ */
 export type Hearing = {
   /** Was this said to us, as opposed to near us. */
   addressed: boolean;
   intent: IntentClass;
   /** What the local ear heard. Stays local unless the gate opens. */
   transcript: string;
+  /** How it sounded. Local, ephemeral, and never recorded anywhere. */
+  sentiment: Sentiment;
 };
 
 /**
@@ -115,6 +149,97 @@ const COMMAND_VERBS = [
 const QUESTION_WORDS = ["what", "why", "how", "when", "where", "who", "which", "can you", "is it", "are there", "do i"];
 
 /**
+ * The words that tint the orb, and the honest floor for reading them.
+ *
+ * Like the classifier around it, this is not a model. It is a small list of
+ * things people say when a machine has just wasted their time, and a smaller
+ * one for when something worked. Both are checked against the same transcript
+ * the intent pass already has in hand.
+ *
+ * Frustration is listed first and checked first on purpose. When somebody is
+ * both excited and annoyed, the annoyed reading is the one worth showing: an
+ * orb that glows cheerfully at a person who is losing patience is worse than an
+ * orb that stays grey.
+ */
+const FRUSTRATION_MARKERS = [
+  "again",
+  "still not",
+  "still doesn't",
+  "still didn't",
+  "doesn't work",
+  "does not work",
+  "didn't work",
+  "not working",
+  "broken",
+  "wrong",
+  "no no",
+  "stop",
+  "why won't",
+  "why doesn't",
+  "come on",
+  "for the love",
+  "seriously",
+  "ugh",
+  "damn",
+];
+
+const EXCITEMENT_MARKERS = [
+  "amazing",
+  "awesome",
+  "brilliant",
+  "beautiful",
+  "perfect",
+  "excellent",
+  "fantastic",
+  "wonderful",
+  "love it",
+  "nice one",
+  "yes!",
+  "that worked",
+  "it worked",
+  "thank you so much",
+];
+
+const CALM_MARKERS = [
+  "no rush",
+  "whenever",
+  "take your time",
+  "just wondering",
+  "curious",
+  "by the way",
+  "if you don't mind",
+  "please",
+  "thanks",
+  "thank you",
+];
+
+/**
+ * Read the tone of one utterance from the text the ear already produced.
+ *
+ * Exported so the mapping is testable on its own and so the seam is obvious:
+ * a real classifier replaces this function's body, or the whole `Classifier`,
+ * without anything downstream changing. What must not change is the shape —
+ * one label out of four, derived locally, from a transcript.
+ */
+export function readSentiment(transcript: string): Sentiment {
+  const text = transcript.trim().toLowerCase();
+  if (!text) return DEFAULT_SENTIMENT;
+
+  // Repeated punctuation is the one piece of prosody that survives a
+  // transcript, so it is worth reading: "it's broken!!" is not "it's broken".
+  const emphatic = /[!?]{2,}/.test(text);
+
+  if (FRUSTRATION_MARKERS.some((marker) => text.includes(marker))) return "frustrated";
+  if (EXCITEMENT_MARKERS.some((marker) => text.includes(marker))) return "excited";
+  // Emphasis with no other signal reads as excitement rather than frustration.
+  // Being wrong in the generous direction costs a warm colour; being wrong the
+  // other way tells somebody having a fine day that they sound angry.
+  if (emphatic) return "excited";
+  if (CALM_MARKERS.some((marker) => text.includes(marker))) return "calm";
+  return DEFAULT_SENTIMENT;
+}
+
+/**
  * The default classifier: wake word plus shape of the sentence.
  *
  * This is not a model and does not pretend to be one. It is the honest floor —
@@ -136,20 +261,29 @@ export function createWakeWordClassifier(
       );
 
       if (!matched) {
-        return { addressed: false, intent: "small-talk", transcript };
+        // Not addressed to us, so nothing is read from it. Sentiment is only
+        // ever inferred about somebody who chose to talk to this machine —
+        // reading the mood of a conversation happening near it is not a thing
+        // this product does, and returning the resting label rather than a
+        // guess is what makes that true rather than merely intended.
+        return { addressed: false, intent: "small-talk", transcript, sentiment: DEFAULT_SENTIMENT };
       }
 
+      // The wake word is not part of how somebody sounds, so the tone is read
+      // from what they actually said after it.
       const remainder = text.slice(matched.length).replace(/^[\s,.!?]+/, "");
+      const sentiment = readSentiment(remainder);
+
       if (!remainder) {
-        return { addressed: true, intent: "bare-wake", transcript };
+        return { addressed: true, intent: "bare-wake", transcript, sentiment };
       }
       if (COMMAND_VERBS.some((verb) => remainder.startsWith(verb))) {
-        return { addressed: true, intent: "command", transcript };
+        return { addressed: true, intent: "command", transcript, sentiment };
       }
       if (remainder.endsWith("?") || QUESTION_WORDS.some((word) => remainder.startsWith(word))) {
-        return { addressed: true, intent: "question", transcript };
+        return { addressed: true, intent: "question", transcript, sentiment };
       }
-      return { addressed: true, intent: "small-talk", transcript };
+      return { addressed: true, intent: "small-talk", transcript, sentiment };
     },
   };
 }

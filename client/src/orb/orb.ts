@@ -14,7 +14,7 @@
  * names, and they are the same property seen from two ends.
  */
 
-import type { Hearing } from "./ear.ts";
+import type { Hearing, Sentiment } from "./ear.ts";
 import { isActionable } from "./ear.ts";
 import { WakeGate, type GateDeps, type GateState } from "./gate.ts";
 import type { FunctionCall, RealtimeSession } from "./live.ts";
@@ -31,10 +31,20 @@ export interface Speaker {
   play(audio: Uint8Array, signal: AbortSignal): Promise<void>;
 }
 
-/** What the faces watching this orb are told. */
+/**
+ * What the faces watching this orb are told.
+ *
+ * `mood` is the one word here that is not a fact about the machine — it is a
+ * guess about a person (#106). It is emitted and forgotten in the same breath:
+ * the orb keeps no mood field, `status` does not report one, and a face that
+ * connects mid-conversation is told the state but not the mood, because there
+ * is nowhere to have kept it. That is what "it lives as long as the pixels"
+ * means when written as code rather than as a promise.
+ */
 export type OrbEvent =
   | { type: "state"; state: OrbState }
-  | { type: "caption"; text: string; speaker: "user" | "assistant" };
+  | { type: "caption"; text: string; speaker: "user" | "assistant" }
+  | { type: "mood"; mood: Sentiment };
 
 /**
  * The four things the orb can be doing, which are also the four ways it moves.
@@ -191,6 +201,12 @@ export class Orb {
     if (hearing.transcript) {
       this.#emit({ type: "caption", text: hearing.transcript, speaker: "user" });
     }
+    // The mood goes to the faces and nowhere else. Not to the realtime provider
+    // below, which is only ever handed audio and text the person actually said;
+    // not to the hub's agent, whose thread is written to disk; not to a field on
+    // this object. The next utterance replaces it and no record of this one
+    // survives anywhere in the process.
+    this.#emit({ type: "mood", mood: hearing.sentiment });
     // A wake that was already actionable gets its filler now rather than waiting
     // for the provider to decide it needs the hub: the round trip has started.
     if (isActionable(hearing.intent)) void this.#playFiller(hearing);
@@ -199,6 +215,10 @@ export class Orb {
   #onQuiet(): void {
     this.#session.mute();
     this.#setState("idle");
+    // Going quiet returns the orb to its resting colour. The conversation that
+    // the mood was read from is over, so continuing to wear it would be the orb
+    // remembering how somebody sounded — which is the one thing it must not do.
+    this.#emit({ type: "mood", mood: "neutral" });
   }
 
   async #playFiller(hearing: Hearing): Promise<void> {

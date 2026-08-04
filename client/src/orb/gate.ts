@@ -25,6 +25,7 @@ import type {
   LocalEar,
   VoiceActivityDetector,
 } from "./ear.ts";
+import { DEFAULT_SENTIMENT } from "./ear.ts";
 
 /**
  * Where the gate is.
@@ -221,7 +222,15 @@ export class WakeGate {
     this.#resetBuffer();
     this.#openedSilenceMs = 0;
     this.#state = "open";
-    this.#events.onOpen({ addressed: true, intent: "bare-wake", transcript: "" });
+    this.#events.onOpen({
+      addressed: true,
+      intent: "bare-wake",
+      transcript: "",
+      // A tap is a gesture, not an utterance. There is nothing to read a mood
+      // from, and inventing one from the act of reaching for the orb would be
+      // a guess about a person built out of nothing they said.
+      sentiment: DEFAULT_SENTIMENT,
+    });
   }
 
   #discard(): void {

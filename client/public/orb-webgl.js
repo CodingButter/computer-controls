@@ -50,19 +50,39 @@ export function stateToParams(state) {
 /**
  * Map a mood label to an RGB color triplet [0..1].
  *
- * Mood drives color independently of state-driven motion (#106). Neutral is
- * the orb's identity indigo-blue; the rest are ready for when #106's emotion
- * classifier starts sending labels.
+ * Mood drives color independently of state-driven motion (#106): the orb moves
+ * according to what it is doing and is tinted according to how the person
+ * sounded, and the two never have to agree.
+ *
+ * The palette follows #106 — red for frustration, green for excitement, blue
+ * for calm — with neutral left as the orb's identity indigo. Calm is blue
+ * rather than the purple the issue also offers, because purple is already what
+ * resting looks like, and a calm orb that is indistinguishable from an orb with
+ * nothing to say would be a colour carrying no information.
+ *
+ * An unknown label is neutral rather than an error. This function sits between
+ * a classifier that may be replaced and a shader that must draw something, and
+ * the resting colour is the honest thing to show when the label is not
+ * understood.
  */
 export function moodToColor(mood) {
   const colors = {
     neutral: [0.62, 0.3, 0.88],
     frustrated: [0.85, 0.25, 0.2],
-    excited: [0.95, 0.65, 0.15],
-    calm: [0.2, 0.56, 0.42],
+    excited: [0.25, 0.78, 0.35],
+    calm: [0.2, 0.5, 0.9],
   };
   return colors[mood] ?? colors.neutral;
 }
+
+/**
+ * How fast the mood colour chases its target, per second.
+ *
+ * The reciprocal is the time constant: at 0.5 the orb covers about two thirds
+ * of a colour change in two seconds and finishes over the following few. Slow
+ * enough that the change reads as a drift rather than a switch.
+ */
+export const MOOD_EASE_PER_SECOND = 0.5;
 
 /**
  * Feature-detect WebGL2 on a canvas-like object.
@@ -420,10 +440,17 @@ export async function mountWebGlOrb({ canvas, reducedMotion = false }) {
     smoke.scale.setScalar(1 + displayLevel * 0.06 * motionScale);
 
     // Tween mood color toward target — smooth transitions, never a hard cut.
+    // Rate is per second, not per frame: a fixed per-frame fraction would make
+    // the orb change mood two and a half times faster on a 144Hz monitor than
+    // on a 60Hz one, and "eases over seconds" has to mean seconds. This is much
+    // slower than the motion easing above it on purpose — the orb is weather,
+    // not a status LED, and a colour that arrives before you noticed it moving
+    // is the second thing.
+    const moodStep = Math.min(1, dt * MOOD_EASE_PER_SECOND);
     const c = uniforms.uColor.value;
-    c.x += (moodTarget[0] - c.x) * 0.05;
-    c.y += (moodTarget[1] - c.y) * 0.05;
-    c.z += (moodTarget[2] - c.z) * 0.05;
+    c.x += (moodTarget[0] - c.x) * moodStep;
+    c.y += (moodTarget[1] - c.y) * moodStep;
+    c.z += (moodTarget[2] - c.z) * moodStep;
 
     // Rotation rides the same energy: a lazy idle turn, a quick thinking one.
     mesh.rotation.y += dt * (0.05 + energy * 0.13) * motionScale;

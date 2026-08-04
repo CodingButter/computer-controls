@@ -21,6 +21,16 @@ export const ORB_STATES = ["idle", "listening", "thinking", "speaking"];
 export const GESTURES = ["toggle", "mute", "dismiss"];
 
 /**
+ * Every mood the hub can report, and the only ones this page will wear (#106).
+ *
+ * Closed like the state list above it. An unrecognised mood renders as the
+ * resting colour rather than as whatever the shader does with a word it has
+ * never seen, because a face guessing at a label it does not know is a face
+ * showing something the hub never said.
+ */
+export const ORB_MOODS = ["neutral", "frustrated", "excited", "calm"];
+
+/**
  * Decide what an event from the hub means for the page.
  *
  * Returns an instruction rather than touching anything, so the whole event
@@ -37,6 +47,9 @@ export function interpret(event) {
     if (typeof event.text !== "string" || !event.text.trim()) return null;
     const speaker = event.speaker === "user" || event.speaker === "assistant" ? event.speaker : null;
     return speaker ? { kind: "caption", text: event.text, speaker } : null;
+  }
+  if (event.type === "mood") {
+    return ORB_MOODS.includes(event.mood) ? { kind: "mood", mood: event.mood } : null;
   }
   return null;
 }
@@ -96,6 +109,14 @@ function init() {
     if (instruction.kind === "state") {
       setState(instruction.state);
       if (instruction.state === "idle") caption.textContent = "";
+      return;
+    }
+    if (instruction.kind === "mood") {
+      // The colour is the only place this label lands. It is not written to the
+      // drawer, not added to the caption, and not kept in a variable the page
+      // reads back — the shader tweens toward it and that is the whole of its
+      // life. A DOM-only face simply does not show a mood.
+      webglOrb?.setMood(instruction.mood);
       return;
     }
     caption.textContent = instruction.text;
