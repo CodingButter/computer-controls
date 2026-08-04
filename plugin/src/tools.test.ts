@@ -165,4 +165,31 @@ describe("construction-time scope minting", () => {
     (plugin.tools as Function)(ctx({ scope: "observe" }));
     expect(supervisor.scope).toEqual([]);
   });
+
+  it("hands the configured criteria to the client, never to the agent", () => {
+    // A14: the party being graded does not write the rubric. There is no tool
+    // that names a criterion, so the only path a criterion can travel is this
+    // one — from configuration, through the client, onto the grant.
+    (plugin.tools as Function)(
+      ctx({ scope: "observe,submit", criteria: "right-recipient, intent-matches" }),
+    );
+    expect(supervisor.criteria).toEqual(["right-recipient", "intent-matches"]);
+
+    const names = Object.keys(
+      (plugin.tools as Function)(ctx({ scope: "observe,submit", criteria: "right-recipient" })),
+    );
+    for (const name of names) {
+      const tool = (plugin.tools as Function)(
+        ctx({ scope: "observe,submit", criteria: "right-recipient" }),
+      )[name];
+      expect(JSON.stringify(tool.inputSchema ?? {})).not.toContain("criteri");
+    }
+  });
+
+  it("declares nothing when no criteria are configured", () => {
+    // Empty is honest: the mechanical criteria are asked of every commit
+    // regardless, so an empty list buys no fewer questions.
+    (plugin.tools as Function)(ctx({ scope: "observe,submit" }));
+    expect(supervisor.criteria).toEqual([]);
+  });
 });

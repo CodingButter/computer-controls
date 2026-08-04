@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 9ffcc3f641ed0521
+// Protocol version: 1.0   schema sha256: 956458ccd3cd40f0
 
 import { z } from "@mastra/code-sdk/plugin";
 
@@ -25,7 +25,7 @@ export const observedEffectsSchema = z.object({
 });
 
 export const errorDataSchema = z.object({
-  code: z.enum(["APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR", "SUBSCRIPTION_LIMIT_REACHED"]),
+  code: z.enum(["APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR", "SUBSCRIPTION_LIMIT_REACHED", "ATTESTATION_FAILED", "ATTESTATION_STALE"]),
   detail: z.record(z.string(), z.unknown()).optional(),
   message: z.string().describe("Present when this error travels inside a result rather than as a JSON-RPC error. A failed step inside a batch has no top-level error member to carry its explanation, and a report that says a step failed without saying why is not worth returning.").optional(),
 });
@@ -255,6 +255,7 @@ export const grantScopeParams = z.object({
   applications: z.array(z.string().max(200)).describe("Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing.").optional(),
   clientId: z.string().optional(),
   confirm: z.boolean().optional(),
+  criteria: z.array(z.string().max(80)).describe("The questions a commit made under this grant must be answered against. Declared here, at the door, because the party being graded does not write the rubric — a worker cannot reach this field, and the service's own mechanical criteria are asked on top of whatever is named here. A name this service cannot decide is still carried and reported as unchecked, so that asking for review is never worse than asking for nothing.").optional(),
   operationClasses: z.array(z.enum(["observe", "edit", "activate", "submit", "destructive"])).describe("What this client intends to do. Ask for what the task needs and no more: a grant is also a description of the blast radius in the audit log."),
   reason: z.string().max(400).describe("What this is for, in the caller's own words. Recorded in the audit log, where the useful question months later is why, not what.").optional(),
   seconds: z.number().int().min(30).max(86400).describe("How long the grant survives without use. Idle time, not a lifetime — a grant being used every second does not expire mid-sentence.").optional(),
@@ -262,6 +263,7 @@ export const grantScopeParams = z.object({
 export const grantScopeResult = z.object({
   applications: z.array(z.string()).optional(),
   ceiling: z.array(z.string()).describe("The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice."),
+  criteria: z.array(z.string()).describe("Every criterion a commit under this grant will be judged against, the mechanical ones included whether or not they were asked for. Returned so a client can tell what review it has actually bought without inferring it from a refusal.").optional(),
   expiresInSeconds: z.number().int().optional(),
   operationClasses: z.array(z.string()).describe("What this client now holds. Always includes observe: a client that may edit must be able to check whether its edit worked."),
 });

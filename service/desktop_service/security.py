@@ -33,9 +33,10 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 
-from . import protocol_generated
+from . import attestation, protocol_generated
 from .errors import DesktopError, ErrorCode, PermissionDenied, SessionExpired
 
 log = logging.getLogger(__name__)
@@ -179,6 +180,13 @@ class Grant:
     #: the difference halfway through a sentence.
     idle_seconds: float = 0.0
     reason: str = ""
+    #: The criteria a commit made under this grant is judged against, declared
+    #: here rather than at the call for the same reason the scope is: the thing
+    #: being judged does not write its own rubric. A worker cannot reach this —
+    #: it is set when the door is opened, by whoever opened it — and the
+    #: service's mechanical criteria are evaluated on top of it regardless, so
+    #: declaring nothing weakens nothing.
+    criteria: tuple[str, ...] = ()
 
     def is_expired(self, now: float) -> bool:
         return bool(self.idle_seconds) and (now - self.last_used_at) >= self.idle_seconds
@@ -297,6 +305,7 @@ class Consent:
         per_application: dict[str, object] | None = None,
         seconds: float | None = None,
         reason: str = "",
+        criteria: Sequence[str] = (),
     ) -> Grant:
         """Narrow a client's hand within the ceiling. Never widen the ceiling.
 
@@ -357,9 +366,23 @@ class Consent:
             last_used_at=now,
             idle_seconds=window,
             reason=reason,
+            criteria=tuple(
+                str(name).strip()
+                for name in (criteria or ())
+                if str(name).strip()
+            ),
         )
         self._grants[client_id] = issued
         return issued
+
+    def criteria_for(self, client_id: str) -> tuple[attestation.Criterion, ...]:
+        """The rubric declared for this client, mechanical criteria included.
+
+        A client with no grant gets the mechanical set, which is the honest
+        answer: the questions the service can decide alone are asked of every
+        commit, and holding no grant is not a reason to ask fewer of them.
+        """
+        return attestation.resolve(self.grant_of(client_id).criteria)
 
     def revoke(self, client_id: str) -> None:
         self._grants.pop(client_id, None)

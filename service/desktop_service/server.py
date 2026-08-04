@@ -21,6 +21,7 @@ from typing import Any
 from . import (
     actions,
     attention,
+    attestation,
     audit,
     cadence,
     capabilities,
@@ -1148,6 +1149,7 @@ def _method_attest_element(params: dict[str, Any]) -> dict[str, Any]:
         client_id=_client_id(params),
         element_id=element_id,
         text=text,
+        revision=_registry.revision,
     )
     return {"attestationId": attestation_id, "expiresInMs": expires_in_ms}
 
@@ -1170,24 +1172,83 @@ def _method_commit_element(params: dict[str, Any]) -> dict[str, Any]:
     # Redeem before anything else: one attestation admits one commit, and a
     # verification failure spends it too, because the caller must re-attest
     # regardless of why the field moved.
-    expected_text = send_gate.redeem(
+    expected_text, proof_revision = send_gate.redeem(
         client_id=_client_id(params),
         attestation_id=attestation_id,
         element_id=element_id,
     )
 
+    # The rubric this commit is judged against, declared on the grant by the
+    # client that holds the door. The worker cannot reach it: it arrives from
+    # the grant register keyed on the connection's issued identity, and the
+    # mechanical criteria are added on top whatever it says.
+    criteria = _consent.criteria_for(_client_id(params))
+
+    def judge(*, target_resolved: bool, contents_match: bool | None) -> attestation.Verdict:
+        """Assemble the proof from what the service saw, and grade it.
+
+        Called on the refusal paths as well as the successful one, because a
+        commit that was refused is exactly the commit a reviewer most needs the
+        verdict for. A refusal recorded without its reasons is a refusal
+        somebody has to reconstruct from the message text.
+        """
+        return attestation.evaluate(
+            criteria,
+            attestation.Observed(
+                target_resolved=target_resolved,
+                contents_match=contents_match,
+                proof_revision=proof_revision,
+                commit_revision=_registry.revision,
+                # Asked as this client, so that the field this client itself
+                # typed into does not read as somebody else's interference.
+                # Whose change it was is the delta engine's answer, not a
+                # second opinion formed here.
+                movement=attestation.movement(
+                    element_id,
+                    _deltas.since(proof_revision, asking_client=_client_id(params)),
+                ),
+            ),
+        )
+
     def verify_and_act() -> bool:
         def work() -> bool:
-            obj = _resolve_element(element_id)
+            try:
+                obj = _resolve_element(element_id)
+            except DesktopError:
+                _record_attestation(judge(target_resolved=False, contents_match=None))
+                raise
             current = atspi.read_for_attest(obj)
-            if current != expected_text:
+            verdict = judge(
+                target_resolved=True,
+                contents_match=None if current is None else current == expected_text,
+            )
+            _record_attestation(verdict)
+            if not verdict.clean:
+                failed = verdict.failures
                 raise DesktopError(
-                    ErrorCode.PERMISSION_DENIED,
-                    f"The contents of {element_id!r} have changed since "
-                    f"attestation {attestation_id!r}. Refusing to commit: "
-                    "what would be sent is not what was approved. "
+                    ErrorCode.ATTESTATION_STALE
+                    if any(
+                        result.criterion.name
+                        == attestation.UNCHANGED_SINCE_PROOF.name
+                        for result in failed
+                    )
+                    else ErrorCode.ATTESTATION_FAILED,
+                    f"Refusing to commit {element_id!r}: "
+                    + "; ".join(
+                        f"{result.criterion.name} {result.verdict}"
+                        + (f" ({result.detail})" if result.detail else "")
+                        for result in failed
+                    )
+                    + ". What would be sent is not what was approved. "
                     "Re-attest and commit again.",
-                    {"elementId": element_id, "attestationId": attestation_id},
+                    {
+                        "elementId": element_id,
+                        "attestationId": attestation_id,
+                        "criteria": [
+                            {"name": r.criterion.name, "verdict": r.verdict}
+                            for r in verdict.results
+                        ],
+                    },
                 )
             available = atspi.actions_of(obj)
             chosen = action_name or (available[0] if available else "")
@@ -1451,10 +1512,18 @@ def _method_grant_scope(params: dict[str, Any]) -> dict[str, Any]:
         applications=params.get("applications") or (),
         seconds=params.get("seconds"),
         reason=params.get("reason") or "",
+        criteria=params.get("criteria") or (),
     )
     return {
         "operationClasses": sorted(grant.classes),
         "applications": sorted(grant.applications),
+        # The whole rubric, not the part that was asked for. A client that
+        # declared nothing still learns which questions its commits will face,
+        # which is the difference between a rubric and a surprise.
+        "criteria": [
+            criterion.name
+            for criterion in _consent.criteria_for(_client_id(params))
+        ],
         "expiresInSeconds": int(grant.idle_seconds),
         "ceiling": sorted(_consent.ceiling.classes),
     }
@@ -1959,6 +2028,10 @@ def _guarded(method: str, handler):
             element_id=_text(params.get("elementId")),
         )
         started = time.monotonic()
+        # Anything a previous call on this thread left behind is not this call's
+        # proof. Clearing on the way in means a verdict can only ever be filed
+        # against the commit that produced it.
+        _take_attestation()
         try:
             _consent.enforce(
                 method=method,
@@ -1990,9 +2063,11 @@ def _guarded(method: str, handler):
             record.error_code = failure.code
             record.reason = failure.message
             record.duration_ms = int((time.monotonic() - started) * 1000)
+            _absorb_attestation(record)
             _audit.write(record)
             raise
         record.duration_ms = int((time.monotonic() - started) * 1000)
+        _absorb_attestation(record)
         # grantScope is the one method whose caller-supplied reason is the
         # whole point of the audit trail: months later, the question is *why*
         # an agent had hands on an application, and the reason a grant was
@@ -2005,6 +2080,43 @@ def _guarded(method: str, handler):
         return result
 
     return call
+
+
+#: The verdict the handler reached, waiting for the record `_guarded` owns.
+#: Thread-local for the same reason the identity is: one call is being served
+#: per thread, and a verdict that outlived its call would be filed against
+#: somebody else's commit.
+_verdicts = threading.local()
+
+
+def _record_attestation(verdict: attestation.Verdict) -> None:
+    """Hand a commit's verdict to the audit record being built around it.
+
+    A channel rather than a return value because the interesting case is the
+    refusal: the handler raises, no result is ever produced, and that is
+    precisely the commit whose reasons a reviewer needs. The user's consent
+    happens before in the configuration and after in the audit log, and this is
+    the second half arriving.
+    """
+    _verdicts.pending = verdict
+
+
+def _take_attestation() -> attestation.Verdict | None:
+    verdict = getattr(_verdicts, "pending", None)
+    _verdicts.pending = None
+    return verdict
+
+
+def _absorb_attestation(record: audit.Record) -> None:
+    """Put the commit's verdict on its record — the verdicts, never the field.
+
+    A tally of what was asked and how it came out. The audit log is a fourth
+    sink for exactly the values the redaction module exists to withhold, so what
+    lands here is "contents-match=verified", never the contents that matched.
+    """
+    verdict = _take_attestation()
+    if verdict is not None:
+        record.attestation_summary = verdict.summary
 
 
 def _absorb_result(record: audit.Record, result: dict[str, Any]) -> None:
