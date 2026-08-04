@@ -44,10 +44,56 @@ export class DesktopSupervisor {
   #exitCleanupArmed = false;
   #attached = false;
   #schemaDigest: string | undefined;
+  #scope: readonly string[] = [];
+  #scopeReason = "";
   readonly #sessionName: string;
 
   constructor(sessionName = `mc-${process.pid}`) {
     this.#sessionName = sessionName;
+  }
+
+  /**
+   * The door the client opens on the agent's behalf, before the agent exists.
+   *
+   * A13: the agent holds no key. It is never handed `grantScope` as a tool, so
+   * the only way its write tools can ever succeed is if the process that built
+   * it granted the matching classes on the connection. Set this from the
+   * plugin's construction-time scope and the grant rides every connection —
+   * including a reconnection, because a grant is filed against the connection's
+   * identity and a new connection is a new identity holding nothing.
+   *
+   * Observe needs no grant: it is what a fresh connection already has.
+   */
+  setScope(classes: readonly string[], reason: string): void {
+    this.#scope = classes.filter((klass) => klass !== "observe");
+    this.#scopeReason = reason;
+  }
+
+  /** The classes this client will ask for on connect. Empty means observe-only. */
+  get scope(): readonly string[] {
+    return this.#scope;
+  }
+
+  /**
+   * Ask for the client's scope on a freshly connected client.
+   *
+   * A failure here is not fatal to the connection: the tools are already
+   * minted, and the refusal an individual call gets is a better account of what
+   * the ceiling allows than a connection that never opens. It is logged because
+   * a client author staring at tools that always refuse deserves the reason.
+   */
+  async #openDoor(client: DesktopClient): Promise<void> {
+    if (this.#scope.length === 0) return;
+    try {
+      await client.request("grantScope", {
+        clientId: this.#sessionName,
+        operationClasses: [...this.#scope],
+        reason: this.#scopeReason,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error(`[desktop-control] the configured scope was refused: ${detail}`);
+    }
   }
 
   get running(): boolean {
@@ -110,6 +156,7 @@ export class DesktopSupervisor {
     }
     this.#attached = true;
     this.#client = client;
+    await this.#openDoor(client);
     return client;
   }
 
@@ -190,6 +237,7 @@ export class DesktopSupervisor {
     const client = new DesktopClient({ socketPath });
     await client.connect();
     this.#client = client;
+    await this.#openDoor(client);
     return client;
   }
 

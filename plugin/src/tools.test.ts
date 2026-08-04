@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import plugin from "./index.ts";
+import type { MastraCodePluginContext } from "@mastra/code-sdk/plugin";
+
+import plugin, { supervisor } from "./index.ts";
 
 /**
  * The tools' schemas are the first line of defence against the failure this
@@ -10,7 +12,15 @@ import plugin from "./index.ts";
  * request.
  */
 
-const tools = plugin.tools as Record<string, { tool: { id: string; description: string; inputSchema: any } }>;
+function ctx(config: Record<string, string | boolean | undefined> = {}): MastraCodePluginContext {
+  return { cwd: ".", scope: "project", pluginDir: ".", config };
+}
+
+/** Full scope so every tool is minted and existing schema tests run unchanged. */
+const tools = (plugin.tools as Function)(ctx({ scope: "observe,edit,activate,submit,destructive" })) as Record<
+  string,
+  { tool: { id: string; description: string; inputSchema: any } }
+>;
 
 function schemaOf(name: string) {
   const entry = tools[name];
@@ -76,5 +86,83 @@ describe("typing and editing", () => {
     expect(tools.desktop_type_text.tool.description).toMatch(/progress/i);
     expect(tools.desktop_type_text.tool.description).toMatch(/read back/i);
     expect(tools.desktop_edit_text.tool.description).toMatch(/exactly once/i);
+  });
+});
+
+describe("construction-time scope minting", () => {
+  it("never mints desktop_grant_scope regardless of scope", () => {
+    // A13: the agent holds no key. Granting is a client operation before the
+    // agent exists — the model is never handed a tool that asks for more.
+    const all = Object.keys(
+      (plugin.tools as Function)(ctx({ scope: "observe,edit,activate,submit,destructive" })),
+    );
+    expect(all).not.toContain("desktop_grant_scope");
+
+    const observeOnly = Object.keys((plugin.tools as Function)(ctx({ scope: "observe" })));
+    expect(observeOnly).not.toContain("desktop_grant_scope");
+
+    const empty = Object.keys((plugin.tools as Function)(ctx({})));
+    expect(empty).not.toContain("desktop_grant_scope");
+  });
+
+  it("mints only observe-class tools when scope is observe", () => {
+    const names = Object.keys((plugin.tools as Function)(ctx({ scope: "observe" })));
+    // Observe tools present.
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "desktop_capabilities",
+        "desktop_list_windows",
+        "desktop_inspect_window",
+        "desktop_audit_tail",
+        "desktop_emergency_stop",
+      ]),
+    );
+    // Acting tools absent.
+    for (const acting of [
+      "desktop_type_text",
+      "desktop_edit_text",
+      "desktop_focus_window",
+      "desktop_invoke_element",
+      "desktop_launch_application",
+    ]) {
+      expect(names).not.toContain(acting);
+    }
+  });
+
+  it("mints observe and edit tools when scope includes edit", () => {
+    const names = Object.keys((plugin.tools as Function)(ctx({ scope: "observe,edit" })));
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "desktop_capabilities",
+        "desktop_type_text",
+        "desktop_edit_text",
+        "desktop_claim_element",
+      ]),
+    );
+    // Still no activate/submit.
+    expect(names).not.toContain("desktop_focus_window");
+    expect(names).not.toContain("desktop_invoke_element");
+  });
+
+  it("defaults to observe-only when no config is given", () => {
+    const names = Object.keys((plugin.tools as Function)(ctx({})));
+    expect(names).toContain("desktop_capabilities");
+    expect(names).not.toContain("desktop_type_text");
+    expect(names).not.toContain("desktop_invoke_element");
+  });
+
+  it("hands the minted scope to the client, so the door is open for the tools that exist", () => {
+    // The tools are minted here; the grant that makes them work is made by the
+    // client on connect. If these two ever disagree, an agent gets write tools
+    // that always refuse — and a refusal now reads as "no such application",
+    // so the failure would look like a missing desktop rather than a missing
+    // grant.
+    (plugin.tools as Function)(ctx({ scope: "observe,edit,submit" }));
+    expect([...supervisor.scope].sort()).toEqual(["edit", "submit"]);
+
+    // Observe is what a fresh connection already holds: asking for it would be
+    // a grant that changes nothing and an audit entry that means nothing.
+    (plugin.tools as Function)(ctx({ scope: "observe" }));
+    expect(supervisor.scope).toEqual([]);
   });
 });

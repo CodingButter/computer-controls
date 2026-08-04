@@ -132,8 +132,8 @@ def test_a_blocked_application_yields_no_pixels(window) -> None:
     """The refusal is the whole gate, because there is no partial version of it.
 
     A value can be redacted on the way out. An image cannot, so the only honest
-    answer for a blocked application is no image — and the caller is told which
-    rule refused rather than being handed something censored.
+    answer for a blocked application is no image — and the caller cannot
+    distinguish a blocked application from one that was never there.
     """
     application = window["applicationName"]
     policy.set_blocked_applications([application])
@@ -141,8 +141,8 @@ def test_a_blocked_application_yields_no_pixels(window) -> None:
     with pytest.raises(DesktopError) as raised:
         server._method_capture_window({"windowId": window["id"]})
 
-    assert raised.value.code == ErrorCode.PERMISSION_DENIED
-    assert application in str(raised.value)
+    assert raised.value.code == ErrorCode.APPLICATION_NOT_FOUND
+    assert application not in str(raised.value)
 
 
 def test_the_blocklist_is_not_something_a_caller_can_widen(window) -> None:

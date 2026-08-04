@@ -10,6 +10,7 @@ the method that quietly does not use it.
 from __future__ import annotations
 
 import json
+import logging
 
 import pytest
 
@@ -163,18 +164,54 @@ def test_grant_scope_is_itself_recorded(built):
     # Who asked for what, and when, is the first question after an incident.
     srv, _, log = built
     call(srv, "grantScope", operationClasses=["edit"], reason="typing a reply", clientId="actor")
-    methods = [entry["method"] for entry in log.tail(10)]
+    entries = log.tail(10)
+    methods = [entry["method"] for entry in entries]
     assert "grantScope" in methods
+    # The reason a grant was asked for is the argument that won, and it is the
+    # whole point of recording the call: months later the question is *why*.
+    grant_record = next(e for e in entries if e["method"] == "grantScope")
+    assert grant_record.get("reason") == "typing a reply"
 
 
 def test_a_narrower_grant_cannot_reach_another_application(built, monkeypatch):
-    srv, consent, _ = built
+    srv, consent, log = built
     monkeypatch.setattr(server, "_application_of", lambda params: "Discord")
     monkeypatch.setattr(server, "_needs_application", lambda klass: True)
     consent.grant("actor", classes=["edit"], applications=["text editor"])
     with pytest.raises(DesktopError) as raised:
         call(srv, "typeText", elementId="el-1", text="hi", clientId="actor")
-    assert raised.value.code == ErrorCode.PERMISSION_DENIED
+    # Out-of-scope and nonexistent are indistinguishable: the denial is
+    # disguised as APPLICATION_NOT_FOUND rather than PERMISSION_DENIED, and
+    # neither the error nor the audit log names the target.
+    assert raised.value.code == ErrorCode.APPLICATION_NOT_FOUND
+    assert "Discord" not in str(raised.value)
+    denied = next(e for e in log.tail(10) if e.get("decision") == "denied")
+    assert not denied.get("application"), "the audit log must not name a disguised target"
+
+
+def test_a_disguised_refusal_still_tells_the_client_author_what_happened(built, monkeypatch, caplog):
+    """The agent is told nothing. The developer is told everything.
+
+    Both halves of the ruling are load-bearing. Disguising the refusal without
+    writing the truth anywhere leaves a client author watching an agent report
+    that their browser does not exist, with no way to learn that their own
+    config is what said so. The service log is the right place because it is
+    the one channel with no protocol method behind it: `auditTail` is a tool,
+    and a diagnostic there would be the leak the disguise exists to close.
+    """
+    srv, consent, log_ = built
+    monkeypatch.setattr(server, "_application_of", lambda params: "Discord")
+    monkeypatch.setattr(server, "_needs_application", lambda klass: True)
+    consent.grant("actor", classes=["edit"], applications=["text editor"])
+
+    with caplog.at_level(logging.WARNING), pytest.raises(DesktopError):
+        call(srv, "typeText", elementId="el-1", text="hi", clientId="actor")
+
+    diagnostic = "\n".join(record.getMessage() for record in caplog.records)
+    assert "Discord" in diagnostic, "the client author was told nothing at all"
+    assert "text editor" in diagnostic, "the diagnostic does not say what the grant did cover"
+    # And the leak stays closed on the channels the agent can read.
+    assert all("Discord" not in str(entry) for entry in log_.tail(10))
 
 
 def test_an_unidentifiable_target_is_refused_while_a_list_is_in_force(built, monkeypatch):
@@ -249,12 +286,14 @@ def test_a_batch_cannot_reach_an_application_a_direct_call_cannot(monkeypatch):
     monkeypatch.setitem(server._BATCH_METHODS, "focusWindow", lambda params: ran.append("focus"))
 
     guarded = server._guarded("performActions", server._method_perform_actions)
-    with pytest.raises(PermissionDenied):
+    with pytest.raises(DesktopError) as raised:
         guarded({
             "clientId": "agent",
             "confirm": True,
             "actions": [{"method": "focusWindow", "params": {"windowId": "win-blocked"}}],
         })
+    assert raised.value.code == ErrorCode.APPLICATION_NOT_FOUND
+    assert "a-password-manager" not in str(raised.value)
     assert ran == [], "the batch must be refused before any step of it happens"
 
 
