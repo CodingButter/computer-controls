@@ -36,7 +36,15 @@ test("test_client_boots_and_serves_the_ui", async () => {
   expect(page.headers.get("content-type")).toContain("text/html");
   const html = await page.text();
   expect(html).toContain("<title>computer controls</title>");
-  expect(html).toContain("/api/chat");
+
+  // The page's logic is one fetch away rather than inline, so the boot proof
+  // has to follow it: a browser that cannot load this module gets a page that
+  // does nothing, and the HTML alone would not say so.
+  expect(html).toContain('src="/app.js"');
+  const script = await fetch(`${baseUrl}/app.js`);
+  expect(script.status).toBe(200);
+  expect(script.headers.get("content-type")).toContain("javascript");
+  expect(await script.text()).toContain("/api/chat");
 
   // A path the page owns rather than a file on disk still lands on the page:
   // one process serving one SPA, which is the whole point of the static lane.

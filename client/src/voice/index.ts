@@ -2,10 +2,10 @@
  * The voice lane: a mouth and ears for the session agent, and a button that
  * uses them.
  *
- * Two seams, and the client scaffold only needs these two. `createSessionVoice`
+ * One seam, and the client scaffold only needs this one: `createSessionVoice`
  * produces the agent's `voice` field (or `undefined`, which is how voice is
- * turned off). `createPushToTalk` drives the core voice routes from the browser.
- * Everything between them belongs to Mastra already.
+ * turned off). The browser half lives in `public/app.js`, where the page that
+ * ships it can load it. Everything between them belongs to Mastra already.
  */
 
 export {
@@ -23,13 +23,3 @@ export {
   VOICE_SPEAKER,
   createSessionVoice,
 } from "./session-voice.ts";
-
-export {
-  createPushToTalk,
-  probeVoice,
-  type PushToTalkPorts,
-  type Recording,
-  type TurnResult,
-  type VoiceAvailability,
-  type VoiceTransport,
-} from "./push-to-talk.ts";

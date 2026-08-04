@@ -5,6 +5,10 @@
     "module": "preserve",
     "moduleResolution": "bundler",
     "types": ["node"],
+    // The browser half is plain JS served verbatim to a browser, so it is
+    // resolvable (the tests import it) but not type-checked.
+    "allowJs": true,
+    "checkJs": false,
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
@@ -12,5 +16,5 @@
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true
   },
-  "include": ["src"]
+  "include": ["src", "public"]
 }

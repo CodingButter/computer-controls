@@ -8,7 +8,7 @@ import { safeReason } from "../safe-reason.ts";
  * The hub has exactly one agent, the session, so the `:agentId` position in
  * the core route shape is a constant rather than a lookup. The path shape is
  * kept anyway (`/api/agents/:agentId/voice/*`) because the ruling names it as
- * the transport, and the browser half (`push-to-talk.ts`) builds these URLs
+ * the transport, and the browser half (`public/app.js`) builds these URLs
  * the way it would against a full Mastra server.
  */
 export const SESSION_AGENT_ID = "session";
