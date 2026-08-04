@@ -30,6 +30,7 @@ exists to withhold, and it is the one with the longest memory.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -81,6 +82,33 @@ def _ending(text: str) -> str:
     return text if text.endswith("\n") else text + "\n"
 
 
+#: Names the episode in its own opening commit. Not a decoration: see
+#: `episode_id`.
+ID_TRAILER = "Episode-Id"
+
+
+def episode_id(store_identity: str, branch: str) -> str:
+    """A name for one episode that is neither a sentence nor a coincidence.
+
+    Two things forced this. A commit hash cannot serve, because git is
+    content-addressed: two attempts at the same task that happen to go
+    identically — same steps, same results, same second — are one commit, and an
+    identity that collapsed there would make a recurrence bar unable to see the
+    recurrence it exists for. And a branch name cannot serve, because a branch
+    name is the intent and the intent is a sentence, which is the one thing that
+    must not leave the machine.
+
+    So: derived from the branch, which the store already keeps unique, and
+    salted with the store's own identity, which never leaves the machine. The
+    salt is what stops the id being a confirmation oracle — without it, anybody
+    holding a filed issue could hash a list of likely intents until one matched
+    and learn what the agent had been doing.
+    """
+    return hashlib.sha256(
+        f"{store_identity}\x00{branch}".encode()
+    ).hexdigest()[:16]
+
+
 def branch_name(intent: str) -> str:
     """A branch named the way somebody would say what they were doing.
 
@@ -107,19 +135,12 @@ class Recorder:
         self.store.write("intent.md", _ending(intent))
         for relative, content in agent.files().items():
             self.store.write(relative, content)
-        self.store.commit(intent, agent.author)
+        identity = episode_id(self.store.identity(), name)
+        self.store.commit(f"{intent}\n\n{ID_TRAILER}: {identity}", agent.author)
         return Episode(store=self.store, agent=agent, branch=name, intent=intent)
 
     def _unused(self, name: str) -> str:
-        taken = set(self.store.branches())
-        if name not in taken:
-            return name
-        # Two attempts at the same task are the normal case, not a collision to
-        # be avoided: the second one wants its own branch and its own reading.
-        attempt = 2
-        while f"{name}-{attempt}" in taken:
-            attempt += 1
-        return f"{name}-{attempt}"
+        return _unused(name, self.store.branches())
 
 
 @dataclass
@@ -186,7 +207,16 @@ class Episode:
             return
         tip = self.store.git("rev-parse", "HEAD")
         if outcome:
-            self.store.git("tag", branch_name(outcome), tip, author=self.agent.author)
+            # Two episodes ending the same way is the normal case, not a
+            # collision — and it is exactly the case a recurrence bar is looking
+            # for, since the second time something fails the same way is the
+            # first time it is a pattern. Branches already number a repeated
+            # intent; a tag that refused a repeated outcome would make the
+            # second recording of a recurring failure crash the recorder.
+            self.store.git(
+                "tag", _unused(branch_name(outcome), self.store.tags()), tip,
+                author=self.agent.author,
+            )
         if worked:
             self.store.checkout("main")
             self.store.git(
@@ -199,6 +229,23 @@ class Episode:
                 author=self.agent.author,
             )
         self.closed = True
+
+
+def _unused(name: str, taken) -> str:
+    """`name`, or the first numbered variant of it nobody has used.
+
+    Two attempts at the same task are the normal case, not a collision to be
+    avoided: the second one wants its own branch, its own tag and its own
+    reading. Numbering keeps both, where refusing would keep the first and
+    numbering silently would keep the second.
+    """
+    held = set(taken)
+    if name not in held:
+        return name
+    attempt = 2
+    while f"{name}-{attempt}" in held:
+        attempt += 1
+    return f"{name}-{attempt}"
 
 
 def _failure(result: dict[str, Any]) -> dict[str, Any]:

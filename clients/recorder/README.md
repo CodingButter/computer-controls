@@ -116,6 +116,51 @@ shape of the fix rather than as a score somebody has to act on. It is a
 proposal until somebody merges it. Agents then improve the way the repository
 does: propose, review, merge.
 
+## Filing what a review concluded
+
+A proposal reaches the agent it is about. Some conclusions are about something
+larger — a tool that is missing, a failure that keeps happening, a sequence
+worth extracting as a skill — and those belong on the board, which until now
+meant a person reading a review and typing an issue. The filer removes that
+courier:
+
+```python
+from episode_recorder import Filer, GitHubBoard, Review
+
+review = Review(recorder.store.path, reviewer_author)
+filer = Filer(recorder.store, reviewer_author, GitHubBoard("CodingButter/computer-controls"))
+
+filer.observe(review.find("sell-the-ps5", steps[3], "recurring-failure"))
+```
+
+Three rules do the work, and each exists because the obvious version of this
+tool is a machine for flooding a board.
+
+**Nothing is filed the first time.** A finding is recorded and the filer waits;
+it files on a second occurrence in a *different* episode, and the issue names
+both. Once is an incident, twice is a pattern, and the first occurrence is not
+lost — it is in the episode, which is where it was always going to be.
+
+**A filer holds a fixed number of open issues.** At the cap it either stays
+quiet or withdraws one of its own — never another filer's, never one its ledger
+cannot account for — and says which finding replaced it and why. The cap is
+what makes ranking happen at the source, where the thing that was seen is still
+in view, rather than in a triage queue three weeks later.
+
+**A finding has no field to write a sentence in.** `review.find` reads the
+method, the target and the error code out of the step record, so a reviewer
+cannot describe a step as something other than what happened, and the title and
+body are generated from those enumerated fields. A filer that can be handed a
+sentence is a filer that can be handed a password. Episodes are named in the
+issue by an opaque id derived from the branch and salted with the commit the
+store opened with — a branch name is the intent, the intent is a sentence, and
+an unsalted hash of a sentence is a sentence anybody can guess back.
+
+It is off until `DESKTOP_AGENT_FILING` is set. Switched off it still counts
+occurrences and still hands back the issue it would have filed, so whether the
+bar holds is a question that can be answered by watching rather than by
+argument.
+
 ## Agents are public. Episodes are not.
 
 Git never forgets, so nothing sensitive may ever reach an object. The recorder
@@ -133,6 +178,14 @@ There is no field on a step for them, so there is nowhere for them to land.
 records real work over it, then reads back every object in the store —
 including packed, unreachable and unmerged ones — and goes looking. "We would
 have noticed" is not a safety property.
+
+A filed issue leaves the machine, so it is held to the stricter line:
+`recorder_tests/test_nothing_sensitive_is_filed.py` seeds a password and a
+personal message, does real work over them in a window whose title names a
+person, then reads the filed issue, the withdrawal comments and the ledger. The
+window titles matter as much as the fields — the delta engine writes them into
+its own change summaries, so a filer that quoted a summary would leak something
+no method call would have returned.
 
 ## Tests
 
