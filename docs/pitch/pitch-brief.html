@@ -72,7 +72,7 @@
 </header>
 
 <h2>The opportunity</h2>
-<p>Every agent product on the market today either lives in a browser tab, or drives a desktop by screenshots and coordinates &mdash; blind clicking, no consent model, no record of what was done. Meanwhile the people who would pay most for a working assistant &mdash; a sales rep clearing a CRM backlog, a small-business owner answering invoices, an operator living in three desktop apps &mdash; have no product built for them at all.</p>
+<p>Every agent product on the market today either lives in a browser tab, or drives a desktop by screenshots and coordinates &mdash; blind clicking, no consent model, no record of what was done. Meanwhile the people who would pay most for a working assistant &mdash; a sales rep clearing a CRM backlog, a small-business owner answering invoices, an operator living in three desktop apps &mdash; are underserved enough that a hardware dongle promising a "second user" just raised venture funding. The demand is proven. The approach on offer is still blind.</p>
 <p>We have spent the last month building the missing layer: a <strong>semantic desktop control service</strong> that lets an agent see and operate real applications through the accessibility tree &mdash; by meaning, not pixels &mdash; behind a consent model that makes "acting as you" provable and bounded.</p>
 
 <div class="pull">The pitch to a business owner is not what the agent can do. It is what the agent provably cannot.</div>
@@ -116,6 +116,19 @@
   <tr><td>Provable record</td><td>An audit log of every action &mdash; who, where, what class, which argument won &mdash; that never contains what was read or typed.</td></tr>
   <tr><td>Secrets stay secret</td><td>Redaction at egress; password fields are unreadable by design, even to the proof system.</td></tr>
 </table>
+
+<h2>The market has already voted &mdash; the competition just can't see</h2>
+<p><strong>Violoop</strong> ("give your computer a second user") is a venture-funded hardware dongle &mdash; HDMI capture in, USB keyboard out, an 8B vision model in between &mdash; that drives any PC by reading pixels and emitting keystrokes, with a phone app to approve risky actions. A funded competitor selling the same promise is the strongest market validation we could ask for. It is also, architecturally, the thing our opportunity section indicts:</p>
+<table>
+  <tr><th></th><th>Violoop (hardware, pixels)</th><th>This product (software, semantics)</th></tr>
+  <tr><td>How it sees</td><td>Screenshots through an HDMI cable; a vision model guesses what is on screen.</td><td>The accessibility tree: real elements with real roles, states and values &mdash; the same truth a screen reader gets.</td></tr>
+  <tr><td>How it acts</td><td>A fake USB keyboard typing at whatever has focus &mdash; blind by construction.</td><td>Addressed, verified actions on named elements; every write is read back and proven, or reported as a failure.</td></tr>
+  <tr><td>How it's bounded</td><td>Approval prompts on actions its model classifies as risky &mdash; the judge is the same model being judged.</td><td>Bounded by construction: out-of-scope tools don't exist to the model, sending sits behind a service-side attestation the agent cannot forge.</td></tr>
+  <tr><td>What it remembers</td><td>Watches everything on screen, always &mdash; the audit trail is your screen itself.</td><td>A semantic audit log of every action that structurally never contains what was read or typed.</td></tr>
+  <tr><td>What it costs to ship</td><td>A hardware BOM, a supply chain, one device per computer.</td><td>An apt install &mdash; and a fleet of them for a small business is a config file, not a purchase order.</td></tr>
+  <tr><td>What it grows into</td><td>A closed appliance.</td><td>Every Mastra Code plugin, plus a curated registry &mdash; a platform.</td></tr>
+</table>
+<p style="font-size:.84rem;color:var(--muted)">The honest concession: a keyboard dongle works on a locked screen and on any OS, today. That is real. It is also exactly the trade &mdash; universality bought with blindness &mdash; that stops being acceptable the moment the agent acts <em>as you</em> in front of a customer.</p>
 
 <h2>The platform flywheel</h2>
 <ul>
