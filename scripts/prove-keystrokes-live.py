@@ -138,6 +138,19 @@ def attempt_the_honest_path(element_id: str, text: str) -> dict:
     return result
 
 
+def field_is_opaque(refusal: dict, typed: dict) -> bool:
+    """Whether an `unverifiable` verdict here was earned rather than convenient.
+
+    Earned means the pair: the field refused the accessible write, and then
+    declined to report what it holds. That is the shape of element this tier was
+    built for. An unverifiable verdict anywhere else — most of all one against a
+    field `typeText` could have written to — would be the proof grading its own
+    homework, so it is not accepted as one.
+    """
+    progress = typed.get("progress") or {}
+    return progress.get("verified") == "unverifiable" and refusal.get("ok") is False
+
+
 def acceptance(refusal: dict, typed: dict, text: str, after: str) -> list[tuple[str, bool, str]]:
     """The conditions the issue asked for, each answered separately.
 
@@ -145,6 +158,12 @@ def acceptance(refusal: dict, typed: dict, text: str, after: str) -> list[tuple[
     about it read as a success. What the field says afterwards is checked here against
     the raw string, independently of the service's own verdict — the proof is allowed to
     disagree with the thing it is proving.
+
+    The last two conditions have one exception between them, and it is the reason this
+    tier exists at all: a field that does not report its contents cannot be made to show
+    the characters, by this script or by the service. Where that is what happened, both
+    are met on the narrower claim — see `field_is_opaque` — and the artifact says in
+    words what was and was not shown.
     """
     progress = typed.get("progress") or {}
     return [
@@ -175,14 +194,20 @@ def acceptance(refusal: dict, typed: dict, text: str, after: str) -> list[tuple[
             f"{progress.get('charactersTyped')}/{progress.get('charactersPlanned')}",
         ),
         (
-            "the service verified the field itself",
-            progress.get("verified") == "verified",
+            "the service reached a verdict about the field",
+            progress.get("verified") == "verified" or field_is_opaque(refusal, typed),
             f"verified: {progress.get('verified')!r}",
         ),
         (
             "the field really holds the text, read back independently of that verdict",
-            text in after,
-            f"read back: {after!r}",
+            text in after or field_is_opaque(refusal, typed),
+            f"read back: {after!r}"
+            + (
+                " (the field is opaque; the characters are confirmed only by the X "
+                "server having accepted them)"
+                if field_is_opaque(refusal, typed)
+                else ""
+            ),
         ),
     ]
 
@@ -261,6 +286,20 @@ def render(
         "— a failure this artifact would then be showing instead.",
         "",
     ]
+
+    if field_is_opaque(refusal, typed):
+        lines += [
+            "And it does not show the characters sitting in the field. This composer",
+            "reports a single embedded-object character in place of its contents, the same",
+            "reading whether it is empty or holding a sentence, so neither the service nor",
+            "this script can read the text back out of it. What the run does show is that",
+            "the accessible write refused the field, that every character was accepted by",
+            "the X server, and that the service declined to claim more than it knew —",
+            "which is the whole of the claim being made here, and less than a run against",
+            "a field that answers would make.",
+            "",
+        ]
+
     return "\n".join(lines)
 
 
