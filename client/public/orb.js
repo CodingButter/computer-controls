@@ -120,7 +120,9 @@ function init() {
   // and hide the DOM button. If not — or if the dynamic import fails for any
   // reason — the DOM orb stays, and its CSS animations carry state. This is
   // the single point where the fallback decision is made (#110 ruling 5).
-  if (canvas && hasWebGl(canvas)) {
+  // The probe uses a scratch canvas: probing the display canvas would claim
+  // its one-and-only context type before three.js asks for its own.
+  if (canvas && hasWebGl(document.createElement("canvas"))) {
     import("./orb-webgl.js")
       .then(({ mountWebGlOrb }) => {
         const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;

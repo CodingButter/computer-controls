@@ -61,17 +61,20 @@ export function moodToColor(mood) {
 }
 
 /**
- * Feature-detect WebGL on a canvas-like object.
+ * Feature-detect WebGL2 on a canvas-like object.
  *
  * Takes an object with a getContext method so it can be tested with a stub.
+ * The caller must probe a THROWAWAY canvas, never the display canvas: a
+ * canvas remembers its first context type forever, so probing the display
+ * canvas with one kind of context makes three.js's later request for its
+ * own kind fail with "existing context of a different type". WebGL2 is what
+ * three r169 requires, so WebGL2 is what the probe asks for.
  * Returns false — not null or a throw — when WebGL is unavailable, so the
  * caller can treat it as a simple boolean gate.
  */
 export function hasWebGl(canvas) {
   try {
-    return Boolean(
-      canvas.getContext("webgl") || canvas.getContext("experimental-webgl"),
-    );
+    return Boolean(canvas.getContext("webgl2"));
   } catch {
     return false;
   }

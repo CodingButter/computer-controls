@@ -113,7 +113,7 @@ describe("test_a_browser_without_webgl_falls_back_to_the_dom_orb", () => {
     ).toBe(false);
   });
 
-  it("checks webgl first, then experimental-webgl", () => {
+  it("asks for webgl2, the context three r169 actually requires", () => {
     const calls: string[] = [];
     hasWebGl({
       getContext: (type: string) => {
@@ -121,7 +121,15 @@ describe("test_a_browser_without_webgl_falls_back_to_the_dom_orb", () => {
         return null;
       },
     });
-    expect(calls).toEqual(["webgl", "experimental-webgl"]);
+    expect(calls).toEqual(["webgl2"]);
+  });
+
+  it("probes a scratch canvas, never the display canvas", () => {
+    // A canvas remembers its first context type; probing the display canvas
+    // blocks three.js from creating its own context on it later.
+    const orbJs = readFileSync(resolve(__dirname, "../../public/orb.js"), "utf-8");
+    expect(orbJs).toMatch(/hasWebGl\(document\.createElement\("canvas"\)\)/);
+    expect(orbJs).not.toMatch(/hasWebGl\(canvas\)/);
   });
 });
 
