@@ -102,12 +102,17 @@ parentheses are what keep the directory change from leaking into whatever you pa
 It prints `listening <socket path>` once it is ready, and holds the terminal. Add `--daemon` to
 outlive the shell that started it; `--socket PATH` and `--config PATH` override the defaults.
 
-Clients attach to a service that is already running and never start one, which makes a stale
-daemon worth knowing about in advance: it serves the code it booted with, so after regenerating
-the protocol or editing the service, **restart it**. A daemon still running the previous schema
-answers `METHOD_NOT_FOUND` for methods the current bindings promise. Both halves carry a schema
-digest so the mismatch can be seen rather than guessed at — see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+A daemon is not immortal, and deliberately so. It exits shortly after its last client
+disconnects, and exits on its own if nobody connects at all within half a minute — say so in
+`stderr` either way, so an exit never reads as a crash. Nothing is interrupted: a daemon with a
+client still attached stays up for as long as that client wants it, however long a write takes.
+
+Clients never attach to a daemon running different code, because they cannot find one: the socket
+name carries the schema digest (`daemon-<digest>.sock`), so a client whose generated protocol
+differs looks for a path that does not exist and starts its own service. Two clients on the same
+build still share one desktop. Regenerating the protocol therefore does not require remembering
+to restart anything — the old daemon keeps serving whoever it already has, and goes away when
+they let go.
 
 ## Tests
 

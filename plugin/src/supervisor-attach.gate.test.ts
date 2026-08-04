@@ -133,6 +133,6 @@ describe.skipIf(!available)("finding a desktop service", () => {
 
   it("agrees with the service about where a daemon lives", () => {
     delete process.env.MASTRACODE_DESKTOP_SOCKET;
-    expect(daemonSocketPath()).toMatch(/mastracode-desktop\/daemon\.sock$/);
+    expect(daemonSocketPath()).toMatch(/mastracode-desktop\/daemon-[0-9a-f]+\.sock$/);
   });
 });

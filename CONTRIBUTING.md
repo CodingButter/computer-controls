@@ -54,19 +54,27 @@ Changing the schema changes `SCHEMA_DIGEST`. That is not cosmetic — see below.
 
 ## Always run the current daemon
 
-The service is a long-lived shared daemon. It serves the code it booted with, forever, no matter
-what the working tree says. A stale daemon reports `METHOD_NOT_FOUND` for a method you can read in
-the source, which is a genuinely maddening hour if you do not know to check.
+The service is a shared daemon, and it serves the code it booted with no matter what the working
+tree says. A stale daemon reporting `METHOD_NOT_FOUND` for a method you can read in the source cost
+a genuinely maddening hour, three separate times, before the socket name started carrying the
+digest.
 
-After anything that regenerates the protocol, restart it, and check:
+It does now: `daemon-<SCHEMA_DIGEST>.sock`. Regenerate the protocol and your client looks for a
+socket that does not exist yet, so it starts a daemon that matches instead of talking to the one
+that does not. There is nothing to remember and no error to read, because two builds that cannot
+understand each other never meet.
+
+What still bites: a **schema-identical** change — editing a handler without touching
+`protocol/schema.json` — keeps the same digest, so the old daemon is still the right daemon by the
+only test the filesystem can run. That one you restart by hand:
 
 ```sh
-# the digest the daemon serves must equal the digest in the tree
-grep -m1 SCHEMA_DIGEST service/desktop_service/protocol_generated.py
+pkill -f "desktop_service --daemon"   # or just let it idle out
 ```
 
-The `hello` result carries `schemaDigest` for exactly this comparison. If they differ, nothing you
-observe is evidence of anything.
+The `hello` result still carries `schemaDigest`, and `staleDaemonHint` still diagnoses a mismatch,
+for the cases the socket name cannot catch. If they differ, nothing you observe is evidence of
+anything.
 
 ## What a finished piece of work looks like
 

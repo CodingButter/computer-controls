@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { DesktopClient, DesktopServiceError } from "./client.ts";
-import { PROTOCOL_VERSION } from "./protocol.generated.ts";
+import { PROTOCOL_VERSION, SCHEMA_DIGEST } from "./protocol.generated.ts";
 
 /**
  * Gets this plugin a desktop service to talk to, by one of two routes.
@@ -34,7 +34,7 @@ export function daemonSocketPath(): string {
   const explicit = process.env.MASTRACODE_DESKTOP_SOCKET;
   if (explicit) return explicit;
   const runtimeDir = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 1000}`;
-  return join(runtimeDir, "mastracode-desktop", "daemon.sock");
+  return join(runtimeDir, "mastracode-desktop", `daemon-${SCHEMA_DIGEST}.sock`);
 }
 
 export class DesktopSupervisor {
