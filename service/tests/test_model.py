@@ -9,6 +9,7 @@ nothing; what matters is that the *backend* has no other path out.
 from __future__ import annotations
 
 import ast
+import dataclasses
 from pathlib import Path
 
 import pytest
@@ -147,3 +148,34 @@ def test_no_backend_emits_element_text_outside_a_semantic_element():
                     "hand-built dict without passing model.egress_value — every "
                     "piece of human-readable text leaves by the one door"
                 )
+
+
+def test_post_construction_mutation_of_value_is_refused():
+    """The egress policy is load-bearing: raw text cannot be injected after init."""
+    element = model.SemanticElement("el-0", "atspi", "entry", "Name", "safe")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        element.value = "raw"
+
+
+def test_post_construction_mutation_of_name_is_refused():
+    element = model.SemanticElement("el-0", "atspi", "entry", "Name", "safe")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        element.name = "raw"
+
+
+def test_post_construction_mutation_of_extra_is_refused():
+    element = model.SemanticElement("el-0", "atspi", "entry", "Name", "safe")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        element.extra = {"secret": "raw"}
+
+
+def test_frozen_element_still_supports_list_mutation():
+    """Frozen blocks reassignment, not in-place container mutation.
+
+    The tree-walk in inspect.py appends children to a list after construction;
+    that contract is preserved.
+    """
+    parent = model.SemanticElement("el-0", "atspi", "frame", "Parent")
+    child = model.SemanticElement("el-1", "atspi", "push button", "Child")
+    parent.children.append(child)
+    assert parent.children[0] is child
