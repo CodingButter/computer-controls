@@ -14,6 +14,12 @@ export type AppDeps = {
   chat: AgentTurn;
   uiRoot: string;
   status: () => ClientStatus;
+  /**
+   * The provider sign-in surface (routes plus the settings section). Optional
+   * only so tests that are not about sign-in can boot without it; the entry
+   * module always supplies it.
+   */
+  auth?: Hono;
 };
 
 /**
@@ -41,6 +47,10 @@ export function buildApp(deps: AppDeps): Hono {
     });
     return c.json(reply);
   });
+
+  // Mounted before the SPA fallback, or the catch-all would swallow the
+  // settings section and every sign-in route with a 404-shaped page.
+  if (deps.auth) app.route("/", deps.auth);
 
   app.get("*", (c) => {
     const asset = readUiAsset(deps.uiRoot, c.req.path);
