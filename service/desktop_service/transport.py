@@ -104,6 +104,56 @@ def daemon_socket_path() -> str:
     return default_socket_path(f"{DAEMON_SESSION}-{SCHEMA_DIGEST}")
 
 
+def _nothing_is_listening(path: str) -> bool:
+    """Whether a socket file is a leftover rather than a live service.
+
+    Presence proves nothing — a crashed process leaves its socket file behind
+    looking exactly like a working one. The connection attempt is the test.
+    """
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    probe.settimeout(0.5)
+    try:
+        probe.connect(path)
+    except (ConnectionRefusedError, FileNotFoundError, socket.timeout, OSError):
+        return True
+    finally:
+        probe.close()
+    return False
+
+
+def sweep_dead_daemon_sockets(keep: str) -> list[str]:
+    """Remove daemon socket files left behind by daemons that are gone.
+
+    Digest keying costs the one self-healing property the single fixed name
+    had: a crashed daemon's file used to be reclaimed by the next one, because
+    the next one wanted the same name. Now every schema change mints a new
+    name, so a daemon killed rather than stopped leaves a file nobody will ever
+    ask for again, and the runtime directory grows by one for every build that
+    ever died badly.
+
+    Sweeping on startup is the cheapest place to do it: a daemon coming up is
+    already the newest thing here, and a file it can connect to belongs to a
+    daemon still serving somebody — those are left alone.
+    """
+    removed: list[str] = []
+    directory = socket_directory()
+    for name in sorted(os.listdir(directory)):
+        if not name.startswith(f"{DAEMON_SESSION}-") or not name.endswith(".sock"):
+            continue
+        path = os.path.join(directory, name)
+        if os.path.abspath(path) == os.path.abspath(keep):
+            continue
+        try:
+            if not stat.S_ISSOCK(os.stat(path).st_mode):
+                continue
+            if _nothing_is_listening(path):
+                os.unlink(path)
+                removed.append(path)
+        except FileNotFoundError:
+            continue
+    return removed
+
+
 class JsonRpcServer:
     def __init__(
         self, socket_path: str, on_disconnect: Callable[[str], None] | None = None

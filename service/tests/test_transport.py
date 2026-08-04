@@ -7,8 +7,10 @@ be open on screen.
 
 import json
 import os
+import shutil
 import socket
 import stat
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -22,6 +24,7 @@ from desktop_service.transport import (
     JsonRpcServer,
     daemon_socket_path,
     default_socket_path,
+    sweep_dead_daemon_sockets,
 )
 
 
@@ -334,6 +337,20 @@ def test_one_connection_ending_does_not_free_another_connection_s_element(tmp_pa
         srv.stop()
 
 
+@pytest.fixture
+def short_runtime():
+    """A runtime directory short enough for AF_UNIX.
+
+    pytest's tmp_path embeds the test name, and a unix socket path is capped at
+    ~108 bytes — a limit these test names comfortably exceed.
+    """
+    directory = tempfile.mkdtemp(prefix="dsk-")
+    try:
+        yield directory
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
 # --- Digest-keyed daemon socket ------------------------------------------- #
 
 
@@ -436,3 +453,64 @@ def test_drain_monitor_exits_when_no_client_connects(tmp_path):
         server.DAEMON_STARTUP_GRACE_SECS = original_grace
         server.DAEMON_POLL_SECS = original_poll
         srv.stop()
+
+
+def test_a_dead_daemon_s_socket_is_swept_and_a_live_one_is_left_alone(short_runtime, monkeypatch):
+    """Digest keying costs the old self-healing, so the sweep pays it back.
+
+    One fixed name used to clean itself up: whoever booted next wanted that
+    exact path and reclaimed it. Every schema change now mints a new name, so a
+    daemon that was killed rather than stopped leaves a file no future daemon
+    will ever ask for. Without a sweep the runtime directory accumulates one
+    corpse per build that ever died badly.
+
+    The distinction that matters is dead versus busy, and presence cannot tell
+    them apart — a crashed daemon's socket file looks exactly like a working
+    one. Only the connection attempt does.
+    """
+    monkeypatch.setenv("XDG_RUNTIME_DIR", short_runtime)
+    directory = Path(default_socket_path("ignored")).parent
+
+    # A daemon from an older build that crashed: the file outlived the process.
+    corpse = directory / f"{DAEMON_SESSION}-0ldd1g3st.sock"
+    dead = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    dead.bind(str(corpse))
+    dead.close()
+    assert corpse.exists()
+
+    # A daemon from another build that is still serving somebody.
+    live = JsonRpcServer(str(directory / f"{DAEMON_SESSION}-l1v3d1g3st.sock"))
+    live.start()
+
+    # And a file that is not a daemon socket at all.
+    bystander = directory / "session-name.sock"
+    bystander.write_text("")
+
+    mine = directory / f"{DAEMON_SESSION}-{SCHEMA_DIGEST}.sock"
+    try:
+        removed = sweep_dead_daemon_sockets(keep=str(mine))
+        assert removed == [str(corpse)]
+        assert not corpse.exists(), "the corpse was left to accumulate"
+        assert Path(live.socket_path).exists(), "a daemon still serving clients was swept"
+        assert bystander.exists(), "the sweep reached past the daemon sockets"
+    finally:
+        live.stop()
+
+
+def test_the_sweep_never_removes_the_socket_the_caller_is_serving_on(short_runtime, monkeypatch):
+    """The listening socket answers, but a daemon must not depend on that.
+
+    The sweep runs on a daemon's own startup, and the ordering that makes it
+    safe — bind first, then sweep — is the kind of thing a later refactor
+    reorders without noticing. Excluding the path explicitly means the mistake
+    costs nothing.
+    """
+    monkeypatch.setenv("XDG_RUNTIME_DIR", short_runtime)
+    directory = Path(default_socket_path("ignored")).parent
+    mine = directory / f"{DAEMON_SESSION}-{SCHEMA_DIGEST}.sock"
+    stray = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    stray.bind(str(mine))
+    stray.close()  # bound but nothing listening: indistinguishable from a corpse
+
+    assert sweep_dead_daemon_sockets(keep=str(mine)) == []
+    assert mine.exists(), "a daemon swept the socket it was about to serve on"

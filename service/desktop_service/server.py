@@ -2125,10 +2125,23 @@ def _start_drain_monitor(
                 if idle_since is None:
                     idle_since = time.monotonic()
                 elif time.monotonic() - idle_since >= DAEMON_DRAIN_IDLE_SECS:
+                    # Say why. A daemon that vanishes without a word reads as a
+                    # crash, and the person reading the terminal has no way to
+                    # tell a designed exit from one.
+                    print(
+                        f"the last client disconnected {DAEMON_DRAIN_IDLE_SECS}s ago; exiting",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                     stop.set()
                     return
             else:
                 if time.monotonic() - born >= DAEMON_STARTUP_GRACE_SECS:
+                    print(
+                        f"no client connected within {DAEMON_STARTUP_GRACE_SECS}s; exiting",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                     stop.set()
                     return
             stop.wait(DAEMON_POLL_SECS)
@@ -2179,6 +2192,10 @@ def main(argv: list[str] | None = None) -> int:
     _start_watching()
     server = build_server(socket_path)
     server.start()
+
+    if args.daemon:
+        for stale in transport.sweep_dead_daemon_sockets(keep=socket_path):
+            print(f"swept dead daemon socket {stale}", file=sys.stderr, flush=True)
 
     # The supervisor waits for this line before sending its first request.
     print(f"listening {socket_path}", flush=True)
