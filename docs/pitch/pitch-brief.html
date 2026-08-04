@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Product Proposal — A Desktop Agent Platform on Mastra Code</title>
+<style>
+  :root {
+    --ink: #17181c;
+    --muted: #5b616e;
+    --accent: #0d7a5f;
+    --rule: #d9dce3;
+    --wash: #f4f6f5;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { font-size: 15px; }
+  body {
+    font-family: "Inter", "Segoe UI", -apple-system, "Helvetica Neue", Arial, sans-serif;
+    color: var(--ink);
+    line-height: 1.45;
+    max-width: 52rem;
+    margin: 0 auto;
+    padding: 2.2rem 2.4rem;
+  }
+  header { border-bottom: 3px solid var(--accent); padding-bottom: 1.1rem; margin-bottom: 1.4rem; }
+  .kicker { text-transform: uppercase; letter-spacing: .14em; font-size: .68rem; color: var(--accent); font-weight: 700; margin-bottom: .45rem; }
+  h1 { font-size: 1.72rem; line-height: 1.15; font-weight: 800; letter-spacing: -.015em; }
+  .oneliner { margin-top: .6rem; font-size: 1.02rem; color: var(--muted); max-width: 44rem; }
+  .meta { margin-top: .7rem; font-size: .72rem; color: var(--muted); }
+  h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .12em; color: var(--accent); font-weight: 800; margin: 1.5rem 0 .55rem; }
+  p { margin-bottom: .6rem; max-width: 46rem; }
+  strong { font-weight: 700; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem 1.6rem; }
+  .card { background: var(--wash); border-radius: 8px; padding: .85rem 1rem; }
+  .card h3 { font-size: .84rem; font-weight: 800; margin-bottom: .3rem; }
+  .card p { font-size: .82rem; color: var(--muted); margin: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: .84rem; margin: .3rem 0 .6rem; }
+  th { text-align: left; font-size: .68rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); padding: .3rem .55rem; border-bottom: 2px solid var(--rule); }
+  td { padding: .42rem .55rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  td:first-child { font-weight: 700; white-space: nowrap; }
+  .stack { border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; margin: .4rem 0 .7rem; font-size: .84rem; }
+  .layer { padding: .55rem .95rem; border-bottom: 1px solid var(--rule); display: flex; justify-content: space-between; gap: 1rem; }
+  .layer:last-child { border-bottom: none; }
+  .layer b { white-space: nowrap; }
+  .layer span { color: var(--muted); text-align: right; }
+  .layer.hub { background: var(--wash); }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: .8rem; margin: .5rem 0 .7rem; }
+  .stat { text-align: center; background: var(--wash); border-radius: 8px; padding: .7rem .4rem; }
+  .stat b { display: block; font-size: 1.35rem; font-weight: 800; color: var(--accent); }
+  .stat span { font-size: .68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; }
+  ul { margin: 0 0 .6rem 1.1rem; max-width: 46rem; }
+  li { margin-bottom: .32rem; font-size: .92rem; }
+  .pull { border-left: 3px solid var(--accent); padding: .5rem .9rem; margin: .7rem 0; font-size: .98rem; font-style: italic; color: var(--ink); background: var(--wash); border-radius: 0 8px 8px 0; }
+  footer { margin-top: 1.6rem; padding-top: .8rem; border-top: 1px solid var(--rule); font-size: .72rem; color: var(--muted); display: flex; justify-content: space-between; }
+  @media print {
+    html { font-size: 12.5px; }
+    body { padding: 0; max-width: none; }
+    @page { margin: 14mm 15mm; }
+    h2 { break-after: avoid; }
+    .card, .stack, .stat, table, .pull { break-inside: avoid; }
+    .pagebreak { break-before: page; }
+    a { color: inherit; text-decoration: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="kicker">Product proposal &nbsp;·&nbsp; internal</div>
+  <h1>A desktop agent platform for everyone who isn't a programmer &mdash; built on Mastra&nbsp;Code</h1>
+  <p class="oneliner">Factory proved that Mastra Code can carry a vertical product for developers. This is the second proof point &mdash; the same architecture, aimed at the far larger market of people who want an agent working their computer <em>as them</em>: small businesses, sales reps, operators, power users.</p>
+  <div class="meta">Prepared by Jamie (CodingButter) &nbsp;·&nbsp; August 2026 &nbsp;·&nbsp; Working title: <strong>Computer Controls</strong></div>
+</header>
+
+<h2>The opportunity</h2>
+<p>Every agent product on the market today either lives in a browser tab, or drives a desktop by screenshots and coordinates &mdash; blind clicking, no consent model, no record of what was done. Meanwhile the people who would pay most for a working assistant &mdash; a sales rep clearing a CRM backlog, a small-business owner answering invoices, an operator living in three desktop apps &mdash; have no product built for them at all.</p>
+<p>We have spent the last month building the missing layer: a <strong>semantic desktop control service</strong> that lets an agent see and operate real applications through the accessibility tree &mdash; by meaning, not pixels &mdash; behind a consent model that makes "acting as you" provable and bounded.</p>
+
+<div class="pull">The pitch to a business owner is not what the agent can do. It is what the agent provably cannot.</div>
+
+<h2>The pattern is already proven &mdash; by us, on your stack</h2>
+<p>Factory is a Node service that drives headless Mastra Code sessions, with a web board on top. This product is the same skeleton with a different day job: sessions that operate the desktop instead of a repository. Nothing about the architecture is speculative &mdash; <strong>this product was built by Factory itself.</strong></p>
+<div class="stats">
+  <div class="stat"><b>38</b><span>merged PRs, agent-built</span></div>
+  <div class="stat"><b>633</b><span>service tests passing</span></div>
+  <div class="stat"><b>33</b><span>protocol methods</span></div>
+  <div class="stat"><b>27</b><span>live Factory sessions</span></div>
+</div>
+<p style="font-size:.84rem;color:var(--muted)">Every pull request was adversarially gated: mutation-tested, type-checked, and live-proven on a real desktop before merge. The proof artifacts are committed to the repository &mdash; including the failures.</p>
+
+<h2>What ships</h2>
+<p>One <code>.deb</code>, the Plex model: install it, and your machine gains a resident assistant reachable from any browser &mdash; including your phone, paired by QR code over your own network. No cloud account required to function; the daemon deliberately owns no relay, no tunnel, no identity provider.</p>
+<div class="stack">
+  <div class="layer hub"><b>Dashboard &amp; first client</b><span>Local web app (PWA) &mdash; setup, settings, model packs, the audit feed, QR pairing</span></div>
+  <div class="layer"><b>Headless Mastra Code runtime</b><span>Sessions, model packs, memory, plugins &mdash; the proven Factory pattern</span></div>
+  <div class="layer"><b>Desktop control daemon</b><span>Semantic desktop access behind the consent ceiling &mdash; already shipped &amp; tested</span></div>
+</div>
+<p>The desktop layer also ships <strong>standalone as a Mastra Code plugin</strong> &mdash; so every existing Mastra Code user gains desktop control, and the full product is the packaged experience of the same components.</p>
+
+<h2>Three depths, one product</h2>
+<table>
+  <tr><th>Mode</th><th>Who</th><th>What they see</th></tr>
+  <tr><td>Easy</td><td>Business owners, reps</td><td>Pick an assistant persona; scopes, models and safety are preset. The centerpiece is the <strong>feed</strong>: everything the agent did in your name, and the approval trail for anything that left the machine.</td></tr>
+  <tr><td>Standard</td><td>Power users</td><td>Own API keys, local models, per-application permissions.</td></tr>
+  <tr><td>Advanced</td><td>Builders</td><td>Custom instructions, new agents, element-level grants, review criteria &mdash; full control.</td></tr>
+</table>
+<p style="font-size:.84rem;color:var(--muted)">The modes are lenses over one object model &mdash; the scopes, grants and model packs already implemented &mdash; never three separate products. A user who grows out of Easy keeps their configuration.</p>
+
+<div class="pagebreak"></div>
+
+<h2>The security layer nobody else has productized</h2>
+<table>
+  <tr><th>Guarantee</th><th>Mechanism (shipped &amp; tested)</th></tr>
+  <tr><td>Bounded by construction</td><td>Tools outside the granted scope do not exist to the model &mdash; no prompt can invoke a tool the agent was never handed.</td></tr>
+  <tr><td>The person outranks the agent</td><td>Presence detection: a human touching the machine takes any field back mid-word, and the agent cannot re-take it.</td></tr>
+  <tr><td>Nothing leaves unapproved</td><td>A send gate: composing is not sending. Committing anything out of the machine requires a service-side attestation the agent cannot forge, judged against criteria the agent cannot author.</td></tr>
+  <tr><td>Provable record</td><td>An audit log of every action &mdash; who, where, what class, which argument won &mdash; that never contains what was read or typed.</td></tr>
+  <tr><td>Secrets stay secret</td><td>Redaction at egress; password fields are unreadable by design, even to the proof system.</td></tr>
+</table>
+
+<h2>The platform flywheel</h2>
+<ul>
+  <li><strong>Every Mastra Code plugin works here by default.</strong> The community's plugins &mdash; existing and future &mdash; become product capabilities without us building them. The product becomes multiple products.</li>
+  <li><strong>A curated, approved-plugin registry</strong> sits on top for the commercial audience &mdash; the security posture demands review, and review becomes a quality bar, the way an app store is.</li>
+  <li><strong>Every product user is a platform user.</strong> A second vertical on Mastra Code turns it from a tool with one product into a platform with a portfolio &mdash; and this vertical reaches a market the developer tools never will.</li>
+</ul>
+
+<h2>What exists today vs. what remains</h2>
+<div class="grid2">
+  <div class="card">
+    <h3>Built and gated</h3>
+    <p>The desktop daemon (protocol, security model, live proofs). The Mastra Code plugin (tools, scope-based tool minting, model-tier selection by scope). The Factory pipeline that built both.</p>
+  </div>
+  <div class="card">
+    <h3>To build</h3>
+    <p>The client: dashboard, QR pairing, packaging (<code>.deb</code> + session service), the approved-plugin registry. The hard problems underneath &mdash; sessions, packs, memory, plugins &mdash; are already solved by Mastra Code.</p>
+  </div>
+</div>
+
+<h2>The ask</h2>
+<ul>
+  <li>Alignment on building this as a <strong>new product bucket</strong> on Mastra Code &mdash; the second vertical, with a dedicated owner.</li>
+  <li>Clarity on licensing/redistribution terms for shipping Mastra Code inside a commercial package &mdash; a conversation this proposal exists to start.</li>
+  <li>Nothing else. The pattern is proven, the foundation is shipped, and the team that built it is already here.</li>
+</ul>
+
+<footer>
+  <span>Computer Controls &mdash; product proposal</span>
+  <span>Jamie · CodingButter &nbsp;·&nbsp; August 2026</span>
+</footer>
+
+</body>
+</html>
