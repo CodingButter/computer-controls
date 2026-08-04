@@ -23,7 +23,7 @@ import pytest
 
 from episode_recorder import Finding, NotFileable, Occurrence, Review
 from episode_recorder.filer import FILING_ENV, LEDGER
-from episode_recorder.finding import ERROR, METHOD
+from episode_recorder.finding import ERROR, METHOD, ROLES
 from episode_recorder.store import Author
 
 from recorder_tests.conftest import action, snapshot, window
@@ -382,6 +382,32 @@ def test_the_shapes_admit_the_protocol_they_describe():
         assert ERROR.fullmatch(code), code
 
 
+def test_the_roles_the_service_knows_are_roles_a_finding_can_name():
+    """The one closed list in `finding.py`, held against the service's own.
+
+    A role is a vocabulary rather than a shape, which buys the redaction line a
+    guarantee no regex can give — and costs the risk that a backend learns a
+    role this list has never heard of, leaving a reviewer with a real finding
+    and no way to file it. That failure should arrive here, on a named list,
+    rather than as a `NotFileable` in front of an agent that did nothing wrong.
+    """
+    from desktop_service import probe, redaction
+    from desktop_service.backends import atspi
+
+    known = (
+        probe.EDITABLE_ROLES
+        | atspi.WINDOW_ROLES
+        | atspi.TEXT_VALUE_ROLES
+        | redaction.SECRET_ROLES
+    )
+    # `password_text` and `passwordtext` are spellings redaction folds together
+    # before comparing, so that a backend writing either is still recognised.
+    # The vocabulary holds the spelling AT-SPI actually reports.
+    spellings = {"password_text", "passwordtext"}
+    unknown = (known - spellings) - ROLES
+    assert not unknown, f"roles the service uses that a finding cannot name: {unknown}"
+
+
 @pytest.mark.parametrize(
     "field, value",
     [
@@ -391,6 +417,12 @@ def test_the_shapes_admit_the_protocol_they_describe():
         ("tool", "message from Alice: see you at six"),
         ("target", "a sentence, with punctuation"),
         ("role", "button\nand a second line"),
+        # Lower-case, no digits, no punctuation, no newline: it passes every
+        # shape a role could be held to, and it is a person's name. This is the
+        # case a vocabulary exists for.
+        ("role", "alice"),
+        ("role", "jamie nichols"),
+        ("role", "sell the ps5"),
     ],
 )
 def test_a_finding_refuses_anything_shaped_like_a_sentence(field, value):

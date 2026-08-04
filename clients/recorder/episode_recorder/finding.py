@@ -16,14 +16,22 @@ that. What a reviewer supplies is which kind of finding it is, which step of
 which episodes it happened on, and a handful of structural words; what it cannot
 supply is anything it read on the screen.
 
-The structural words are constrained by shape rather than by a vocabulary this
-file would have to keep in step with the protocol. A method name is a camelCase
-identifier, an error code is a shouted constant, an element role is lower-case
-words. `recorder_tests/test_findings_are_filed.py` holds those shapes against
-the protocol's real method and error vocabularies, so a shape that stopped
-admitting the actual protocol would fail there rather than quietly here. What
-the shapes buy is the property that matters: none of them admits a sentence, a
-newline, or a secret, and `hunter2-correct-horse` is not a role.
+Most of those words are constrained by shape rather than by a vocabulary this
+file would have to keep in step with the protocol: a method name is a camelCase
+identifier, an error code is a shouted constant. That works because those fields
+are read out of the step record, which already went through the service's
+allowlist — the shape is a second lock on a door that is closed. It buys the
+property that matters: no shape here admits a sentence, a newline, or a secret,
+and `hunter2-correct-horse` is not a method.
+
+An element's role is the exception, and it is the exception because nothing in
+an episode records one, so a reviewer has to supply it. A shape cannot carry
+that weight — `alice` is lower-case words with no digits and no punctuation, and
+so is almost everything that must never leave the machine — so the role is held
+to a closed vocabulary instead. `recorder_tests/test_findings_are_filed.py`
+holds the shapes against the protocol's real method and error vocabularies and
+the role list against the service's own role sets, so drift in either direction
+fails there rather than quietly here.
 """
 
 from __future__ import annotations
@@ -66,10 +74,24 @@ METHOD = re.compile(r"\A[a-z][A-Za-z0-9]{0,39}\Z")
 #: An error code is shouted, which is a shape a sentence cannot take.
 ERROR = re.compile(r"\A[A-Z][A-Z0-9_]{0,39}\Z")
 
-#: A role is what the accessibility layer calls a thing — `push button`,
-#: `password text`. Lower-case words only: no digits, so nothing that looks like
-#: a value fits, and no newline, so nothing that looks like a paragraph does.
-ROLE = re.compile(r"\A[a-z][a-z ]{0,39}\Z")
+#: What the accessibility layer calls a thing. A closed list, not a shape,
+#: because this is the only field a reviewer supplies rather than the record
+#: yielding it: nothing in an episode records an element's role, so there is
+#: nothing to read it out of. A shape check is not enough for a field like that.
+#: `alice` is lower-case words with no digits and no newline; so is `sell the
+#: ps5`; so is most of what must never leave the machine. A vocabulary is the
+#: only check that answers "is this a term, or is this content that happens to
+#: look like one" — and a role that has to be invented is a role the filer does
+#: not need. Held against the service's own role sets by a test, so that a
+#: backend learning a new one shows up here as a failure rather than as a
+#: finding nobody could file.
+ROLES = frozenset({
+    "alert", "check box", "combo box", "dialog", "document text", "entry", "frame",
+    "label", "link", "list", "list item", "menu", "menu item", "page tab",
+    "panel", "password text", "push button", "radio button", "scroll bar",
+    "slider", "spin button", "table", "table cell", "text", "toggle button",
+    "tool bar", "tree", "tree item", "window",
+})
 
 #: A tool is named the way a tool is named. Same shape as a method, plus the
 #: underscores agent tooling tends to use.
@@ -137,7 +159,10 @@ class Finding:
             raise NotFileable(f"not an area this board routes to: {self.area!r}")
         _shaped("method", self.method, METHOD)
         _shaped("error", self.error, ERROR)
-        _shaped("role", self.role, ROLE)
+        if self.role and self.role not in ROLES:
+            raise NotFileable(
+                f"not a role the accessibility layer uses: {self.role!r}"
+            )
         _shaped("tool", self.tool, TOOL)
         _shaped("target", self.target, HANDLE)
         _shaped("agent label", self.agent.label, HANDLE)
