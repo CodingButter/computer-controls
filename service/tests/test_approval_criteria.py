@@ -61,9 +61,11 @@ class FakeDeltas:
         self.changes: list[dict] = []
         self.complete = True
         self.asked_as: list[str] = []
+        self.asked_since: list[int] = []
 
     def since(self, revision: int, asking_client: str = "") -> dict:
         self.asked_as.append(asking_client)
+        self.asked_since.append(revision)
         return {
             "changes": list(self.changes),
             "revision": 1,
@@ -188,6 +190,30 @@ def test_the_verdict_is_attributed_as_the_committing_client(desktop):
     commit(built, attest)
 
     assert deltas.asked_as == ["agent"]
+
+
+def test_the_change_log_is_asked_from_the_proof_not_from_now(desktop):
+    """Freshness compares against the photograph's moment, not the present.
+
+    A gate that asked the log "what changed since now" would find stillness by
+    construction — the check would pass vacuously in production while every
+    test with a fake log stayed green. So the fake records what it was asked,
+    and this test pins both ends of the plumbing: the revision stamped at
+    attest is the one the log is asked from at commit, and the one the audit
+    record carries.
+    """
+    built, _, deltas, log = desktop
+    grant(built)
+    server._registry.bump()
+    proof_revision = server._registry.revision
+    attest = call(built, "attestElement", elementId="el-1", clientId="agent")
+    server._registry.bump()
+    server._registry.bump()
+
+    commit(built, attest)
+
+    assert deltas.asked_since[-1] == proof_revision
+    assert f"r{proof_revision} " in summaries(log)[-1]
 
 
 # ---------------------------------------------------------------------------
