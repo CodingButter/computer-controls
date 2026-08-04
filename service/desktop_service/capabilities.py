@@ -17,7 +17,6 @@ that yet", which are very different facts.
 from __future__ import annotations
 
 import os
-import shutil
 from typing import Any, Callable
 
 
@@ -81,17 +80,62 @@ def _detect_session(discover: Callable[[], dict[str, str]] | None = None) -> dic
     }
 
 
-def _raw_input_reason() -> str:
-    reasons = []
-    if not os.path.exists("/dev/uinput"):
-        reasons.append("/dev/uinput does not exist")
-    elif not os.access("/dev/uinput", os.W_OK):
-        reasons.append("/dev/uinput is not writable by this user")
-    missing = [b for b in ("xdotool", "ydotool", "wmctrl") if shutil.which(b) is None]
-    if missing:
-        reasons.append(f"no {', '.join(missing)} on PATH")
-    reasons.append("raw input is out of scope for this build by design")
-    return "; ".join(reasons)
+#: Raw input as a general driver is refused, not missing, so its reason is a
+#: constant rather than a probe result. It used to be assembled from `/dev/uinput`
+#: existence and writability checks and `xdotool`/`ydotool`/`wmctrl` lookups,
+#: which was wrong twice over: a design refusal does not turn on which tools are
+#: installed, and none of those tools is how anything in this build synthesizes a
+#: key. The second error was the costly one — it left this entry reading as the
+#: last word on synthetic keyboard input, when the keystroke tier that does exist
+#: uses a different mechanism entirely and is reported somewhere else.
+_RAW_INPUT_REASON = (
+    "raw input as a general driver is out of scope for this build by design: the "
+    "rule is a semantic desktop, never a remote shell, and a driver types into "
+    "whatever holds focus, including a window the user walled off. Synthetic "
+    "keystrokes addressed to a named element are a different thing and are "
+    "implemented: see typeKeystrokes, reported under this report's accessibility "
+    "tier as its 'keystrokes' detail."
+)
+
+#: What the keystroke tier is, carried in the report whether or not this session
+#: can run it. A caller that finds only `keystrokes: false` learns that the tier
+#: is unavailable; a caller that also reads this learns that it exists at all,
+#: which is the fact the report used to withhold entirely.
+_KEYSTROKE_NOTE = (
+    "typeKeystrokes types with synthetic key events, for a field that is editable "
+    "and readable but offers no interface to write through. It is an escalation "
+    "addressed to a named element rather than a general input driver: it passes "
+    "the consent ceiling, the holds registry, the presence gate and per-character "
+    "pacing, and what landed is read back and compared exactly as typeText's is."
+)
+
+
+def _keystroke_reason(accessibility: dict[str, Any], display_server: str) -> str | None:
+    """Why this session cannot synthesize keystrokes, or None when it can.
+
+    The dependencies are the tier's real ones, which are not the ones the
+    raw-input entry used to probe for. `typeKeystrokes` synthesizes through
+    `Atspi.generate_keyboard_event` on the accessibility bus, and the modifier it
+    holds down to clear a field is an X11 hardware keycode
+    (`backends/atspi.py:1026-1033`). So: the bus, and an X11 session.
+
+    Nothing here presses a key to find out. A probe that proved synthesis by
+    synthesizing would type a character into whatever the person at this desktop
+    is doing, which is too high a price for an answer these two inputs already
+    give.
+    """
+    if not accessibility.get("available"):
+        return (
+            "keystroke synthesis goes through the accessibility bus, and the bus is "
+            f"unavailable: {accessibility.get('reason')}"
+        )
+    if display_server != "x11":
+        return (
+            "keystroke synthesis needs an X11 session: the keys it holds down are "
+            "X11 hardware keycodes, and this session's display server is "
+            f"{display_server!r}"
+        )
+    return None
 
 
 def build_report(
@@ -106,6 +150,7 @@ def build_report(
     # The empty string means "nothing stands in the way", so availability and its
     # reason come from one probe and cannot disagree with each other.
     capture_reason = probe_capture()
+    keystroke_reason = _keystroke_reason(accessibility, session["displayServer"])
 
     tiers = [
         {
@@ -129,6 +174,16 @@ def build_report(
                     "it reads false on machines where the bridge works"
                 ),
                 "applicationCount": accessibility.get("applicationCount"),
+                # Reported here rather than as a tier of its own, for the same
+                # reason window capture and OCR sit inside the vision tier: this
+                # is a capability of the accessibility bus, reached through the
+                # same connection the tree is read over. Its own tier id would
+                # also land it in `recommendedBackends`, and a call documented as
+                # an escalation and never a fallback has no business being
+                # recommended to anybody.
+                "keystrokes": keystroke_reason is None,
+                "keystrokesReason": keystroke_reason,
+                "keystrokesNote": _KEYSTROKE_NOTE,
             },
         },
         {
@@ -168,9 +223,9 @@ def build_report(
         },
         {
             "id": "raw-input",
-            "name": "Synthetic pointer and keyboard input",
+            "name": "Synthetic pointer and keyboard input as a general driver",
             "available": False,
-            "reason": _raw_input_reason(),
+            "reason": _RAW_INPUT_REASON,
         },
     ]
 

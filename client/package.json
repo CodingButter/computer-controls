@@ -1,20 +1,24 @@
 {
-  "name": "@codingbutter/client",
+  "name": "@codingbutter/computer-controls-client",
   "version": "0.1.0",
-  "description": "The local hub's browser-facing pieces; today, the voice lane",
+  "description": "The local hub: headless Mastra Code, the desktop plugin, and a chat page, in one process",
   "type": "module",
   "private": true,
   "scripts": {
+    "start": "node src/index.ts",
     "test": "vitest run",
+    "test:gate": "vitest run --config vitest.gate.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "license": "MIT",
   "dependencies": {
+    "@hono/node-server": "^2.0.12",
+    "@mastra/code-sdk": "1.1.1",
     "@mastra/core": "1.55.0",
-    "@mastra/voice-openai": "^0.13.0"
+    "@mastra/voice-openai": "^0.13.0",
+    "hono": "^4.12.33"
   },
   "devDependencies": {
-    "@mastra/code-sdk": "1.1.1",
     "@types/node": "^26.1.2",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"

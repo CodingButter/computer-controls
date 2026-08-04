@@ -10,24 +10,24 @@ way to know the characters arrived is to ask the application afterwards.
 
 | | |
 |---|---|
-| Measured | 2026-08-04 06:35 UTC |
+| Measured | 2026-08-04 09:55 UTC |
 | Operating system | Ubuntu 24.04.4 LTS |
 | Desktop environment | ubuntu:GNOME |
 | Session type | x11 |
 | Display | :1 |
 | Python | 3.12.3 |
 | Application | Discord |
-| Element | `el-b6da04454564` |
+| Element | `el-e26757892f6d` |
 
 ## What was asked of the run
 
 | Condition | Met | Observed |
 |---|---|---|
 | the accessible write refused this field first | yes | `typeText ok: False, 'the element does not accept text'` |
-| the keystroke tier accepted it | NO | `ok: False, stoppedBecause: 'the person at this desktop started working in that window, so the writing stopped'` |
+| the keystroke tier accepted it | NO | `ok: False, stoppedBecause: None` |
 | the result says which backend answered | yes | `backend: 'keystrokes'` |
 | it named the window it took focus from | yes | `focusedWindow: '79691786'` |
-| every character it planned was sent | NO | `1/20` |
+| every character it planned was sent | yes | `20/20` |
 | the service verified the field itself | NO | `verified: 'mismatch'` |
 | the field really holds the text, read back independently of that verdict | NO | `read back: '￼'` |
 
@@ -41,7 +41,7 @@ saying no belongs in the same artifact as the record of the escalation.
 {
   "actionId": "act-000001",
   "backend": "accessibility",
-  "durationMs": 59,
+  "durationMs": 66,
   "error": {
     "code": "ACTION_NOT_SUPPORTED",
     "message": "typeText was refused by every available tier (accessibility)"
@@ -53,7 +53,7 @@ saying no belongs in the same artifact as the record of the escalation.
     "changes": [],
     "fromRevision": 2,
     "partial": false,
-    "settledMs": 56,
+    "settledMs": 62,
     "toRevision": 2
   },
   "ok": false,
@@ -72,7 +72,7 @@ saying no belongs in the same artifact as the record of the escalation.
 {
   "actionId": "act-000002",
   "backend": "keystrokes",
-  "durationMs": 447,
+  "durationMs": 3606,
   "error": {
     "code": "ACTION_NOT_SUPPORTED",
     "message": "typeKeystrokes was refused by every available tier (keystrokes)"
@@ -88,29 +88,13 @@ saying no belongs in the same artifact as the record of the escalation.
         "detail": {},
         "kind": "focus-changed",
         "revision": 3,
-        "summary": "focus moved to Discord: @Dyno - Discord",
+        "summary": "focus moved to Discord: @\ud835\udc1c\ud835\udc28\ud835\udc28\ud835\udc24\ud835\udc22\ud835\udc1e - Discord",
         "windowId": "win-8e84f7305c55"
-      },
-      {
-        "applicationId": "app-e6a1acaada67",
-        "applicationName": "Discord",
-        "detail": {
-          "charactersAdded": 1,
-          "charactersRemoved": 0,
-          "lengthAfter": 1,
-          "lengthBefore": 0,
-          "shape": "appended",
-          "unchangedPrefix": 0
-        },
-        "elementId": "el-6364180126d4",
-        "kind": "element-value-changed",
-        "revision": 3,
-        "summary": "an element's value grew by 1 characters at the end"
       }
     ],
     "fromRevision": 2,
     "partial": false,
-    "settledMs": 257,
+    "settledMs": 304,
     "toRevision": 3
   },
   "ok": false,
@@ -118,12 +102,10 @@ saying no belongs in the same artifact as the record of the escalation.
     "actualText": "\ufffc",
     "backend": "keystrokes",
     "charactersPlanned": 20,
-    "charactersTyped": 1,
+    "charactersTyped": 20,
     "estimatedMs": 3428,
     "focusedWindow": "79691786",
-    "stoppedBecause": "the person at this desktop started working in that window, so the writing stopped",
-    "verified": "mismatch",
-    "yieldedTo": "user"
+    "verified": "mismatch"
   }
 }
 ```

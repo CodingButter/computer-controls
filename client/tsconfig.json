@@ -1,9 +1,6 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    // The push-to-talk controller runs in a browser: MediaRecorder, Blob,
-    // FormData. The plugin has no such half, which is why its lib list is
-    // shorter than this one.
     "lib": ["ES2023", "DOM"],
     "module": "preserve",
     "moduleResolution": "bundler",

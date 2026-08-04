@@ -77,6 +77,31 @@ def test_compat_matrix_script_is_runnable() -> None:
     )
 
 
+def test_the_open_questions_doc_does_not_deny_the_keystroke_tier() -> None:
+    """The written docs have to agree with the build about what the build does.
+
+    Nothing checked this, and the §raw-input section spent a whole release saying
+    that synthetic input bypasses the consent ceiling, the holds registry and the
+    redaction layer — a true sentence about a general input driver, and a false one
+    about the keystroke tier, which was written specifically to pass through all
+    three. Regeneration cannot catch this: the document is hand-written, so a test
+    is the only thing holding it to the code.
+    """
+    doc = (DOCS / "07-open-questions.md").read_text()
+    section = doc[doc.index("### raw-input") :]
+
+    assert "typeKeystrokes" in section, (
+        "§raw-input must name the governed alternative that exists, or it reads as "
+        "a denial that this build synthesizes keys at all"
+    )
+    for denial in (
+        "Synthetic input bypasses the consent ceiling",
+        "/dev/uinput",
+        "xdotool",
+    ):
+        assert denial not in section, f"§raw-input still claims: {denial}"
+
+
 def test_relative_links_resolve() -> None:
     """Every relative link in docs/ and README.md points at a real file."""
     markdown_files = sorted(DOCS.rglob("*.md"))

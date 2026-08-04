@@ -1,13 +1,9 @@
-# pnpm refuses to finish an install that silently skipped a dependency's build
-# script, so every package that wants to run one has to be answered here — and
-# an unanswered package fails `pnpm install` outright, which would put the
-# fresh-clone lanes right back where they started.
-#
-# All of these arrive underneath `@mastra/core`, and every one of them belongs
-# to a feature this package does not touch: model providers, browser automation,
-# an ONNX runtime, protobuf codegen. Their builds compile native binaries we
-# never load. `bufferutil` is only a speedup for `ws`, which falls back to a
-# pure-JavaScript implementation without it.
+# Same answer the plugin gives, for the same reason: pnpm refuses to finish an
+# install that silently skipped a dependency's build script, and an unanswered
+# package fails `pnpm install` outright. Every entry below arrives underneath
+# `@mastra/core` and belongs to a feature this client does not touch — model
+# providers, browser automation, an ONNX runtime, protobuf codegen. Their builds
+# compile native binaries we never load.
 #
 # So: build nothing. If a future dependency genuinely needs its build to run,
 # flip that one entry and say why.
@@ -19,3 +15,5 @@ allowBuilds:
   geckodriver: false
   onnxruntime-node: false
   protobufjs: false
+minimumReleaseAgeExclude:
+  - '@rolldown/binding-android-arm64@1.2.2'
