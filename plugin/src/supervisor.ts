@@ -4,7 +4,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { DesktopClient, DesktopServiceError } from "./client.ts";
-import { PROTOCOL_VERSION } from "./protocol.generated.ts";
+import type { GrantScopeResult } from "./protocol.generated.ts";
+import { PROTOCOL_VERSION, SCHEMA_DIGEST } from "./protocol.generated.ts";
+import { brainFromGrant, type BrainChoice } from "./scope-brain.ts";
 
 /**
  * Gets this plugin a desktop service to talk to, by one of two routes.
@@ -34,7 +36,7 @@ export function daemonSocketPath(): string {
   const explicit = process.env.MASTRACODE_DESKTOP_SOCKET;
   if (explicit) return explicit;
   const runtimeDir = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 1000}`;
-  return join(runtimeDir, "mastracode-desktop", "daemon.sock");
+  return join(runtimeDir, "mastracode-desktop", `daemon-${SCHEMA_DIGEST}.sock`);
 }
 
 export class DesktopSupervisor {
@@ -44,10 +46,93 @@ export class DesktopSupervisor {
   #exitCleanupArmed = false;
   #attached = false;
   #schemaDigest: string | undefined;
+  #scope: readonly string[] = [];
+  #scopeReason = "";
+  #criteria: readonly string[] = [];
+  #brain: BrainChoice | undefined;
   readonly #sessionName: string;
 
   constructor(sessionName = `mc-${process.pid}`) {
     this.#sessionName = sessionName;
+  }
+
+  /**
+   * The door the client opens on the agent's behalf, before the agent exists.
+   *
+   * A13: the agent holds no key. It is never handed `grantScope` as a tool, so
+   * the only way its write tools can ever succeed is if the process that built
+   * it granted the matching classes on the connection. Set this from the
+   * plugin's construction-time scope and the grant rides every connection —
+   * including a reconnection, because a grant is filed against the connection's
+   * identity and a new connection is a new identity holding nothing.
+   *
+   * Observe needs no grant: it is what a fresh connection already has.
+   *
+   * A14: the criteria a commit is judged against ride the same call, for the
+   * same reason the classes do. They are configuration the client reads before
+   * the agent exists, so the party being graded never writes its own rubric —
+   * and there is no tool through which it could.
+   */
+  setScope(classes: readonly string[], reason: string, criteria: readonly string[] = []): void {
+    this.#scope = classes.filter((klass) => klass !== "observe");
+    this.#scopeReason = reason;
+    this.#criteria = criteria.filter((name) => name.length > 0);
+  }
+
+  /** The classes this client will ask for on connect. Empty means observe-only. */
+  get scope(): readonly string[] {
+    return this.#scope;
+  }
+
+  /** The criteria this client declares its commits should be judged against. */
+  get criteria(): readonly string[] {
+    return this.#criteria;
+  }
+
+  /**
+   * How much thinking the granted scope asks for, per the service's own
+   * severity and breadth report (A16). Undefined until a door has been opened —
+   * an observe-only scope asks for nothing and so reports nothing. Re-decided
+   * on every connection, so a host that reads it after a reconnect sees the
+   * price of the scope it holds now, not the one it started with.
+   */
+  get brain(): BrainChoice | undefined {
+    return this.#brain;
+  }
+
+  /**
+   * Ask for the client's scope on a freshly connected client.
+   *
+   * A failure here is not fatal to the connection: the tools are already
+   * minted, and the refusal an individual call gets is a better account of what
+   * the ceiling allows than a connection that never opens. It is logged because
+   * a client author staring at tools that always refuse deserves the reason.
+   */
+  async #openDoor(client: DesktopClient): Promise<void> {
+    if (this.#scope.length === 0) return;
+    try {
+      const granted = await client.request<GrantScopeResult>("grantScope", {
+        clientId: this.#sessionName,
+        operationClasses: [...this.#scope],
+        reason: this.#scopeReason,
+        ...(this.#criteria.length > 0 ? { criteria: [...this.#criteria] } : {}),
+      });
+      // A16: the service reports what the scope costs — severity and breadth —
+      // and stops there. Turning those two numbers into a model tier is a
+      // client decision, and this is the only place a grant response exists
+      // now that A13 removed the granting tool from the agent's hand. The
+      // choice is re-decided on every door opening, including a reconnection:
+      // a scope change is a model change, and carrying on cheaply after being
+      // handed more is precisely the wrong economy. Swapping the running model
+      // on the answer belongs to whatever hosts this plugin.
+      this.#brain = brainFromGrant(granted);
+      console.error(
+        `[desktop-control] scope granted; brain tier "${this.#brain.tier}" (${this.#brain.reason})`,
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error(`[desktop-control] the configured scope was refused: ${detail}`);
+    }
   }
 
   get running(): boolean {
@@ -110,6 +195,7 @@ export class DesktopSupervisor {
     }
     this.#attached = true;
     this.#client = client;
+    await this.#openDoor(client);
     return client;
   }
 
@@ -190,6 +276,7 @@ export class DesktopSupervisor {
     const client = new DesktopClient({ socketPath });
     await client.connect();
     this.#client = client;
+    await this.#openDoor(client);
     return client;
   }
 

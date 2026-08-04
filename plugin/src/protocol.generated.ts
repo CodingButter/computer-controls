@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: e16c1fef044c1ae0
+// Protocol version: 1.0   schema sha256: 375c11d95e161bbc
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "e16c1fef044c1ae0" as const;
+export const SCHEMA_DIGEST = "375c11d95e161bbc" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -34,8 +34,8 @@ export type WaitCondition = "window-opened" | "window-closed" | "element-appeare
 export const WAIT_CONDITION_VALUES: readonly WaitCondition[] = ["window-opened", "window-closed", "element-appeared", "element-state-changed", "revision-advanced"];
 
 /** The complete domain error vocabulary. Carried in the JSON-RPC error object under data.code. */
-export type ErrorCode = "APPLICATION_NOT_FOUND" | "WINDOW_NOT_FOUND" | "ELEMENT_NOT_FOUND" | "ELEMENT_REFERENCE_STALE" | "BACKEND_UNAVAILABLE" | "ACTION_NOT_SUPPORTED" | "PERMISSION_DENIED" | "SESSION_EXPIRED" | "ELEMENT_HELD" | "CLAIM_EXPIRED" | "TIMEOUT" | "METHOD_NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL_ERROR";
-export const ERROR_CODE_VALUES: readonly ErrorCode[] = ["APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "CLAIM_EXPIRED", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR"];
+export type ErrorCode = "APPLICATION_NOT_FOUND" | "WINDOW_NOT_FOUND" | "ELEMENT_NOT_FOUND" | "ELEMENT_REFERENCE_STALE" | "BACKEND_UNAVAILABLE" | "ACTION_NOT_SUPPORTED" | "PERMISSION_DENIED" | "SESSION_EXPIRED" | "ELEMENT_HELD" | "CLAIM_EXPIRED" | "SUBSCRIPTION_LIMIT_REACHED" | "ATTESTATION_FAILED" | "ATTESTATION_STALE" | "TIMEOUT" | "METHOD_NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL_ERROR";
+export const ERROR_CODE_VALUES: readonly ErrorCode[] = ["APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "CLAIM_EXPIRED", "SUBSCRIPTION_LIMIT_REACHED", "ATTESTATION_FAILED", "ATTESTATION_STALE", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR"];
 
 /** The result of one action, including the effects it was seen to have. A caller that reads this does not need to re-inspect. */
 export interface ActionResult {
@@ -104,7 +104,7 @@ export interface ElementClaim {
 
 /** The data member of a JSON-RPC error. The domain code lives here; the top-level code stays a reserved JSON-RPC number. */
 export interface ErrorData {
-  code: "APPLICATION_NOT_FOUND" | "WINDOW_NOT_FOUND" | "ELEMENT_NOT_FOUND" | "ELEMENT_REFERENCE_STALE" | "BACKEND_UNAVAILABLE" | "ACTION_NOT_SUPPORTED" | "PERMISSION_DENIED" | "SESSION_EXPIRED" | "ELEMENT_HELD" | "TIMEOUT" | "METHOD_NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL_ERROR";
+  code: "APPLICATION_NOT_FOUND" | "WINDOW_NOT_FOUND" | "ELEMENT_NOT_FOUND" | "ELEMENT_REFERENCE_STALE" | "BACKEND_UNAVAILABLE" | "ACTION_NOT_SUPPORTED" | "PERMISSION_DENIED" | "SESSION_EXPIRED" | "ELEMENT_HELD" | "TIMEOUT" | "METHOD_NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL_ERROR" | "SUBSCRIPTION_LIMIT_REACHED" | "ATTESTATION_FAILED" | "ATTESTATION_STALE";
   detail?: Record<string, unknown>;
   /** Present when this error travels inside a result rather than as a JSON-RPC error. A failed step inside a batch has no top-level error member to carry its explanation, and a report that says a step failed without saying why is not worth returning. */
   message?: string;
@@ -140,10 +140,22 @@ export interface ResponseCommon {
   revision?: number;
 }
 
+/** A place in the accessibility tree that a permission hangs on, and what may be done there. An application is the outermost place there is, and most tasks mean something far narrower: 'fill in this form' expressed as 'edit anything in the browser' draws the boundary around the wrong thing. Anchors are resolved against the live tree on every call, never remembered as an answer, and the nearest one covering the target decides — so a subtree granted observe with one field inside it granted edit composes without either rule knowing about the other. */
+export interface ScopeAnchor {
+  /** Whether this speaks for everything under it or only for the one node it names. Defaults to false: a grant on a single field that silently reached everything beneath it would be the widening anchors exist to prevent. */
+  coversDescendants?: boolean;
+  /** What may be done at this place. Faces the ceiling like every other class named in a grant: an anchor is a narrowing device, never a side door. */
+  operationClasses: "observe" | "edit" | "activate" | "submit" | "destructive"[];
+  /** The place this hangs on: an element id, a window id, or an application name. Ids are matched exactly, because an id is minted rather than typed and a substring of one is a coincidence. Application names are matched as substrings, the same way they are everywhere else. */
+  target: string;
+}
+
 /** One thing on the desktop, as a caller sees it. */
 export interface SemanticElement {
   /** Action names invokable on this element. For a window this is often the application's whole command set. */
   actions: string[];
+  /** Ancestor chain for this element, nearest first, up to the requested depth. Present only when the caller asked for ancestor expansion. Each entry is a full element whose id is valid for getElement. */
+  ancestry?: SemanticElement[];
   backend: "atspi" | "compositor";
   bounds?: Bounds;
   children?: SemanticElement[];
@@ -155,6 +167,8 @@ export interface SemanticElement {
   name: string;
   /** What kind of thing it is, in the backend's vocabulary. */
   role: string;
+  /** Immediate neighbours of this element under the same parent, up to a per-hit cap. Present only when the caller asked for sibling expansion. */
+  siblings?: SemanticElement[];
   states: string[];
   /** Present and true when this element has children the walk did not return, whether because the node budget ran out or because the depth limit was reached. Never silently omitted: a subtree that was cut off must never be indistinguishable from one that ended. Drill from this element with inspectElement to see what is below it. */
   truncated?: boolean;
@@ -163,6 +177,20 @@ export interface SemanticElement {
 }
 
 /** Every method, its operation class, and its request and response shapes. */
+/** Read and record what is in a field right now, so a later commitElement can refuse if it has changed. The evidence is the field's own contents read by the service — the caller writes the argument (which element), never the evidence (what text). A masked field, whose contents even the accessibility layer cannot read, is refused: there is nothing to attest that a later commit could compare against. Composing is not sending, and this call authorises nothing: it takes a snapshot, and the snapshot is only as good as the moment it was taken. (operation class: observe) */
+export interface AttestElementParams {
+  clientId?: string;
+  confirm?: boolean;
+  /** The field whose contents are being attested for a later commit. */
+  elementId: string;
+}
+export interface AttestElementResult {
+  /** Identifies this attestation. Present it to commitElement within its TTL; one attestation admits exactly one commit. */
+  attestationId: string;
+  /** How long before the attestation must be retaken. A stale attestation is not reusable. */
+  expiresInMs: number;
+}
+
 /** The most recent entries from this service's audit log, including the calls that were refused. Refusals are the half worth reading: an agent that tried to close a window and was told no is a fact about the agent, and it is invisible in a record of what succeeded. Entries carry what was done and to which application, never the contents of anything read or typed. (operation class: observe) */
 export interface AuditTailParams {
   clientId?: string;
@@ -220,6 +248,20 @@ export interface ClaimElementResult {
   claim: ElementClaim;
   revision: number;
 }
+
+/** Send what was attested. Re-reads the field and refuses if it no longer matches what attestElement recorded; if it matches, triggers the element's own action. Success is asserted from the observed effect — the field is now empty, meaning it transmitted — not from the action call returning true. A field that the action was called on but which still contains its contents afterwards is a commit that did not send, reported as failure regardless of what the action call returned. The thing that would have caught the original incident: a keystroke that typed a character instead of pressing Return leaves the field non-empty, and that is the failure this reports. (operation class: destructive) */
+export interface CommitElementParams {
+  /** The action to trigger, as reported in the element's actions list. Not an index: indices move. When omitted, the element's first action is used. */
+  action?: string;
+  /** The attestation returned by attestElement for this field. One attestation admits one commit; a second commit with the same id is refused. */
+  attestationId: string;
+  clientId?: string;
+  confirm?: boolean;
+  /** The field whose attested contents are being sent. */
+  elementId: string;
+  settleMs?: number;
+}
+export type CommitElementResult = ActionResult;
 
 /** Replace or remove part of an editable element's text, addressed by the text itself rather than by character offsets. Editing at this layer is a splice — a range is removed and something is put in its place in one operation — because there is no keyboard here and nothing to press backspace on. An offset computed from a field somebody has since typed into points at the wrong characters; text that has moved is simply not found, which is a refusal instead of a wrong edit. (operation class: edit) */
 export interface EditTextParams {
@@ -350,10 +392,14 @@ export interface GetRevisionResult {
 
 /** Ask for the operation classes this client may use, within the ceiling the user's configuration sets. Only ever narrows: a request above the ceiling is refused by naming the config key, because the answer to 'why can't I' should be a file the user owns rather than a shrug. Classified as observe so that a client holding nothing can still ask — refusing the request for permission is not a security boundary, it is a dead end. (operation class: observe) */
 export interface GrantScopeParams {
+  /** Places in the tree this grant hangs on, instead of hanging on whole applications. A grant that names anchors has said where it applies, so anywhere else is outside it — the same rule naming applications individually has always had. Omit to grant across applications as before. */
+  anchors?: ScopeAnchor[];
   /** Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing. */
   applications?: string[];
   clientId?: string;
   confirm?: boolean;
+  /** The questions a commit made under this grant must be answered against. Declared here, at the door, because the party being graded does not write the rubric — a worker cannot reach this field, and the service's own mechanical criteria are asked on top of whatever is named here. A name this service cannot decide is still carried and reported as unchecked, so that asking for review is never worse than asking for nothing. */
+  criteria?: string[];
   /** What this client intends to do. Ask for what the task needs and no more: a grant is also a description of the blast radius in the audit log. */
   operationClasses: "observe" | "edit" | "activate" | "submit" | "destructive"[];
   /** What this is for, in the caller's own words. Recorded in the audit log, where the useful question months later is why, not what. */
@@ -362,12 +408,32 @@ export interface GrantScopeParams {
   seconds?: number;
 }
 export interface GrantScopeResult {
+  /** Where this grant now hangs. Returned so a client can tell an anchor that was accepted from one that was quietly dropped. */
+  anchors?: ScopeAnchor[];
   applications?: string[];
+  /** How wide a net this scope casts. The competence dimension: breadth, not depth, is what overwhelms a small model. */
+  breadth?: {
+    /** Element-anchored permissions hung on this grant (A15). Each anchor is a separate place to keep track of, so it counts toward the same spread the applications do. */
+    anchors: number;
+    /** Distinct applications this grant spans. A weaker model loses track across many. */
+    applications: number;
+    /** True when the scope names no applications and neither does the ceiling, so it spans every application there is. The count above is then a floor, not a total. */
+    unbounded: boolean;
+  };
   /** The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice. */
   ceiling: string[];
+  /** Every criterion a commit under this grant will be judged against, the mechanical ones included whether or not they were asked for. Returned so a client can tell what review it has actually bought without inferring it from a refusal. */
+  criteria?: string[];
   expiresInSeconds?: number;
   /** What this client now holds. Always includes observe: a client that may edit must be able to check whether its edit worked. */
   operationClasses: string[];
+  /** How much damage a mistake within this scope can cause. A fact about the classes held, not an opinion about which model should hold them. */
+  severity?: {
+    /** True when the grant includes a class whose mistakes cannot be taken back (submit, destructive). */
+    irreversible: boolean;
+    /** Ordinal of the highest operation class held: observe=0, edit=1, activate=2, submit=3, destructive=4. */
+    rank: number;
+  };
 }
 
 /** Version handshake. First call on a connection. (operation class: observe) */
@@ -537,14 +603,20 @@ export interface PerformActionsResult {
   revision: number;
 }
 
-/** Find elements in a window by role, name or state. At least one filter is required. (operation class: observe) */
+/** Find elements in a window by role, name or state. At least one filter is required. Optional ancestors/descendants/siblings expand the neighbourhood around each match after the match set is capped — how to find something in a large application without walking the whole tree. (operation class: observe) */
 export interface QueryElementsParams {
+  /** Expand each match upward toward the window root, returning up to this many ancestors in the element's ancestry field. Zero or absent means no ancestor expansion. Capped at 32 because a broken toolkit can hand back a non-terminating parent chain. */
+  ancestors?: number;
   clientId?: string;
   /** Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. */
   confirm?: boolean;
+  /** Expand each match downward, populating the element's children field to this many depth levels. Zero or absent means no descendant expansion. */
+  descendants?: number;
   limit?: number;
   name?: string;
   role?: string;
+  /** When true, return each match's immediate neighbours (up to a per-hit cap) in the element's siblings field. */
+  siblings?: boolean;
   states?: string[];
   windowId: string;
 }
@@ -554,6 +626,8 @@ export interface QueryElementsResult {
   matchCount: number;
   /** More matches exist than were returned — either the search was cut short or the answer hit its limit with tree left unwalked. A caller seeing this should narrow its filter rather than assume it has seen everything. */
   moreResults?: boolean;
+  /** Expansion was cut short by the node budget or time limit, not the search itself. Distinct from searchTruncated: the search covered the window, but some matches did not get their full neighbourhood. */
+  neighbourhoodTruncated?: boolean;
   revision: number;
   /** The search gave up before covering the window. */
   searchTruncated: boolean;
@@ -623,6 +697,17 @@ export interface SetObservationModeResult {
   revision: number;
 }
 
+/** Declare intent to be told about changes to an element without holding a call open. A subscription is an observation claim, not a write claim: it does not prevent anyone else from acting on the element, and no subscription outranks the person at the keyboard. The element is resolved first — subscribing to an id that names nothing is an unkeepable promise. Subscribed elements are sampled on every observation sweep regardless of recency, because a declared intent outranks a heuristic that ranks by how recently something was touched. Over the per-connection ceiling is a refusal that names the ceiling, never a silent truncation: a service that accepts a thousand subscriptions and quietly samples the first sixteen has reinvented the current bug with better manners. A disconnecting client's subscriptions are all released, exactly as a claim is. (operation class: observe) */
+export interface SubscribeElementParams {
+  clientId?: string;
+  confirm?: boolean;
+  elementId: string;
+}
+export interface SubscribeElementResult {
+  revision: number;
+  subscribed: boolean;
+}
+
 /** Type into an element through synthetic keyboard events when the editable-text interface that typeText and setElementValue use is unavailable. The element is on the accessibility bus and its text can be read back, but it offers no way to write through it — a Discord composer, a browser input that only listens to key events. This is a deliberate escalation, not a fallback: the caller tried the accessible write and it refused, and the cost of typing at a window is that focus must be where the caller believes it is. Requires focus and reports which window it raised. Success is the field reading back what was typed, verified the same way as typeText. (operation class: edit) */
 export interface TypeKeystrokesParams {
   clientId?: string;
@@ -653,6 +738,19 @@ export interface TypeTextParams {
 }
 export type TypeTextResult = ActionResult;
 
+/** Stop asking to be told about an element. Releasing what you do not subscribe to is not an error: the desired state is that this client watches nothing here, and it is already true. A client that disconnects is unsubscribed from everything it held. (operation class: observe) */
+export interface UnsubscribeElementParams {
+  clientId?: string;
+  /** Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. */
+  confirm?: boolean;
+  elementId: string;
+}
+export interface UnsubscribeElementResult {
+  /** True when this call ended a subscription, false when there was nothing of this client's to give up. */
+  released: boolean;
+  revision: number;
+}
+
 /** Wait for a semantic condition. Replaces sleeping in the model's context: the waiting happens in the service and returns the moment the condition holds. (operation class: observe) */
 export interface WaitForParams {
   clientId?: string;
@@ -678,12 +776,14 @@ export interface WaitForResult {
   waitedMs: number;
 }
 
-export type MethodName = "auditTail" | "captureWindow" | "claimElement" | "editText" | "emergencyStop" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "grantScope" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "releaseElement" | "setAttention" | "setElementValue" | "setObservationMode" | "typeKeystrokes" | "typeText" | "waitFor";
+export type MethodName = "attestElement" | "auditTail" | "captureWindow" | "claimElement" | "commitElement" | "editText" | "emergencyStop" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "grantScope" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "releaseElement" | "setAttention" | "setElementValue" | "setObservationMode" | "subscribeElement" | "typeKeystrokes" | "typeText" | "unsubscribeElement" | "waitFor";
 
 export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
+  attestElement: "observe",
   auditTail: "observe",
   captureWindow: "observe",
   claimElement: "edit",
+  commitElement: "destructive",
   editText: "edit",
   emergencyStop: "observe",
   focusWindow: "activate",
@@ -707,15 +807,19 @@ export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   setAttention: "observe",
   setElementValue: "edit",
   setObservationMode: "observe",
+  subscribeElement: "observe",
   typeKeystrokes: "edit",
   typeText: "edit",
+  unsubscribeElement: "observe",
   waitFor: "observe",
 };
 
 export interface MethodMap {
+  attestElement: { params: AttestElementParams; result: AttestElementResult };
   auditTail: { params: AuditTailParams; result: AuditTailResult };
   captureWindow: { params: CaptureWindowParams; result: CaptureWindowResult };
   claimElement: { params: ClaimElementParams; result: ClaimElementResult };
+  commitElement: { params: CommitElementParams; result: CommitElementResult };
   editText: { params: EditTextParams; result: EditTextResult };
   emergencyStop: { params: EmergencyStopParams; result: EmergencyStopResult };
   focusWindow: { params: FocusWindowParams; result: FocusWindowResult };
@@ -739,7 +843,9 @@ export interface MethodMap {
   setAttention: { params: SetAttentionParams; result: SetAttentionResult };
   setElementValue: { params: SetElementValueParams; result: SetElementValueResult };
   setObservationMode: { params: SetObservationModeParams; result: SetObservationModeResult };
+  subscribeElement: { params: SubscribeElementParams; result: SubscribeElementResult };
   typeKeystrokes: { params: TypeKeystrokesParams; result: TypeKeystrokesResult };
   typeText: { params: TypeTextParams; result: TypeTextResult };
+  unsubscribeElement: { params: UnsubscribeElementParams; result: UnsubscribeElementResult };
   waitFor: { params: WaitForParams; result: WaitForResult };
 }

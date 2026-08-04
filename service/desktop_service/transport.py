@@ -17,7 +17,9 @@ local for much longer: the shape this project is heading for is one server per
 machine — this daemon, an agent layer above it, a gateway above that — and many
 clients holding nothing but a server URL and a credential. Nothing
 network-facing ever speaks to the desktop directly, which is the entire reason
-the guarantees below this line keep their meaning.
+the guarantees below this line keep their meaning. The full ruling on how a
+client reaches that server — the tiers, the constraints, what the daemon is not
+— is in `docs/06-how-a-stranger-connects.md`.
 
 So the rule for whatever opens this socket on their behalf: **one connection per
 agent, never one for the server.** The connection is not a transport detail
@@ -53,7 +55,8 @@ import stat
 import threading
 from typing import Any, Callable
 
-from . import holds, identity
+from . import holds, identity, send_gate
+from .protocol_generated import SCHEMA_DIGEST
 from .errors import (
     JSONRPC_INVALID_REQUEST,
     JSONRPC_PARSE_ERROR,
@@ -86,14 +89,69 @@ def daemon_socket_path() -> str:
     """
     Where a shared desktop service listens.
 
-    One name, known to every client without being told: a client that finds a
-    live service here attaches to it instead of starting a second one. That is
-    the difference between a desktop each client sees a private view of and one
-    desktop several clients agree about — two services on one desktop would
-    each hold their own element registry and their own revision counter, and an
-    element id from one would be meaningless to the other.
+    The name carries the schema digest so that a client and a daemon built from
+    the same protocol agree on one socket, while a client whose protocol differs
+    finds no socket at all and starts its own. The filesystem does the matching:
+    no version negotiation, no compatibility check — two builds that cannot
+    understand each other never meet on the same socket.
+
+    Within one build, one name is still what makes several clients agree about
+    one desktop: two services on one desktop would each hold their own element
+    registry and revision counter, and an element id from one would be
+    meaningless to the other. Digest keying preserves that while keeping
+    different builds apart.
     """
-    return default_socket_path(DAEMON_SESSION)
+    return default_socket_path(f"{DAEMON_SESSION}-{SCHEMA_DIGEST}")
+
+
+def _nothing_is_listening(path: str) -> bool:
+    """Whether a socket file is a leftover rather than a live service.
+
+    Presence proves nothing — a crashed process leaves its socket file behind
+    looking exactly like a working one. The connection attempt is the test.
+    """
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    probe.settimeout(0.5)
+    try:
+        probe.connect(path)
+    except (ConnectionRefusedError, FileNotFoundError, socket.timeout, OSError):
+        return True
+    finally:
+        probe.close()
+    return False
+
+
+def sweep_dead_daemon_sockets(keep: str) -> list[str]:
+    """Remove daemon socket files left behind by daemons that are gone.
+
+    Digest keying costs the one self-healing property the single fixed name
+    had: a crashed daemon's file used to be reclaimed by the next one, because
+    the next one wanted the same name. Now every schema change mints a new
+    name, so a daemon killed rather than stopped leaves a file nobody will ever
+    ask for again, and the runtime directory grows by one for every build that
+    ever died badly.
+
+    Sweeping on startup is the cheapest place to do it: a daemon coming up is
+    already the newest thing here, and a file it can connect to belongs to a
+    daemon still serving somebody — those are left alone.
+    """
+    removed: list[str] = []
+    directory = socket_directory()
+    for name in sorted(os.listdir(directory)):
+        if not name.startswith(f"{DAEMON_SESSION}-") or not name.endswith(".sock"):
+            continue
+        path = os.path.join(directory, name)
+        if os.path.abspath(path) == os.path.abspath(keep):
+            continue
+        try:
+            if not stat.S_ISSOCK(os.stat(path).st_mode):
+                continue
+            if _nothing_is_listening(path):
+                os.unlink(path)
+                removed.append(path)
+        except FileNotFoundError:
+            continue
+    return removed
 
 
 class JsonRpcServer:
@@ -118,6 +176,11 @@ class JsonRpcServer:
     @property
     def methods(self) -> list[str]:
         return sorted(self._handlers)
+
+    @property
+    def connection_count(self) -> int:
+        with self._lock:
+            return len(self._connections)
 
     def _reclaim_socket_path(self) -> None:
         """Replace a stale socket file rather than inheriting it.
@@ -204,6 +267,7 @@ class JsonRpcServer:
             # back to release anything, and an element owned by a process that
             # no longer exists is owned for the rest of the session.
             holds.release_all(client_id)
+            send_gate.release_client(client_id)
             with self._lock:
                 self._connections.discard(conn)
             try:

@@ -31,11 +31,15 @@ and the human, where it belongs.
 
 from __future__ import annotations
 
+import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 
-from . import protocol_generated
-from .errors import PermissionDenied, SessionExpired
+from . import attestation, protocol_generated
+from .errors import DesktopError, ErrorCode, PermissionDenied, SessionExpired
+
+log = logging.getLogger(__name__)
 
 #: Taken from the generated protocol rather than typed here. Written by hand
 #: this list grew a `focus` class the schema has never had, which would have
@@ -56,6 +60,48 @@ CONFIRM_BY_DEFAULT: frozenset[str] = frozenset({"submit", "destructive"})
 #: How long a grant lasts without use. A grant that never expires is a grant
 #: nobody remembers giving.
 DEFAULT_IDLE_EXPIRY_SECONDS = 30 * 60
+
+
+def severity_of(classes) -> dict:
+    """How much damage a mistake with these classes can cause.
+
+    rank is the ordinal of the highest held class in OPERATION_CLASSES
+    (observe=0 … destructive=4) — the severity ladder the class list already
+    encodes. irreversible is True when any held class is in
+    CONFIRM_BY_DEFAULT, the ones a confirm dialog was born for. Both are
+    facts about the classes held, not opinions about which model should hold
+    them.
+    """
+    held = [c for c in OPERATION_CLASSES if c in classes]
+    rank = OPERATION_CLASSES.index(held[-1]) if held else 0
+    irreversible = bool(set(classes) & CONFIRM_BY_DEFAULT)
+    return {"rank": rank, "irreversible": irreversible}
+
+
+def breadth_of(grant: "Grant", ceiling: "Ceiling") -> dict:
+    """How wide a net this grant casts.
+
+    applications is the count of distinct application identities the grant
+    could act against. anchors is the count of element-anchored permissions
+    hung on the grant (A15) — each one is a separate place to keep track of,
+    so it counts toward the same spread the applications do.
+
+    A grant that names no applications inherits the ceiling's list, and a
+    ceiling that names none means every application there is. Reporting that
+    as zero would read as the narrowest possible scope when it is the widest
+    one available, so it is counted and flagged rather than summed: the count
+    is what is nameable, `unbounded` is the warning that the real number is
+    however many applications happen to be running.
+    """
+    anchors = len(grant.anchors)
+    apps = set(grant.applications) | set(grant.per_application.keys())
+    if apps:
+        return {"applications": len(apps), "anchors": anchors, "unbounded": False}
+    return {
+        "applications": len(ceiling.applications),
+        "anchors": anchors,
+        "unbounded": not ceiling.applications,
+    }
 
 
 class ScopeError(PermissionDenied):
@@ -153,6 +199,50 @@ def _normalise(names) -> set[str]:
     return {str(name).strip().casefold() for name in names or () if str(name).strip()}
 
 
+#: The prefixes the backend mints ids with. An anchor whose target carries one
+#: is matched exactly: an id is minted rather than typed, so a substring of one
+#: is a coincidence and never an intention. Anything else is an application
+#: name, matched as a substring — which is how applications are named
+#: everywhere else in this file, and in the configuration the ceiling reads.
+_MINTED_PREFIXES: tuple[str, ...] = ("el-", "win-", "app-")
+
+
+@dataclass(frozen=True)
+class Anchor:
+    """A place in the tree, and what may be done there.
+
+    An application is one place a permission can hang, but it is not the only
+    one, and it is rarely the one a task means. "Fill in this form" is a
+    sentence about a form, and expressing it as "edit anything in the browser"
+    is a widening the task never asked for. An anchor lets the grant say the
+    narrow thing: this window, this element, and — if `covers_descendants` —
+    what is inside it.
+    """
+
+    target: str
+    classes: frozenset[str] = frozenset()
+    #: Whether this anchor speaks for the subtree under it, or only for the one
+    #: node it names. Off by default: a grant on a single field that silently
+    #: reached everything beneath it would be the widening anchors exist to
+    #: prevent, and a form has fields inside fields.
+    covers_descendants: bool = False
+
+    def covers(self, identifier: str, *, descendant: bool) -> bool:
+        if descendant and not self.covers_descendants:
+            return False
+        target = self.target.strip().casefold()
+        if not target:
+            return False
+        if target.startswith(_MINTED_PREFIXES):
+            return target == identifier
+        # A typed name never matches a minted id, even as a substring of one.
+        # The ancestry carries both, and an application named "win" would
+        # otherwise cover every window on the desktop by spelling.
+        if identifier.startswith(_MINTED_PREFIXES):
+            return False
+        return target in identifier
+
+
 @dataclass
 class Grant:
     """What one client currently holds. Mutable, because it expires."""
@@ -168,6 +258,10 @@ class Grant:
     #: An entry here replaces `classes` for calls against that application rather
     #: than adding to it, so the narrow answer wins where there is one.
     per_application: dict[str, frozenset[str]] = field(default_factory=dict)
+    #: Places in the tree this grant hangs on, nearest-wins. The generalisation
+    #: of `per_application`: an application is the outermost anchor there is,
+    #: and everything narrower than one used to have nowhere to be written down.
+    anchors: tuple[Anchor, ...] = ()
     granted_at: float = 0.0
     last_used_at: float = 0.0
     #: How long the grant survives *without use*. Idle expiry, not a lifetime:
@@ -176,6 +270,13 @@ class Grant:
     #: the difference halfway through a sentence.
     idle_seconds: float = 0.0
     reason: str = ""
+    #: The criteria a commit made under this grant is judged against, declared
+    #: here rather than at the call for the same reason the scope is: the thing
+    #: being judged does not write its own rubric. A worker cannot reach this —
+    #: it is set when the door is opened, by whoever opened it — and the
+    #: service's mechanical criteria are evaluated on top of it regardless, so
+    #: declaring nothing weakens nothing.
+    criteria: tuple[str, ...] = ()
 
     def is_expired(self, now: float) -> bool:
         return bool(self.idle_seconds) and (now - self.last_used_at) >= self.idle_seconds
@@ -204,6 +305,82 @@ class Grant:
             return None
         return self.classes
 
+    def classes_at(self, ancestry) -> frozenset[str] | None:
+        """What this client holds at a place in the tree, or None if it holds nothing.
+
+        `ancestry` runs nearest-first: the target itself, then its parents, then
+        the window, then the application. The nearest anchor covering the target
+        wins, which is the rule filesystem permissions have used for decades —
+        an entry deeper in the tree is a more specific statement than one above
+        it, and the more specific statement is the one that was meant. So a
+        subtree granted observe with one field inside it granted edit composes
+        without either rule having to know about the other: the field is nearer.
+
+        The target itself is covered by an anchor naming it whether or not that
+        anchor covers descendants — an anchor on a node always speaks for that
+        node. Only the walk upward asks about descendants.
+
+        None is a refusal, for the same reason `hand_in` refuses an unnamed
+        application: a grant that named the places it applies to has said what it
+        does not cover, and falling back to the general hand outside them would
+        make the anchor a suggestion.
+        """
+        for step, identifier in enumerate(ancestry):
+            name = str(identifier).strip().casefold()
+            if not name:
+                continue
+            for anchor in self.anchors:
+                if anchor.covers(name, descendant=step > 0):
+                    return anchor.classes | DEFAULT_CLASSES
+        return None
+
+    def classes_anywhere(self) -> frozenset[str]:
+        """Everything this grant permits at any of the places it hangs.
+
+        For the one call that has no place of its own: a batch reaches the
+        desktop only through its steps, and each step is checked at its own
+        place before any of them runs. Asking the batch itself "may you submit
+        here" has no *here* to answer about, and answering from the general hand
+        would refuse every batch an anchored grant could ever legitimately
+        make — which would push clients back to asking for the class across the
+        whole desktop, the widening anchors exist to avoid.
+
+        It is a gate rather than the decision: passing it says only that this
+        grant submits somewhere. Where, is a question the steps answer.
+        """
+        return self.classes.union(*(anchor.classes for anchor in self.anchors))
+
+
+class AnchorUnresolved(DesktopError):
+    """A grant hung on a place that is no longer there.
+
+    Not a permission answer, which is the point. The client asked to act
+    somewhere its grant no longer describes, and the honest report is that the
+    reference died rather than that the action was refused: one of those is
+    fixed by re-reading the window and asking again, and the other is not. It
+    reuses the stale-reference code because that is the same event a stale
+    element id reports, and the client already knows how to recover from it.
+    """
+
+    def __init__(self, target: str, ambiguous: bool = False) -> None:
+        why = (
+            "it now matches more than one thing, so which one it meant is no longer knowable"
+            if ambiguous
+            else "the place it named is no longer there"
+        )
+        super().__init__(
+            ErrorCode.ELEMENT_REFERENCE_STALE,
+            f"This client's grant is anchored to {target!r}, and {why}. "
+            "An anchor that cannot be resolved grants nothing.",
+            {
+                "anchor": target,
+                "hint": (
+                    "Re-read the window and ask for the scope again against what is "
+                    "there now. Nothing was revoked; the tree moved."
+                ),
+            },
+        )
+
 
 @dataclass(frozen=True)
 class Decision:
@@ -220,10 +397,32 @@ class Decision:
     client_id: str
     reason: str
     application: str = ""
+    #: When set, the denial is raised as this error code instead of
+    #: PERMISSION_DENIED. An out-of-scope application must be indistinguishable
+    #: from one that was never real: a refusal names the thing refused, and
+    #: naming it confirms it exists. The disguise carries a generic message so
+    #: neither the error code nor its text leaks the target.
+    disguised_as: str = ""
+    #: The answer the *client author* gets: the application, and which rule
+    #: refused. It goes to the service's own log, which is the one channel the
+    #: agent has no method for — `auditTail` is a tool, and a diagnostic written
+    #: there would be the leak this disguise exists to close. Without this, a
+    #: developer whose config is wrong sees an agent reporting that their
+    #: browser does not exist, and nothing anywhere says otherwise.
+    diagnostic: str = ""
 
     def raise_for_denial(self, ceiling: Ceiling, granted: frozenset[str]) -> None:
         if self.allowed:
             return
+        if self.disguised_as:
+            if self.diagnostic:
+                log.warning(
+                    "refused %s for client %r and told it nothing exists: %s",
+                    self.method,
+                    self.client_id,
+                    self.diagnostic,
+                )
+            raise DesktopError(self.disguised_as, self.reason, {})
         raise PermissionDenied(
             self.reason,
             method=self.method,
@@ -270,8 +469,10 @@ class Consent:
         classes,
         applications=(),
         per_application: dict[str, object] | None = None,
+        anchors=(),
         seconds: float | None = None,
         reason: str = "",
+        criteria: Sequence[str] = (),
     ) -> Grant:
         """Narrow a client's hand within the ceiling. Never widen the ceiling.
 
@@ -293,10 +494,34 @@ class Consent:
             for app, app_classes in (per_application or {}).items()
             if str(app).strip()
         }
+        hung = tuple(
+            Anchor(
+                target=str(anchor.target).strip().casefold(),
+                classes=frozenset(_normalise(anchor.classes)),
+                covers_descendants=bool(anchor.covers_descendants),
+            )
+            for anchor in anchors or ()
+        )
+        if any(not anchor.target for anchor in hung):
+            raise ScopeError(
+                "An anchor must name the place it hangs on.",
+                method="grantScope",
+                remedy=(
+                    "Give each anchor a target: an element id, a window id, or an "
+                    "application name. An anchor that names nothing covers nothing, "
+                    "and a grant that appears to have been issued and then refuses "
+                    "everything it covers is a grant somebody debugs for an hour."
+                ),
+            )
         # Every class named anywhere in this grant faces the ceiling, including
-        # the ones only named against a single application. A per-application
-        # entry is a narrowing device, never a side door around the ceiling.
-        wanted = frozenset(_normalise(classes)) | frozenset().union(*scoped.values(), frozenset())
+        # the ones only named against a single application or a single element.
+        # A per-application entry and an anchor are both narrowing devices,
+        # never side doors around the ceiling.
+        wanted = (
+            frozenset(_normalise(classes))
+            | frozenset().union(*scoped.values(), frozenset())
+            | frozenset().union(*(anchor.classes for anchor in hung), frozenset())
+        )
         unknown = wanted - set(OPERATION_CLASSES)
         if unknown:
             raise ScopeError(
@@ -315,7 +540,22 @@ class Consent:
                 remedy=self._ceiling.how_to_raise,
             )
         apps = frozenset(_normalise(applications)) | frozenset(scoped)
-        refused = {app for app in apps if not self._ceiling.permits_application(app)}
+        # An anchor that names an application faces the same door as any other
+        # way of naming one. An anchor onto an id cannot be checked here — the
+        # id means nothing without the tree, and resolving it at grant time
+        # would answer a question about a desktop that may have moved on by the
+        # time the grant is used. That one is caught where it matters: `decide`
+        # puts the target's own application against the ceiling before it ever
+        # looks at an anchor, so no anchor reaches into a walled-off
+        # application no matter what it names.
+        named = {
+            anchor.target
+            for anchor in hung
+            if not anchor.target.startswith(_MINTED_PREFIXES)
+        }
+        refused = {
+            app for app in apps | named if not self._ceiling.permits_application(app)
+        }
         if refused:
             raise ScopeError(
                 f"This desktop's configuration does not allow acting on: {', '.join(sorted(refused))}",
@@ -328,13 +568,28 @@ class Consent:
             classes=frozenset(_normalise(classes)) | DEFAULT_CLASSES,
             applications=apps,
             per_application=scoped,
+            anchors=hung,
             granted_at=now,
             last_used_at=now,
             idle_seconds=window,
             reason=reason,
+            criteria=tuple(
+                str(name).strip()
+                for name in (criteria or ())
+                if str(name).strip()
+            ),
         )
         self._grants[client_id] = issued
         return issued
+
+    def criteria_for(self, client_id: str) -> tuple[attestation.Criterion, ...]:
+        """The rubric declared for this client, mechanical criteria included.
+
+        A client with no grant gets the mechanical set, which is the honest
+        answer: the questions the service can decide alone are asked of every
+        commit, and holding no grant is not a reason to ask fewer of them.
+        """
+        return attestation.resolve(self.grant_of(client_id).criteria)
 
     def revoke(self, client_id: str) -> None:
         self._grants.pop(client_id, None)
@@ -369,6 +624,29 @@ class Consent:
         self._stopped = False
         self._stopped_reason = ""
 
+    @staticmethod
+    def _refuse_dead_anchors(grant: Grant, anchor_lives) -> None:
+        """Raise if any anchor this grant hangs on has stopped resolving.
+
+        Asked in tree order rather than grant order is not worth the
+        complication: a grant hangs on a handful of places, and the first dead
+        one is enough to say the grant no longer describes the desktop it was
+        issued against.
+        """
+        if anchor_lives is None:
+            return
+        for anchor in grant.anchors:
+            alive = anchor_lives(anchor.target)
+            if alive is None:
+                # None is the answer `rediscover` gives when two things match:
+                # a reference that could mean either is not a reference. It is
+                # treated as unresolved rather than resolved-to-one, because
+                # handing back "one of them" is how a permission ends up
+                # applied to the wrong field.
+                raise AnchorUnresolved(anchor.target, ambiguous=True)
+            if not alive:
+                raise AnchorUnresolved(anchor.target)
+
     def decide(
         self,
         *,
@@ -376,6 +654,10 @@ class Consent:
         operation_class: str,
         client_id: str,
         application: str = "",
+        ancestry=(),
+        names_a_place: bool = False,
+        anchor_lives=None,
+        reaches_through_steps: bool = False,
         confirmed: bool = False,
     ) -> Decision:
         """Whether this call may proceed, and why.
@@ -384,9 +666,24 @@ class Consent:
         against a blocked application: a window the user has walled off is not
         visible, rather than visible-but-unactionable. Reading a password
         manager's window is the thing being prevented, not clicking in it.
+
+        `ancestry` is where the target sits in the tree, nearest-first, and is
+        consulted only by a grant that hung itself somewhere — a grant with no
+        anchors costs exactly what it cost before. `names_a_place` says the call
+        was about somewhere rather than about the desktop, and is separate from
+        the ancestry because a target that named a place and could not be found
+        in the tree must not be answered as though it had named none.
+        `anchor_lives` answers
+        whether a target still resolves; it is asked for only when a grant with
+        anchors covers nothing here, which is the one case where the difference
+        between "not allowed there" and "there is gone" changes the answer.
+        `reaches_through_steps` marks the call that has no place of its own
+        because it carries other calls inside it.
         """
         allow = lambda reason: Decision(True, method, operation_class, client_id, reason, application)
-        deny = lambda reason: Decision(False, method, operation_class, client_id, reason, application)
+        deny = lambda reason, disguised_as="", diagnostic="": Decision(
+            False, method, operation_class, client_id, reason, application, disguised_as, diagnostic
+        )
 
         if self._stopped and operation_class != "observe":
             return deny(
@@ -395,7 +692,11 @@ class Consent:
             )
         if application and not self._ceiling.permits_application(application):
             return deny(
-                f"This desktop's configuration does not expose {application!r} to a client."
+                "No application matching that target was found.",
+                disguised_as=ErrorCode.APPLICATION_NOT_FOUND,
+                diagnostic=(
+                    f"this desktop's configuration does not expose {application!r} to any client"
+                ),
             )
 
         grant = self._grants.get(client_id)
@@ -411,13 +712,47 @@ class Consent:
                     remedy="Call grantScope. Nothing was revoked in anger — it simply timed out.",
                 )
         # What is held here, rather than what is held in general: a grant can say
-        # different things about different applications, and the question is
-        # always about the one being touched.
-        held = grant.hand_in(application) if grant else DEFAULT_CLASSES
+        # different things about different places, and the question is always
+        # about the one being touched.
+        # A call is about a place if the tree could put it in one, or if it named
+        # one the tree could not find — the second is not the same as a call
+        # about the desktop, and must not be answered as though it were.
+        about_a_place = bool(ancestry) or names_a_place
+        if grant and grant.anchors and reaches_through_steps and not about_a_place:
+            # A batch names no place of its own. Its steps do, and every one of
+            # them is decided here too, at its own place, before any of them
+            # runs.
+            held = grant.classes_anywhere()
+        elif grant and grant.anchors and about_a_place:
+            # An empty ancestry here is a target the tree could not place, which
+            # is not the same as a target nothing covers — but it is answered
+            # the same way, because an anchored grant that cannot be told where
+            # it is being used has nothing to say except no.
+            held = grant.classes_at(ancestry)
+            if held is None:
+                # Before refusing, find out whether there is anything left to
+                # refuse. A grant anchored to a dialog that has since closed
+                # would otherwise report a permission problem for the rest of
+                # the session, and the client would ask for the same scope again
+                # and be refused again, because the answer it needed was that
+                # the place is gone.
+                self._refuse_dead_anchors(grant, anchor_lives)
+                return deny(
+                    f"{method} is a {operation_class!r} operation and this client's "
+                    "grant does not hang anywhere over this target. It is anchored to "
+                    f"{', '.join(sorted(anchor.target for anchor in grant.anchors))}."
+                )
+        else:
+            held = grant.hand_in(application) if grant else DEFAULT_CLASSES
         if held is None:
             covers = sorted(grant.per_application) or sorted(grant.applications)
             return deny(
-                f"This client's grant covers {', '.join(covers)}, not {application!r}."
+                "No application matching that target was found.",
+                disguised_as=ErrorCode.APPLICATION_NOT_FOUND,
+                diagnostic=(
+                    f"this client's grant covers {', '.join(covers) or 'nothing'}, "
+                    f"not {application!r}"
+                ),
             )
 
         if operation_class not in held:

@@ -21,6 +21,7 @@ from typing import Any
 from . import (
     actions,
     attention,
+    attestation,
     audit,
     cadence,
     capabilities,
@@ -29,18 +30,21 @@ from . import (
     holds,
     identity,
     inspect as inspection,
+    model,
     policy,
     presence,
     protocol_generated,
     redaction,
     security,
+    send_gate,
     state,
+    subscriptions,
     waitfor,
     watch,
 )
 from .backends import atspi, capture, launcher, loop, session_env, x11
 from .errors import DesktopError, ErrorCode, InvalidParams
-from .registry import ElementRegistry
+from .registry import ElementRegistry, ElementReferenceStale
 from .session import Session
 from . import transport
 from .transport import JsonRpcServer, default_socket_path
@@ -62,6 +66,15 @@ _session = Session()
 #: so the caller receives a structured TIMEOUT naming what timed out.
 WALK_TIMEOUT_SECONDS = 15.0
 SINGLE_ELEMENT_TIMEOUT_SECONDS = 10.0
+
+#: Expansion runs inside ``query()`` under this soft deadline, which is checked
+#: between describe calls rather than by the loop timeout: ``call_on_loop``
+#: destroys the source on expiry (loop.py:188-191), which would lose the partial
+#: answer. Twelve seconds leaves three seconds of margin under the 15s hard
+#: backstop and eight under the client's 20s request timeout.
+EXPANSION_BUDGET_SECONDS = 12.0
+MAX_SIBLINGS_PER_HIT = 10
+MAX_EXPAND_NODES = 2000
 
 
 def _require_window(window_id: str):
@@ -98,6 +111,31 @@ def _int_param(params: dict[str, Any], key: str, default: int, maximum: int) -> 
         raise InvalidParams(f"{key!r} must be at least 1", {"parameter": key, "received": value})
     # Clamped rather than rejected: a caller asking for too much gets a bounded
     # answer plus the truncation marker, which is more useful than an error.
+    return min(value, maximum)
+
+
+def _bool_param(params: dict[str, Any], key: str, default: bool = False) -> bool:
+    value = params.get(key, default)
+    if not isinstance(value, bool):
+        raise InvalidParams(
+            f"{key!r} must be a boolean", {"parameter": key, "received": type(value).__name__}
+        )
+    return value
+
+
+def _optional_int_param(
+    params: dict[str, Any], key: str, maximum: int
+) -> int:
+    """An integer that defaults to 0 (off) and rejects out-of-range values."""
+    value = params.get(key, 0)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise InvalidParams(
+            f"{key!r} must be an integer", {"parameter": key, "received": type(value).__name__}
+        )
+    if value < 0:
+        raise InvalidParams(
+            f"{key!r} must be at least 0", {"parameter": key, "received": value}
+        )
     return min(value, maximum)
 
 
@@ -284,6 +322,10 @@ def _method_query_elements(params: dict[str, Any]) -> dict[str, Any]:
             {"parameters": ["role", "name", "states"]},
         )
     limit = _int_param(params, "limit", 50, MAX_QUERY_LIMIT)
+    ancestors = _optional_int_param(params, "ancestors", inspection.MAX_ANCESTORS)
+    descendants = _optional_int_param(params, "descendants", inspection.MAX_DESCENDANTS)
+    siblings = _bool_param(params, "siblings", False)
+    wants_expansion = ancestors > 0 or descendants > 0 or siblings
 
     def work():
         window = _require_window(window_id)
@@ -291,10 +333,19 @@ def _method_query_elements(params: dict[str, Any]) -> dict[str, Any]:
             window,
             describe=atspi.describe,
             children=atspi.children_of,
+            parent_of=atspi.parent_of if wants_expansion else None,
             role=role,
             name=name,
             states=states,
             limit=limit,
+            ancestors=ancestors,
+            descendants=descendants,
+            siblings=siblings,
+            max_expand_nodes=MAX_EXPAND_NODES,
+            max_siblings_per_hit=MAX_SIBLINGS_PER_HIT,
+            deadline=time.monotonic() + EXPANSION_BUDGET_SECONDS
+            if wants_expansion
+            else None,
         )
 
     found = loop.call_on_loop(work, timeout=WALK_TIMEOUT_SECONDS)
@@ -304,6 +355,7 @@ def _method_query_elements(params: dict[str, Any]) -> dict[str, Any]:
         "matchCount": len(found.matches),
         "searchTruncated": found.truncated,
         "moreResults": found.more,
+        "neighbourhoodTruncated": found.neighbourhood_truncated,
         "revision": revision,
         "backend": atspi.BACKEND_NAME,
     }
@@ -436,6 +488,59 @@ _deltas = deltas.DeltaEngine(_action_log, advance=_registry.bump)
 VALUE_WATCH_LIMIT = 16
 
 
+def _probe_stale_subscriptions(
+    previous: state.Snapshot, current: state.Snapshot
+) -> list[dict[str, Any]]:
+    """Detect subscribed elements that have gone since the last sample.
+
+    Only ids present in the previous snapshot but absent from the current one
+    are candidates — probing an element on its first sighting would report
+    'gone' for something that was merely slow to arrive. The probe resolves
+    the ambiguity the diff engine refuses to: ``sample_values`` returns empty
+    for both unreachable and never-touched elements, but the registry's
+    fingerprint check fails only when the element has actually changed identity
+    or become unreachable.
+    """
+    subscribed = subscriptions.all_ids()
+    if not subscribed:
+        return []
+
+    candidates = [
+        eid for eid in subscribed
+        if eid in previous.values and eid not in current.values
+    ]
+    if not candidates:
+        return []
+
+    stale: list[dict[str, Any]] = []
+    for eid in candidates:
+        gone = False
+        try:
+            _registry.resolve(eid)
+            if atspi.lookup(eid) is None:
+                gone = True
+        except ElementReferenceStale:
+            gone = True
+
+        if gone:
+            owner = current.owners.get(eid) or previous.owners.get(eid) or ("", "")
+            stale.append(
+                {
+                    "kind": "element-stale",
+                    "elementId": eid,
+                    "applicationId": owner[0] or None,
+                    "applicationName": owner[1] or None,
+                    "summary": model.egress_value(
+                        "a subscribed element is no longer reachable",
+                        field=model.SUMMARY,
+                        element_id=eid,
+                    ),
+                }
+            )
+            subscriptions.purge(eid)
+    return stale
+
+
 def _observe() -> tuple[state.Snapshot, list[dict[str, Any]]]:
     """Look at the desktop once, fold it in, and report what that changed.
 
@@ -448,15 +553,30 @@ def _observe() -> tuple[state.Snapshot, list[dict[str, Any]]]:
     empty list of effects. Both halves of that sentence were true and together they read
     as a lie — the field really had changed, and the only way to know it was to read the
     value back by hand.
+
+    The watch set is the union of the recency heuristic and declared subscriptions: an
+    element somebody subscribed to is sampled regardless of how recently it was touched,
+    because a declared intent outranks a heuristic. A subscribed element that was sampled
+    before but is missing now may have gone, and is probed rather than left to silence.
     """
-    watched = _registry.recent(VALUE_WATCH_LIMIT, roles=atspi.TEXT_VALUE_ROLES)
+    watched = list(
+        set(_registry.recent(VALUE_WATCH_LIMIT, roles=atspi.TEXT_VALUE_ROLES))
+        | subscriptions.all_ids()
+    )
 
     def look():
         return atspi.list_windows(), atspi.sample_values(watched), atspi.owners_of(watched)
 
+    previous = _deltas.current
     windows, values, owners = loop.call_on_loop(look, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
     snapshot = state.snapshot_from_windows(_registry.revision, windows, values, owners)
-    return snapshot, _deltas.observe(snapshot)
+    changes = _deltas.observe(snapshot)
+
+    stale = _probe_stale_subscriptions(previous, _deltas.current)
+    if stale:
+        changes.extend(_deltas.report(stale))
+
+    return _deltas.current, changes
 
 
 def _snapshot() -> state.Snapshot:
@@ -1164,6 +1284,192 @@ def _method_perform_actions(params: dict[str, Any]) -> dict[str, Any]:
     return {**outcome, "revision": _registry.revision}
 
 
+def _method_attest_element(params: dict[str, Any]) -> dict[str, Any]:
+    """Snapshot a field's contents so a later commit can prove they have not moved.
+
+    The evidence is the field's own text read by the service, stored in the send
+    gate under the caller's identity. The text never leaves the register except
+    through redeem, and is never written to any persistent sink. A field whose
+    contents even the accessibility layer cannot read — password bullets — has
+    nothing to attest against, and is refused rather than recording a mask that
+    no honest comparison could match.
+    """
+    element_id = _str_param(params, "elementId", required=True)
+
+    def read_text() -> str | None:
+        obj = _resolve_element(element_id)
+        return atspi.read_for_attest(obj)
+
+    text = loop.call_on_loop(read_text, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
+    if text is None:
+        raise DesktopError(
+            ErrorCode.ACTION_NOT_SUPPORTED,
+            f"Element {element_id!r} masks its contents or has no readable text, "
+            "so there is nothing to attest that a later commit could compare against.",
+            {"elementId": element_id},
+        )
+
+    attestation_id, expires_in_ms = send_gate.attest(
+        client_id=_client_id(params),
+        element_id=element_id,
+        text=text,
+        revision=_registry.revision,
+    )
+    return {"attestationId": attestation_id, "expiresInMs": expires_in_ms}
+
+
+def _method_commit_element(params: dict[str, Any]) -> dict[str, Any]:
+    """Send what was attested.
+
+    Re-reads the field and refuses if it no longer matches what attestElement
+    recorded. If it matches, triggers the element's own action. Success is
+    asserted from the observed effect — the field is now empty, meaning it
+    transmitted — not from the action call returning true. A field that the
+    action was called on but which still contains its contents afterwards is a
+    commit that did not send, reported as failure regardless of what the action
+    call returned.
+    """
+    element_id = _str_param(params, "elementId", required=True)
+    attestation_id = _str_param(params, "attestationId", required=True)
+    action_name = _str_param(params, "action")
+
+    # Redeem before anything else: one attestation admits one commit, and a
+    # verification failure spends it too, because the caller must re-attest
+    # regardless of why the field moved.
+    expected_text, proof_revision = send_gate.redeem(
+        client_id=_client_id(params),
+        attestation_id=attestation_id,
+        element_id=element_id,
+    )
+
+    # The rubric this commit is judged against, declared on the grant by the
+    # client that holds the door. The worker cannot reach it: it arrives from
+    # the grant register keyed on the connection's issued identity, and the
+    # mechanical criteria are added on top whatever it says.
+    criteria = _consent.criteria_for(_client_id(params))
+
+    def judge(*, target_resolved: bool, contents_match: bool | None) -> attestation.Verdict:
+        """Assemble the proof from what the service saw, and grade it.
+
+        Called on the refusal paths as well as the successful one, because a
+        commit that was refused is exactly the commit a reviewer most needs the
+        verdict for. A refusal recorded without its reasons is a refusal
+        somebody has to reconstruct from the message text.
+        """
+        return attestation.evaluate(
+            criteria,
+            attestation.Observed(
+                target_resolved=target_resolved,
+                contents_match=contents_match,
+                proof_revision=proof_revision,
+                commit_revision=_registry.revision,
+                # Asked as this client, so that the field this client itself
+                # typed into does not read as somebody else's interference.
+                # Whose change it was is the delta engine's answer, not a
+                # second opinion formed here.
+                movement=attestation.movement(
+                    element_id,
+                    _deltas.since(proof_revision, asking_client=_client_id(params)),
+                ),
+            ),
+        )
+
+    def verify_and_act() -> bool:
+        def work() -> bool:
+            try:
+                obj = _resolve_element(element_id)
+            except DesktopError:
+                _record_attestation(judge(target_resolved=False, contents_match=None))
+                raise
+            current = atspi.read_for_attest(obj)
+            verdict = judge(
+                target_resolved=True,
+                contents_match=None if current is None else current == expected_text,
+            )
+            _record_attestation(verdict)
+            if not verdict.clean:
+                failed = verdict.failures
+                raise DesktopError(
+                    ErrorCode.ATTESTATION_STALE
+                    if any(
+                        result.criterion.name
+                        == attestation.UNCHANGED_SINCE_PROOF.name
+                        for result in failed
+                    )
+                    else ErrorCode.ATTESTATION_FAILED,
+                    f"Refusing to commit {element_id!r}: "
+                    + "; ".join(
+                        f"{result.criterion.name} {result.verdict}"
+                        + (f" ({result.detail})" if result.detail else "")
+                        for result in failed
+                    )
+                    + ". What would be sent is not what was approved. "
+                    "Re-attest and commit again.",
+                    {
+                        "elementId": element_id,
+                        "attestationId": attestation_id,
+                        "criteria": [
+                            {"name": r.criterion.name, "verdict": r.verdict}
+                            for r in verdict.results
+                        ],
+                    },
+                )
+            available = atspi.actions_of(obj)
+            chosen = action_name or (available[0] if available else "")
+            if not chosen:
+                raise DesktopError(
+                    ErrorCode.ACTION_NOT_SUPPORTED,
+                    f"Element {element_id!r} exposes no action to commit with.",
+                    {"elementId": element_id, "availableActions": available},
+                )
+            if chosen not in available:
+                raise DesktopError(
+                    ErrorCode.ACTION_NOT_SUPPORTED,
+                    f"Element {element_id!r} does not expose an action named "
+                    f"{chosen!r}",
+                    {"elementId": element_id, "availableActions": available},
+                )
+            return atspi.do_action(obj, chosen)
+
+        return loop.call_on_loop(work, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
+
+    result = actions.perform(
+        "commitElement",
+        element_id,
+        [actions.Attempt("accessibility", verify_and_act)],
+        _snapshot,
+        _action_log,
+        client_id=_client_id(params),
+        scope=_element_scope(element_id),
+        **_settle_bounds(params),
+    )
+
+    # The action call returned; now verify the effect. The one thing that
+    # matters is whether the field actually transmitted: a composer that is now
+    # empty sent its message, and one that still holds its contents did not —
+    # regardless of what do_action returned. The "4" foot-gun lives here: the
+    # synth reported success, the field was not cleared, and only an effect
+    # check catches it.
+    if result.get("ok"):
+
+        def read_after() -> str | None:
+            obj = _resolve_element(element_id)
+            return atspi.read_for_attest(obj)
+
+        remaining = loop.call_on_loop(read_after, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
+        if remaining:
+            result["ok"] = False
+            result["progress"] = {
+                "effect": "field-still-populated",
+                "detail": (
+                    "The action call returned successfully but the field still "
+                    "contains its contents. The message may not have transmitted."
+                ),
+            }
+
+    return result
+
+
 def _method_wait_for(params: dict[str, Any]) -> dict[str, Any]:
     condition = waitfor.Condition(
         kind=_str_param(params, "condition", required=True),
@@ -1306,10 +1612,14 @@ def _method_capture_window(params: dict[str, Any]) -> dict[str, Any]:
 
     refusal = policy.capture_refusal(application_name)
     if refusal:
+        # The agent is told the window is not there. The developer who wrote the
+        # blocklist is told which rule fired, on the one channel no tool reads.
+        log.warning("refused captureWindow %r and told the caller nothing exists: %s",
+                    window_id, refusal)
         raise DesktopError(
-            ErrorCode.PERMISSION_DENIED,
-            refusal,
-            {"windowId": window_id, "hint": "the blocklist is configuration, not a request"},
+            ErrorCode.APPLICATION_NOT_FOUND,
+            "No application matching that target was found.",
+            {"windowId": window_id},
         )
 
     if xid <= 0:
@@ -1364,14 +1674,49 @@ def _method_grant_scope(params: dict[str, Any]) -> dict[str, Any]:
         _client_id(params),
         classes=classes,
         applications=params.get("applications") or (),
+        anchors=[
+            security.Anchor(
+                target=anchor.get("target") or "",
+                classes=frozenset(anchor.get("operationClasses") or ()),
+                covers_descendants=bool(anchor.get("coversDescendants")),
+            )
+            for anchor in params.get("anchors") or ()
+            if isinstance(anchor, dict)
+        ],
         seconds=params.get("seconds"),
         reason=params.get("reason") or "",
+        criteria=params.get("criteria") or (),
     )
+    # Severity is over the union of every class held anywhere in the grant,
+    # general and per-application alike: a submit in one app is still a submit.
+    all_classes = grant.classes | {
+        c for classes in grant.per_application.values() for c in classes
+    }
     return {
         "operationClasses": sorted(grant.classes),
         "applications": sorted(grant.applications),
+        # Returned rather than assumed: a client that asked for three anchors
+        # and got two back has learned something a silent success would have
+        # cost it an afternoon to find out.
+        "anchors": [
+            {
+                "target": anchor.target,
+                "operationClasses": sorted(anchor.classes),
+                "coversDescendants": anchor.covers_descendants,
+            }
+            for anchor in grant.anchors
+        ],
+        # The whole rubric, not the part that was asked for. A client that
+        # declared nothing still learns which questions its commits will face,
+        # which is the difference between a rubric and a surprise.
+        "criteria": [
+            criterion.name
+            for criterion in _consent.criteria_for(_client_id(params))
+        ],
         "expiresInSeconds": int(grant.idle_seconds),
         "ceiling": sorted(_consent.ceiling.classes),
+        "severity": security.severity_of(all_classes),
+        "breadth": security.breadth_of(grant, _consent.ceiling),
     }
 
 
@@ -1598,6 +1943,34 @@ def _method_release_element(params: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _method_subscribe_element(params: dict[str, Any]) -> dict[str, Any]:
+    """Declare that this connection wants to be told about this element.
+
+    A subscription is an observation claim, not a write claim: it changes who is
+    watching, not who may touch. Subscribing to an id that names nothing is an
+    unkeepable promise, so the element is resolved first — the way a claim is.
+
+    Over the ceiling is a refusal that names the ceiling, never a silent
+    truncation: a service that accepted a thousand subscriptions and quietly
+    sampled the first sixteen would have reinvented the bug this method exists
+    to fix.
+    """
+    _resolve_element(_str_param(params, "elementId"))
+    subscriptions.declare(_client_id(params), _str_param(params, "elementId"))
+    return {"subscribed": True, "revision": _registry.revision}
+
+
+def _method_unsubscribe_element(params: dict[str, Any]) -> dict[str, Any]:
+    """Drop this connection's subscription to an element.
+
+    Releasing what you do not subscribe to is not an error, for the same reason
+    releasing an unclaimed element is not: the connection ends up in the right
+    state either way.
+    """
+    released = subscriptions.release(_client_id(params), _str_param(params, "elementId"))
+    return {"released": released, "revision": _registry.revision}
+
+
 def _method_set_attention(params: dict[str, Any]) -> dict[str, Any]:
     """Record what this connection is looking at.
 
@@ -1721,6 +2094,70 @@ def _needs_application(operation_class: str) -> bool:
     return False
 
 
+def _place_named_by(params: dict[str, Any]) -> str:
+    """The window or element this call is about, or "" for a call about the desktop.
+
+    A window wins over an element for the same reason it does when the
+    application is resolved: a call that names both is acting on the window.
+    """
+    window_id = params.get("windowId")
+    if isinstance(window_id, str) and window_id:
+        return window_id
+    element_id = params.get("elementId")
+    return element_id if isinstance(element_id, str) and element_id else ""
+
+
+def _ancestry_of(params: dict[str, Any]) -> tuple[str, ...]:
+    """Where this call's target sits in the tree, nearest first.
+
+    Resolved on the same terms as the application: only when a rule depends on
+    it, which here means only when this client's grant actually hung itself
+    somewhere. A grant that named no anchors pays nothing, which is the whole of
+    the fifth acceptance criterion — the common call is unchanged, and the walk
+    is one the toolkit thread was going to do for attribution anyway.
+
+    A target that cannot be resolved answers with nothing rather than with a
+    guess. An empty ancestry means a grant with anchors covers none of it, which
+    refuses; it never falls through to the general hand.
+    """
+    target = _place_named_by(params)
+    if not target:
+        return ()
+
+    def resolve() -> tuple[str, ...]:
+        obj = (
+            atspi.find_window(target)
+            if target.startswith("win-")
+            else atspi.lookup(target)
+        )
+        return atspi.ancestry_of(obj) if obj is not None else ()
+
+    try:
+        return loop.call_on_loop(resolve, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
+    except Exception:
+        return ()
+
+
+def _anchor_lives(target: str) -> bool | None:
+    """Whether a grant's anchor still names something. Asked only on the refusal path.
+
+    An allowed call never reaches this: the grant covered the target, so
+    nothing about the rest of the tree can change the answer. It is the price of
+    a refusal, where one extra lookup buys the difference between "you may not"
+    and "it is gone" — and a client that cannot tell those apart re-asks for a
+    scope it already has, forever.
+    """
+    try:
+        return loop.call_on_loop(
+            lambda: atspi.anchor_lives(target), timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS
+        )
+    except Exception:
+        # The desktop did not answer in time. Reporting the anchor dead on a
+        # timeout would turn a slow application into a revoked grant, so the
+        # refusal stands as a refusal.
+        return True
+
+
 #: Methods whose parameters carry other calls inside them. A batch reaches the
 #: desktop through its steps, and a step's target is not visible in the
 #: parameters the batch itself was checked against — so a rule about which
@@ -1751,6 +2188,7 @@ def _enforce_nested(method: str, params: dict[str, Any], client_id: str) -> None
     steps = params.get("actions")
     if not isinstance(steps, list):
         return
+    anchored = bool(_consent.grant_of(client_id).anchors)
     for step in steps:
         if not isinstance(step, dict):
             continue
@@ -1759,15 +2197,26 @@ def _enforce_nested(method: str, params: dict[str, Any], client_id: str) -> None
             continue
         inner_params = step.get("params")
         inner_class = protocol_generated.OPERATION_CLASS.get(inner, "submit")
+        has_params = isinstance(inner_params, dict)
         _consent.enforce(
             method=inner,
             operation_class=inner_class,
             client_id=client_id,
             application=(
                 _application_of(inner_params)
-                if isinstance(inner_params, dict) and _needs_application(inner_class)
+                if has_params and _needs_application(inner_class)
                 else ""
             ),
+            # A step's target is a different place from the batch's, so an
+            # anchored grant has to be asked about each one. This is the same
+            # reason the application is resolved per step.
+            ancestry=_ancestry_of(inner_params) if has_params and anchored else (),
+            # Every method that may appear in a batch acts on a window or an
+            # element, so a step is always about a place — including the
+            # malformed step that named none, which an anchored grant must
+            # refuse rather than answer from the hand it holds elsewhere.
+            names_a_place=anchored,
+            anchor_lives=_anchor_lives,
             # The batch carried the confirmation. Asking for it again per step
             # would make a confirmed batch impossible to express.
             confirmed=bool(params.get("confirm")),
@@ -1835,6 +2284,8 @@ def _guarded(method: str, handler):
         # refusing rather than towards allowing.
         client_id = _client_id(params)
         application = _application_of(params) if _needs_application(operation_class) else ""
+        anchored = bool(_consent.grant_of(client_id).anchors)
+        ancestry = _ancestry_of(params) if anchored else ()
         record = audit.Record(
             method=method,
             operation_class=operation_class,
@@ -1846,12 +2297,20 @@ def _guarded(method: str, handler):
             element_id=_text(params.get("elementId")),
         )
         started = time.monotonic()
+        # Anything a previous call on this thread left behind is not this call's
+        # proof. Clearing on the way in means a verdict can only ever be filed
+        # against the commit that produced it.
+        _take_attestation()
         try:
             _consent.enforce(
                 method=method,
                 operation_class=operation_class,
                 client_id=client_id,
                 application=application,
+                ancestry=ancestry,
+                names_a_place=anchored and bool(_place_named_by(params)),
+                anchor_lives=_anchor_lives,
+                reaches_through_steps=method in _NESTING_METHODS,
                 confirmed=bool(params.get("confirm")),
             )
             _enforce_presence(operation_class, params)
@@ -1860,6 +2319,13 @@ def _guarded(method: str, handler):
             record.decision = "denied"
             record.reason = denial.message
             record.error_code = denial.code
+            # A disguised consent denial must not leak the target's name into
+            # the audit log either: an agent can read auditTail, and a record
+            # that names the application it was refused against confirms the
+            # application exists. Genuine presence not-founds (WINDOW/ELEMENT)
+            # are not disguised and keep their context.
+            if denial.code == ErrorCode.APPLICATION_NOT_FOUND:
+                record.application = ""
             _audit.write(record)
             raise
 
@@ -1870,14 +2336,60 @@ def _guarded(method: str, handler):
             record.error_code = failure.code
             record.reason = failure.message
             record.duration_ms = int((time.monotonic() - started) * 1000)
+            _absorb_attestation(record)
             _audit.write(record)
             raise
         record.duration_ms = int((time.monotonic() - started) * 1000)
+        _absorb_attestation(record)
+        # grantScope is the one method whose caller-supplied reason is the
+        # whole point of the audit trail: months later, the question is *why*
+        # an agent had hands on an application, and the reason a grant was
+        # asked for is the argument that won. No other method carries a reason
+        # param, so this is a narrow special case, not a general sink.
+        if method == "grantScope":
+            record.reason = _text(params.get("reason"))
         _absorb_result(record, result)
         _audit.write(record)
         return result
 
     return call
+
+
+#: The verdict the handler reached, waiting for the record `_guarded` owns.
+#: Thread-local for the same reason the identity is: one call is being served
+#: per thread, and a verdict that outlived its call would be filed against
+#: somebody else's commit.
+_verdicts = threading.local()
+
+
+def _record_attestation(verdict: attestation.Verdict) -> None:
+    """Hand a commit's verdict to the audit record being built around it.
+
+    A channel rather than a return value because the interesting case is the
+    refusal: the handler raises, no result is ever produced, and that is
+    precisely the commit whose reasons a reviewer needs. The user's consent
+    happens before in the configuration and after in the audit log, and this is
+    the second half arriving.
+    """
+    _verdicts.pending = verdict
+
+
+def _take_attestation() -> attestation.Verdict | None:
+    verdict = getattr(_verdicts, "pending", None)
+    _verdicts.pending = None
+    return verdict
+
+
+def _absorb_attestation(record: audit.Record) -> None:
+    """Put the commit's verdict on its record — the verdicts, never the field.
+
+    A tally of what was asked and how it came out. The audit log is a fourth
+    sink for exactly the values the redaction module exists to withhold, so what
+    lands here is "contents-match=verified", never the contents that matched.
+    """
+    verdict = _take_attestation()
+    if verdict is not None:
+        record.attestation_summary = verdict.summary
 
 
 def _absorb_result(record: audit.Record, result: dict[str, Any]) -> None:
@@ -1907,8 +2419,12 @@ def build_server(socket_path: str) -> JsonRpcServer:
     # Attention dies with the connection that declared it. Identities are never
     # reused, so a survivor could not be inherited by a later client — it would
     # just accumulate, one entry per connection, in a process meant to run for
-    # weeks.
-    base = JsonRpcServer(socket_path, on_disconnect=attention.forget)
+    # weeks. Subscriptions die with their connection for the same reason.
+    def _on_disconnect(client_id: str) -> None:
+        attention.forget(client_id)
+        subscriptions.forget(client_id)
+
+    base = JsonRpcServer(socket_path, on_disconnect=_on_disconnect)
 
     class _ValidatingServer:
         """Registers every handler behind its schema check."""
@@ -1939,8 +2455,12 @@ def build_server(socket_path: str) -> JsonRpcServer:
     server.register("inspectElement", _method_inspect_element)
     server.register("focusWindow", _method_focus_window)
     server.register("invokeElement", _method_invoke_element)
+    server.register("attestElement", _method_attest_element)
+    server.register("commitElement", _method_commit_element)
     server.register("claimElement", _method_claim_element)
     server.register("releaseElement", _method_release_element)
+    server.register("subscribeElement", _method_subscribe_element)
+    server.register("unsubscribeElement", _method_unsubscribe_element)
     server.register("setElementValue", _method_set_element_value)
     server.register("typeText", _method_type_text)
     server.register("typeKeystrokes", _method_type_keystrokes)
@@ -1972,6 +2492,67 @@ def _start_watching() -> None:
     except Exception:
         log.exception("could not subscribe to desktop events; falling back to the sweep")
     loop.call_on_loop(_watcher.start_sweep)
+
+
+# --- Drain monitor --------------------------------------------------------- #
+# A superseded daemon must not be killed — a write may be mid-flight on
+# someone's screen. It stops accepting new connections (they land on the
+# new-digest socket and never reach it), finishes serving whoever is still
+# attached, and exits when the last one lets go. If nobody ever connected
+# within the startup grace, it exits on its own — nobody wanted this build.
+
+DAEMON_DRAIN_IDLE_SECS = 5
+DAEMON_STARTUP_GRACE_SECS = 30
+DAEMON_POLL_SECS = 0.5
+
+
+def _start_drain_monitor(
+    server: transport.JsonRpcServer, stop: threading.Event
+) -> threading.Thread:
+    """Exit the daemon once it has been drained or was never wanted.
+
+    The monitor polls connection count rather than hooking connect/disconnect
+    callbacks, because the exit condition is temporal — "idle for N seconds" —
+    and a callback would still need a timer.
+    """
+
+    def _monitor() -> None:
+        ever_connected = False
+        idle_since: float | None = None
+        born = time.monotonic()
+        while not stop.is_set():
+            count = server.connection_count
+            if count > 0:
+                ever_connected = True
+                idle_since = None
+            elif ever_connected:
+                if idle_since is None:
+                    idle_since = time.monotonic()
+                elif time.monotonic() - idle_since >= DAEMON_DRAIN_IDLE_SECS:
+                    # Say why. A daemon that vanishes without a word reads as a
+                    # crash, and the person reading the terminal has no way to
+                    # tell a designed exit from one.
+                    print(
+                        f"the last client disconnected {DAEMON_DRAIN_IDLE_SECS}s ago; exiting",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    stop.set()
+                    return
+            else:
+                if time.monotonic() - born >= DAEMON_STARTUP_GRACE_SECS:
+                    print(
+                        f"no client connected within {DAEMON_STARTUP_GRACE_SECS}s; exiting",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    stop.set()
+                    return
+            stop.wait(DAEMON_POLL_SECS)
+
+    thread = threading.Thread(target=_monitor, name="desktop-drain", daemon=True)
+    thread.start()
+    return thread
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -2016,6 +2597,10 @@ def main(argv: list[str] | None = None) -> int:
     server = build_server(socket_path)
     server.start()
 
+    if args.daemon:
+        for stale in transport.sweep_dead_daemon_sockets(keep=socket_path):
+            print(f"swept dead daemon socket {stale}", file=sys.stderr, flush=True)
+
     # The supervisor waits for this line before sending its first request.
     print(f"listening {socket_path}", flush=True)
 
@@ -2026,6 +2611,9 @@ def main(argv: list[str] | None = None) -> int:
 
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
+
+    if args.daemon:
+        _start_drain_monitor(server, stop)
 
     try:
         stop.wait()

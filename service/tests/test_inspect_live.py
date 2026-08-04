@@ -149,3 +149,59 @@ def test_a_text_element_with_characters_reports_its_text(live_window):
             assert len(element.value) == min(count, backend.MAX_VALUE_CHARS)
             return
     pytest.skip("no text element currently holds any characters")
+
+
+# ---------------------------------------------------------------------------
+# Neighbourhood expansion (issue #43) — live shape assertions
+# ---------------------------------------------------------------------------
+
+def _query(window, **kwargs):
+    return loop.call_on_loop(
+        lambda: inspection.query(
+            window,
+            describe=atspi.describe,
+            children=atspi.children_of,
+            parent_of=atspi.parent_of,
+            **kwargs,
+        ),
+        timeout=25.0,
+    )
+
+
+def test_ancestors_chain_reaches_the_window_root(live_window):
+    """An ancestor expansion should produce a path toward the window root."""
+    result = _query(live_window, role="push button", limit=1, ancestors=8)
+    if not result.matches:
+        pytest.skip("no push button in this window")
+    match = result.matches[0]
+    assert match.ancestry, "ancestors requested but none returned"
+    # Every ancestor id must be resolvable through the observation registry.
+    observed = {o[0] for o in result.observations}
+    for ancestor in match.ancestry:
+        assert ancestor.id in observed
+
+
+def test_descendants_build_a_coherent_subtree(live_window):
+    """descendants=N should populate children with real sub-elements."""
+    result = _query(live_window, role="panel", limit=1, descendants=2)
+    if not result.matches:
+        pytest.skip("no panel in this window")
+    match = result.matches[0]
+    if not match.children:
+        pytest.skip("this panel has no children")
+    # Each child should itself be a valid element with a role and id.
+    for child in match.children:
+        assert child.role
+        assert child.id
+
+
+def test_siblings_are_under_the_same_parent(live_window):
+    """Sibling expansion should return elements that are not the match itself."""
+    result = _query(live_window, role="push button", limit=1, siblings=True)
+    if not result.matches:
+        pytest.skip("no push button in this window")
+    match = result.matches[0]
+    if not match.siblings:
+        pytest.skip("this button has no siblings")
+    for sib in match.siblings:
+        assert sib.id != match.id

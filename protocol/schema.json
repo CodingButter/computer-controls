@@ -84,6 +84,9 @@
         "SESSION_EXPIRED": "The client session's grant has expired and must be renewed. Distinct from PERMISSION_DENIED so a caller can tell 'never allowed' from 'allowed, ask again'.",
         "ELEMENT_HELD": "Another client is writing this element and owns it until that write finishes. Carries the holder's identity, what it is doing and how long it has been at it. Not a permission answer and not a queue: the request is refused, not deferred.",
         "CLAIM_EXPIRED": "The claim covering this write ran out before the write finished. A lease is sized from the work it was taken for, so this says the work outran its own estimate rather than that time merely passed. The element is free and nothing was rolled back: a half-written field is a real state of the world, and hiding it would be the more expensive lie.",
+        "SUBSCRIPTION_LIMIT_REACHED": "This connection already holds the maximum number of element subscriptions. Carries the ceiling, because a refusal that names the bound lets a caller choose what to release rather than guessing.",
+        "ATTESTATION_FAILED": "The service could not assemble a proof for a submit-class action, so the action was never dispatched. Not a permission answer: the caller may do this, but the service could not confirm what it would be doing it to, and a commit the service cannot describe is a commit nobody can review. Carries the criterion that could not be satisfied.",
+        "ATTESTATION_STALE": "The target moved between the proof and the commit, so the approval was obtained for one state of the desktop and would have been applied to another. Carries the criterion and the revision at which the difference appeared, because a caller told only 'stale' has to guess what to prove again.",
         "TIMEOUT": "The desktop did not answer within the allotted time.",
         "METHOD_NOT_FOUND": "No such method in this protocol version.",
         "INVALID_PARAMS": "The request did not satisfy this schema.",
@@ -123,6 +126,16 @@
         "actions": { "type": "array", "items": { "type": "string" }, "description": "Action names invokable on this element. For a window this is often the application's whole command set." },
         "bounds": { "$ref": "#/$defs/bounds" },
         "children": { "type": "array", "items": { "$ref": "#/$defs/semanticElement" } },
+        "ancestry": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/semanticElement" },
+          "description": "Ancestor chain for this element, nearest first, up to the requested depth. Present only when the caller asked for ancestor expansion. Each entry is a full element whose id is valid for getElement."
+        },
+        "siblings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/semanticElement" },
+          "description": "Immediate neighbours of this element under the same parent, up to a per-hit cap. Present only when the caller asked for sibling expansion."
+        },
         "truncated": { "type": "boolean", "description": "Present and true when this element has children the walk did not return, whether because the node budget ran out or because the depth limit was reached. Never silently omitted: a subtree that was cut off must never be indistinguishable from one that ended. Drill from this element with inspectElement to see what is below it." },
         "extra": {
           "type": "object",
@@ -158,7 +171,8 @@
             "APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND",
             "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED",
             "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "TIMEOUT",
-            "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR"
+            "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR", "SUBSCRIPTION_LIMIT_REACHED",
+            "ATTESTATION_FAILED", "ATTESTATION_STALE"
           ]
         },
         "message": {
@@ -250,6 +264,24 @@
         "reason": { "type": "string", "description": "What the holder said it was doing. Present when it said." }
       },
       "required": ["elementId", "clientId", "expiresInMs", "leaseMs", "heldForMs"],
+      "additionalProperties": false
+    },
+
+    "scopeAnchor": {
+      "type": "object",
+      "description": "A place in the accessibility tree that a permission hangs on, and what may be done there. An application is the outermost place there is, and most tasks mean something far narrower: 'fill in this form' expressed as 'edit anything in the browser' draws the boundary around the wrong thing. Anchors are resolved against the live tree on every call, never remembered as an answer, and the nearest one covering the target decides — so a subtree granted observe with one field inside it granted edit composes without either rule knowing about the other.",
+      "properties": {
+        "target": { "type": "string", "maxLength": 200, "description": "The place this hangs on: an element id, a window id, or an application name. Ids are matched exactly, because an id is minted rather than typed and a substring of one is a coincidence. Application names are matched as substrings, the same way they are everywhere else." },
+        "operationClasses": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["observe", "edit", "activate", "submit", "destructive"] },
+          "minItems": 1,
+          "maxItems": 5,
+          "description": "What may be done at this place. Faces the ceiling like every other class named in a grant: an anchor is a narrowing device, never a side door."
+        },
+        "coversDescendants": { "type": "boolean", "description": "Whether this speaks for everything under it or only for the one node it names. Defaults to false: a grant on a single field that silently reached everything beneath it would be the widening anchors exist to prevent." }
+      },
+      "required": ["target", "operationClasses"],
       "additionalProperties": false
     },
 
@@ -523,7 +555,7 @@
 
     "queryElements": {
       "operationClass": "observe",
-      "summary": "Find elements in a window by role, name or state. At least one filter is required.",
+      "summary": "Find elements in a window by role, name or state. At least one filter is required. Optional ancestors/descendants/siblings expand the neighbourhood around each match after the match set is capped — how to find something in a large application without walking the whole tree.",
       "params": {
         "type": "object",
         "properties": {
@@ -532,6 +564,9 @@
           "name": { "type": "string" },
           "states": { "type": "array", "items": { "type": "string" } },
           "limit": { "type": "integer", "minimum": 1, "maximum": 200 },
+          "ancestors": { "type": "integer", "minimum": 0, "maximum": 32, "description": "Expand each match upward toward the window root, returning up to this many ancestors in the element's ancestry field. Zero or absent means no ancestor expansion. Capped at 32 because a broken toolkit can hand back a non-terminating parent chain." },
+          "descendants": { "type": "integer", "minimum": 0, "maximum": 10, "description": "Expand each match downward, populating the element's children field to this many depth levels. Zero or absent means no descendant expansion." },
+          "siblings": { "type": "boolean", "description": "When true, return each match's immediate neighbours (up to a per-hit cap) in the element's siblings field." },
           "clientId": { "type": "string" }
         },
         "required": ["windowId"],
@@ -554,6 +589,10 @@
           "moreResults": {
             "type": "boolean",
             "description": "More matches exist than were returned — either the search was cut short or the answer hit its limit with tree left unwalked. A caller seeing this should narrow its filter rather than assume it has seen everything."
+          },
+          "neighbourhoodTruncated": {
+            "type": "boolean",
+            "description": "Expansion was cut short by the node budget or time limit, not the search itself. Distinct from searchTruncated: the search covered the window, but some matches did not get their full neighbourhood."
           },
           "revision": { "type": "integer" },
           "backend": { "type": "string" }
@@ -686,6 +725,53 @@
       }
     },
 
+    "subscribeElement": {
+      "operationClass": "observe",
+      "summary": "Declare intent to be told about changes to an element without holding a call open. A subscription is an observation claim, not a write claim: it does not prevent anyone else from acting on the element, and no subscription outranks the person at the keyboard. The element is resolved first — subscribing to an id that names nothing is an unkeepable promise. Subscribed elements are sampled on every observation sweep regardless of recency, because a declared intent outranks a heuristic that ranks by how recently something was touched. Over the per-connection ceiling is a refusal that names the ceiling, never a silent truncation: a service that accepts a thousand subscriptions and quietly samples the first sixteen has reinvented the current bug with better manners. A disconnecting client's subscriptions are all released, exactly as a claim is.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "elementId": { "type": "string" },
+          "clientId": { "type": "string" },
+          "confirm": { "type": "boolean" }
+        },
+        "required": ["elementId"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "subscribed": { "type": "boolean" },
+          "revision": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["subscribed", "revision"],
+        "additionalProperties": false
+      }
+    },
+
+    "unsubscribeElement": {
+      "operationClass": "observe",
+      "summary": "Stop asking to be told about an element. Releasing what you do not subscribe to is not an error: the desired state is that this client watches nothing here, and it is already true. A client that disconnects is unsubscribed from everything it held.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "elementId": { "type": "string" },
+          "clientId": { "type": "string" }
+        },
+        "required": ["elementId"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "released": { "type": "boolean", "description": "True when this call ended a subscription, false when there was nothing of this client's to give up." },
+          "revision": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["released", "revision"],
+        "additionalProperties": false
+      }
+    },
+
     "setElementValue": {
       "operationClass": "edit",
       "summary": "Set an element's text through the accessibility editable-text interface, or its numeric value through the value interface. Never by synthesizing keystrokes.",
@@ -802,6 +888,49 @@
         "required": ["results", "completed", "revision"],
         "additionalProperties": false
       }
+    },
+
+    "attestElement": {
+      "operationClass": "observe",
+      "summary": "Read and record what is in a field right now, so a later commitElement can refuse if it has changed. The evidence is the field's own contents read by the service — the caller writes the argument (which element), never the evidence (what text). A masked field, whose contents even the accessibility layer cannot read, is refused: there is nothing to attest that a later commit could compare against. Composing is not sending, and this call authorises nothing: it takes a snapshot, and the snapshot is only as good as the moment it was taken.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "elementId": { "type": "string", "description": "The field whose contents are being attested for a later commit." },
+          "confirm": { "type": "boolean" },
+          "clientId": { "type": "string" }
+        },
+        "required": ["elementId"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "attestationId": { "type": "string", "description": "Identifies this attestation. Present it to commitElement within its TTL; one attestation admits exactly one commit." },
+          "expiresInMs": { "type": "integer", "minimum": 0, "description": "How long before the attestation must be retaken. A stale attestation is not reusable." }
+        },
+        "required": ["attestationId", "expiresInMs"],
+        "additionalProperties": false
+      }
+    },
+
+    "commitElement": {
+      "operationClass": "destructive",
+      "summary": "Send what was attested. Re-reads the field and refuses if it no longer matches what attestElement recorded; if it matches, triggers the element's own action. Success is asserted from the observed effect — the field is now empty, meaning it transmitted — not from the action call returning true. A field that the action was called on but which still contains its contents afterwards is a commit that did not send, reported as failure regardless of what the action call returned. The thing that would have caught the original incident: a keystroke that typed a character instead of pressing Return leaves the field non-empty, and that is the failure this reports.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "elementId": { "type": "string", "description": "The field whose attested contents are being sent." },
+          "attestationId": { "type": "string", "description": "The attestation returned by attestElement for this field. One attestation admits one commit; a second commit with the same id is refused." },
+          "action": { "type": "string", "description": "The action to trigger, as reported in the element's actions list. Not an index: indices move. When omitted, the element's first action is used." },
+          "settleMs": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "confirm": { "type": "boolean" },
+          "clientId": { "type": "string" }
+        },
+        "required": ["elementId", "attestationId"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/actionResult" }
     },
 
     "waitFor": {
@@ -1095,6 +1224,12 @@
             "maxItems": 50,
             "description": "Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing."
           },
+          "anchors": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/scopeAnchor" },
+            "maxItems": 50,
+            "description": "Places in the tree this grant hangs on, instead of hanging on whole applications. A grant that names anchors has said where it applies, so anywhere else is outside it — the same rule naming applications individually has always had. Omit to grant across applications as before."
+          },
           "seconds": {
             "type": "integer",
             "minimum": 30,
@@ -1105,6 +1240,12 @@
             "type": "string",
             "maxLength": 400,
             "description": "What this is for, in the caller's own words. Recorded in the audit log, where the useful question months later is why, not what."
+          },
+          "criteria": {
+            "type": "array",
+            "items": { "type": "string", "maxLength": 80 },
+            "maxItems": 20,
+            "description": "The questions a commit made under this grant must be answered against. Declared here, at the door, because the party being graded does not write the rubric — a worker cannot reach this field, and the service's own mechanical criteria are asked on top of whatever is named here. A name this service cannot decide is still carried and reported as unchecked, so that asking for review is never worse than asking for nothing."
           },
           "confirm": { "type": "boolean" },
           "clientId": { "type": "string" }
@@ -1124,11 +1265,42 @@
             "type": "array",
             "items": { "type": "string" }
           },
+          "anchors": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/scopeAnchor" },
+            "description": "Where this grant now hangs. Returned so a client can tell an anchor that was accepted from one that was quietly dropped."
+          },
+          "criteria": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Every criterion a commit under this grant will be judged against, the mechanical ones included whether or not they were asked for. Returned so a client can tell what review it has actually bought without inferring it from a refusal."
+          },
           "expiresInSeconds": { "type": "integer" },
           "ceiling": {
             "type": "array",
             "items": { "type": "string" },
             "description": "The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice."
+          },
+          "severity": {
+            "type": "object",
+            "properties": {
+              "rank": { "type": "integer", "minimum": 0, "description": "Ordinal of the highest operation class held: observe=0, edit=1, activate=2, submit=3, destructive=4." },
+              "irreversible": { "type": "boolean", "description": "True when the grant includes a class whose mistakes cannot be taken back (submit, destructive)." }
+            },
+            "required": ["rank", "irreversible"],
+            "additionalProperties": false,
+            "description": "How much damage a mistake within this scope can cause. A fact about the classes held, not an opinion about which model should hold them."
+          },
+          "breadth": {
+            "type": "object",
+            "properties": {
+              "applications": { "type": "integer", "minimum": 0, "description": "Distinct applications this grant spans. A weaker model loses track across many." },
+              "anchors": { "type": "integer", "minimum": 0, "description": "Element-anchored permissions hung on this grant (A15). Each anchor is a separate place to keep track of, so it counts toward the same spread the applications do." },
+              "unbounded": { "type": "boolean", "description": "True when the scope names no applications and neither does the ceiling, so it spans every application there is. The count above is then a floor, not a total." }
+            },
+            "required": ["applications", "anchors", "unbounded"],
+            "additionalProperties": false,
+            "description": "How wide a net this scope casts. The competence dimension: breadth, not depth, is what overwhelms a small model."
           }
         },
         "required": ["operationClasses", "ceiling"],

@@ -309,6 +309,113 @@ def test_an_existing_file_is_named_as_something_to_widen():
     assert "Widen" in remedy and "does not exist" not in remedy
 
 
+# -- severity_of -------------------------------------------------------------
+
+def test_severity_ranks_a_read_only_grant_as_lowest():
+    result = security.severity_of({"observe"})
+    assert result == {"rank": 0, "irreversible": False}
+
+
+def test_severity_ranks_destructive_as_highest_and_irreversible():
+    result = security.severity_of({"observe", "destructive"})
+    assert result == {"rank": 4, "irreversible": True}
+
+
+def test_severity_treats_submit_as_irreversible():
+    # submit is the cliff: a submitted form cannot be unsubmitted.
+    result = security.severity_of({"observe", "submit"})
+    assert result["rank"] == 3
+    assert result["irreversible"] is True
+
+
+def test_severity_picks_the_highest_held_class_as_the_rank():
+    result = security.severity_of({"observe", "edit", "activate"})
+    assert result == {"rank": 2, "irreversible": False}
+
+
+def test_severity_of_no_classes_is_observe_rank():
+    result = security.severity_of(set())
+    assert result == {"rank": 0, "irreversible": False}
+
+
+# -- breadth_of --------------------------------------------------------------
+
+def test_breadth_counts_named_applications():
+    grant = security.Grant(classes=frozenset({"observe"}), applications=frozenset({"chrome", "editor"}))
+    result = security.breadth_of(grant, security.Ceiling())
+    assert result == {"applications": 2, "anchors": 0, "unbounded": False}
+
+
+def test_breadth_counts_per_application_entries():
+    grant = security.Grant(
+        classes=frozenset({"observe"}),
+        per_application={"chrome": frozenset({"submit"}), "editor": frozenset({"edit"})},
+    )
+    result = security.breadth_of(grant, security.Ceiling())
+    assert result["applications"] == 2
+    assert result["anchors"] == 0
+
+
+def test_breadth_counts_an_overlapping_application_only_once():
+    grant = security.Grant(
+        classes=frozenset({"observe"}),
+        applications=frozenset({"chrome"}),
+        per_application={"chrome": frozenset({"submit"})},
+    )
+    result = security.breadth_of(grant, security.Ceiling())
+    assert result["applications"] == 1
+
+
+def test_breadth_falls_back_to_the_ceiling_when_the_grant_names_nothing():
+    # A grant with no named applications acts against whatever the ceiling
+    # allows, so the breadth is the ceiling's spread, not zero.
+    ceiling = security.Ceiling(applications=frozenset({"chrome", "editor", "notes"}))
+    grant = security.Grant(classes=frozenset({"observe"}))
+    result = security.breadth_of(grant, ceiling)
+    assert result["applications"] == 3
+    assert result["unbounded"] is False
+
+
+def test_a_scope_that_names_nothing_at_all_is_reported_as_unbounded():
+    # Nothing named in the grant and nothing named in the ceiling is every
+    # application there is — the widest scope available. Reported as a count it
+    # would be zero, which reads as the narrowest, and a dispatcher reading that
+    # number would size the model for a scope of one thing.
+    grant = security.Grant(classes=frozenset({"observe"}))
+    result = security.breadth_of(grant, security.Ceiling())
+    assert result["unbounded"] is True
+
+
+def test_breadth_counts_the_anchors_hung_on_the_grant():
+    # A15 shipped: an anchored grant is not narrow just because it names one
+    # application. Each anchor is a separate place to keep track of, and a
+    # breadth that reported zero here would buy a cheap model for a scope of
+    # many things — understating is the same lie as overstating, pointed the
+    # cheaper way.
+    grant = security.Grant(
+        classes=frozenset({"observe"}),
+        applications=frozenset({"chrome"}),
+        anchors=(
+            security.Anchor(target="el-subject", classes=frozenset({"edit"})),
+            security.Anchor(target="el-message", classes=frozenset({"edit"})),
+            security.Anchor(target="el-send", classes=frozenset({"submit"})),
+        ),
+    )
+    result = security.breadth_of(grant, security.Ceiling())
+    assert result == {"applications": 1, "anchors": 3, "unbounded": False}
+
+
+def test_breadth_reports_anchors_even_when_the_grant_names_no_application():
+    # The ceiling fallback branch must not lose the anchor count.
+    grant = security.Grant(
+        classes=frozenset({"observe"}),
+        anchors=(security.Anchor(target="el-send", classes=frozenset({"submit"})),),
+    )
+    result = security.breadth_of(grant, security.Ceiling(applications=frozenset({"chrome"})))
+    assert result["anchors"] == 1
+    assert result["applications"] == 1
+
+
 class TestPermissionsPerApplication:
     """The shape a real task needs: read here, send there, and never the reverse.
 
@@ -455,3 +562,361 @@ class TestPermissionsPerApplication:
                 classes=["observe"],
                 per_application={"keepassxc": ["observe", "edit"]},
             )
+
+
+class TestAnchors:
+    """A permission hung on a place in the tree rather than on an application.
+
+    The task is "fill in this one field and send the form". Expressed against an
+    application it becomes "edit anything in the browser", which is a boundary
+    around the wrong thing: every other field on the page, and every other page,
+    is inside it. The anchors here say the narrow thing instead, and the
+    assertions that matter are the ones proving the narrow statement survives
+    contact with a wider one sitting above it.
+    """
+
+    #: A form, inside a window, inside an application — nearest first, which is
+    #: the order the walk out of the tree produces and the order the rule reads.
+    FIELD = ("el-message", "el-compose-form", "win-mail", "chrome")
+    SIBLING = ("el-subject", "el-compose-form", "win-mail", "chrome")
+    ELSEWHERE = ("el-search", "win-browser", "chrome")
+
+    def consent(self) -> security.Consent:
+        return security.Consent(full_ceiling(), now=Clock())
+
+    def dispatch(self, consent: security.Consent) -> security.Grant:
+        """Read the whole form, write the one field the task is about."""
+        return consent.grant(
+            "the-mail-agent",
+            classes=[],
+            anchors=[
+                security.Anchor(
+                    target="el-compose-form",
+                    classes=frozenset({"observe"}),
+                    covers_descendants=True,
+                ),
+                security.Anchor(target="el-message", classes=frozenset({"observe", "edit"})),
+            ],
+            reason="fill in the message and leave the rest of the form alone",
+        )
+
+    def test_the_nearer_anchor_wins_over_the_one_above_it(self):
+        """The composition rule, and the reason it is worth having.
+
+        Both anchors cover this field: the form's because it covers its
+        descendants, the field's because it names it. Neither had to be written
+        with the other in mind, and the answer is still the specific one.
+        """
+        consent = self.consent()
+        self.dispatch(consent)
+        decision = consent.decide(
+            method="typeText",
+            operation_class="edit",
+            client_id="the-mail-agent",
+            ancestry=self.FIELD,
+        )
+        assert decision.allowed
+
+    def test_the_wider_anchor_still_governs_everything_else_under_it(self):
+        consent = self.consent()
+        self.dispatch(consent)
+        assert consent.decide(
+            method="getElement",
+            operation_class="observe",
+            client_id="the-mail-agent",
+            ancestry=self.SIBLING,
+        ).allowed
+        assert not consent.decide(
+            method="typeText",
+            operation_class="edit",
+            client_id="the-mail-agent",
+            ancestry=self.SIBLING,
+        ).allowed
+
+    def test_a_place_no_anchor_hangs_over_is_outside_the_grant(self):
+        """Same rule the per-application form has: naming places unnames the rest."""
+        consent = self.consent()
+        self.dispatch(consent)
+        decision = consent.decide(
+            method="getElement",
+            operation_class="observe",
+            client_id="the-mail-agent",
+            ancestry=self.ELSEWHERE,
+        )
+        assert not decision.allowed
+        assert "el-compose-form" in decision.reason
+
+    def test_an_anchor_that_does_not_cover_descendants_speaks_only_for_itself(self):
+        """Otherwise every anchor would be a subtree, and the flag would be a lie."""
+        consent = self.consent()
+        consent.grant(
+            "narrow",
+            classes=[],
+            anchors=[security.Anchor(target="el-compose-form", classes=frozenset({"edit"}))],
+        )
+        assert consent.decide(
+            method="typeText",
+            operation_class="edit",
+            client_id="narrow",
+            ancestry=("el-compose-form", "win-mail", "chrome"),
+        ).allowed
+        assert not consent.decide(
+            method="typeText",
+            operation_class="edit",
+            client_id="narrow",
+            ancestry=self.FIELD,
+        ).allowed
+
+    def test_an_anchor_may_hang_on_an_application(self):
+        """The outermost place there is. The old form, said the new way."""
+        consent = self.consent()
+        consent.grant(
+            "broad",
+            classes=[],
+            anchors=[
+                security.Anchor(
+                    target="chrome",
+                    classes=frozenset({"edit"}),
+                    covers_descendants=True,
+                )
+            ],
+        )
+        assert consent.decide(
+            method="typeText",
+            operation_class="edit",
+            client_id="broad",
+            ancestry=self.FIELD,
+        ).allowed
+
+    def test_an_anchor_on_an_id_is_matched_exactly(self):
+        """An id is minted, not typed: a substring of one is a coincidence.
+
+        Application names are matched as substrings because a person wrote them
+        and cannot be expected to reproduce the desktop's own spelling. Nobody
+        writes an element id by hand, and treating a prefix of one as a match
+        would hang a permission on whatever else happened to start the same way.
+        """
+        consent = self.consent()
+        consent.grant(
+            "exact",
+            classes=[],
+            anchors=[security.Anchor(target="el-mess", classes=frozenset({"edit"}))],
+        )
+        assert not consent.decide(
+            method="typeText",
+            operation_class="edit",
+            client_id="exact",
+            ancestry=self.FIELD,
+        ).allowed
+
+    def test_an_application_name_never_matches_a_minted_id(self):
+        """The other half of the same rule, and the widening one.
+
+        Ancestry carries both kinds of name — element and window ids, then the
+        application's id and its name. An application called "win" matched as a
+        substring would cover every window on the desktop by spelling alone,
+        which is a grant nobody wrote reaching a place nobody named.
+        """
+        consent = self.consent()
+        consent.grant(
+            "unlucky-name",
+            classes=[],
+            anchors=[
+                security.Anchor(
+                    target="win",
+                    classes=frozenset({"edit"}),
+                    covers_descendants=True,
+                )
+            ],
+        )
+        assert not consent.decide(
+            method="typeText",
+            operation_class="edit",
+            client_id="unlucky-name",
+            ancestry=self.FIELD,
+            anchor_lives=lambda target: True,
+        ).allowed
+
+    def test_an_anchor_cannot_reach_past_the_ceiling(self):
+        """A narrowing device, never a side door — the same rule per-application has."""
+        consent = security.Consent(security.Ceiling(classes=frozenset({"observe", "edit"})))
+        with pytest.raises(security.ScopeError):
+            consent.grant(
+                "sneaky",
+                classes=["observe"],
+                anchors=[security.Anchor(target="el-send", classes=frozenset({"submit"}))],
+            )
+
+    def test_an_anchor_naming_a_blocked_application_is_refused_when_asked_for(self):
+        consent = security.Consent(
+            security.Ceiling(
+                classes=frozenset({"observe", "edit"}),
+                blocked_applications=frozenset({"keepassxc"}),
+            )
+        )
+        with pytest.raises(security.ScopeError):
+            consent.grant(
+                "hopeful",
+                classes=["observe"],
+                anchors=[security.Anchor(target="keepassxc", classes=frozenset({"edit"}))],
+            )
+
+    def test_an_anchor_that_names_nothing_is_refused(self):
+        consent = self.consent()
+        with pytest.raises(security.ScopeError):
+            consent.grant(
+                "vague",
+                classes=[],
+                anchors=[security.Anchor(target="  ", classes=frozenset({"edit"}))],
+            )
+
+    def test_an_anchor_always_carries_observe(self):
+        """A client that may edit must be able to check whether its edit worked."""
+        consent = self.consent()
+        consent.grant(
+            "writer",
+            classes=[],
+            anchors=[security.Anchor(target="el-message", classes=frozenset({"edit"}))],
+        )
+        assert consent.decide(
+            method="getElement",
+            operation_class="observe",
+            client_id="writer",
+            ancestry=self.FIELD,
+        ).allowed
+
+    def test_a_grant_with_no_anchors_costs_nothing_and_behaves_as_before(self):
+        """The ancestry is offered on every call; a grant that hung nowhere ignores it."""
+        consent = self.consent()
+        consent.grant("plain", classes=["edit"], applications=["chrome"])
+        assert consent.decide(
+            method="typeText",
+            operation_class="edit",
+            client_id="plain",
+            application="chrome",
+            ancestry=self.ELSEWHERE,
+        ).allowed
+
+    def test_a_desktop_level_call_answers_from_the_general_hand(self):
+        """Listing windows is not a question about a place inside one."""
+        consent = self.consent()
+        self.dispatch(consent)
+        assert consent.decide(
+            method="listWindows",
+            operation_class="observe",
+            client_id="the-mail-agent",
+            ancestry=(),
+        ).allowed
+
+    def test_a_vanished_anchor_grants_nothing_and_says_which_one(self):
+        """The trap this amendment exists for.
+
+        The dialog closed. The grant still exists, still names the element, and
+        the element is gone — so the next action must not be answered as a
+        permission question, because re-asking for the same scope would produce
+        the same grant and the same silence. It fails as a stale reference,
+        which is the one answer that tells the client to go and look again.
+        """
+        consent = self.consent()
+        self.dispatch(consent)
+        with pytest.raises(DesktopError) as raised:
+            consent.decide(
+                method="typeText",
+                operation_class="edit",
+                client_id="the-mail-agent",
+                ancestry=self.ELSEWHERE,
+                anchor_lives=lambda target: target != "el-compose-form",
+            )
+        assert raised.value.code == ErrorCode.ELEMENT_REFERENCE_STALE
+        assert "el-compose-form" in raised.value.message
+
+    def test_an_ambiguous_anchor_is_treated_as_unresolved(self):
+        """Two identical fields: handing back one of them is worse than admitting it died."""
+        consent = self.consent()
+        self.dispatch(consent)
+        with pytest.raises(DesktopError) as raised:
+            consent.decide(
+                method="typeText",
+                operation_class="edit",
+                client_id="the-mail-agent",
+                ancestry=self.ELSEWHERE,
+                anchor_lives=lambda target: None,
+            )
+        assert raised.value.code == ErrorCode.ELEMENT_REFERENCE_STALE
+        assert "more than one" in raised.value.message
+
+    def test_a_living_anchor_that_simply_does_not_cover_this_place_is_a_refusal(self):
+        """Staleness and refusal are different answers, and the client acts on them differently."""
+        consent = self.consent()
+        self.dispatch(consent)
+        decision = consent.decide(
+            method="typeText",
+            operation_class="edit",
+            client_id="the-mail-agent",
+            ancestry=self.ELSEWHERE,
+            anchor_lives=lambda target: True,
+        )
+        assert not decision.allowed
+        assert decision.reason
+
+    def test_the_anchors_are_not_resolved_while_the_grant_covers_the_target(self):
+        """Criterion five, stated as behaviour rather than as a benchmark.
+
+        Resolution is the expensive half, and an allowed call must never pay for
+        it. The probe raises if it is consulted at all.
+        """
+
+        def never(target):
+            raise AssertionError(f"resolved {target!r} on a call the grant already covered")
+
+        consent = self.consent()
+        self.dispatch(consent)
+        assert consent.decide(
+            method="typeText",
+            operation_class="edit",
+            client_id="the-mail-agent",
+            ancestry=self.FIELD,
+            anchor_lives=never,
+        ).allowed
+
+    def test_a_call_that_reaches_through_steps_asks_what_the_grant_holds_anywhere(self):
+        """A batch has no place of its own, and its steps are each checked at theirs.
+
+        Refusing it from the general hand would mean an anchored grant could
+        never make a batch, and the client's way out would be to ask for the
+        class across the whole desktop — which is the widening this is for.
+        """
+        consent = self.consent()
+        consent.grant(
+            "batcher",
+            classes=[],
+            anchors=[security.Anchor("el-send", frozenset({"submit"}))],
+        )
+        assert consent.decide(
+            method="performActions",
+            operation_class="submit",
+            client_id="batcher",
+            ancestry=(),
+            reaches_through_steps=True,
+            confirmed=True,
+        ).allowed
+
+    def test_a_batch_still_cannot_start_on_a_class_the_grant_holds_nowhere(self):
+        consent = self.consent()
+        self.dispatch(consent)
+        assert not consent.decide(
+            method="performActions",
+            operation_class="submit",
+            client_id="the-mail-agent",
+            ancestry=(),
+            reaches_through_steps=True,
+        ).allowed
+
+    def test_a_grant_built_directly_still_refuses_what_it_did_not_hang_over(self):
+        """The rule lives in the grant, not only in how grants are issued."""
+        grant = security.Grant(
+            classes=frozenset({"observe", "submit"}),
+            anchors=(security.Anchor("el-message", frozenset({"edit"})),),
+        )
+        assert grant.classes_at(self.FIELD) == frozenset({"observe", "edit"})
+        assert grant.classes_at(self.ELSEWHERE) is None

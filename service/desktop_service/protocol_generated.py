@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: e16c1fef044c1ae0
+# Protocol version: 1.0   schema sha256: 375c11d95e161bbc
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "e16c1fef044c1ae0"
+SCHEMA_DIGEST: Final = "375c11d95e161bbc"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -33,13 +33,15 @@ ATTRIBUTIONS: Final[tuple[str, ...]] = ("self", "external", "unattributed")
 WAIT_CONDITIONS: Final[tuple[str, ...]] = ("window-opened", "window-closed", "element-appeared", "element-state-changed", "revision-advanced")
 
 #: The complete domain error vocabulary. Carried in the JSON-RPC error object under data.code.
-ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "CLAIM_EXPIRED", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR")
+ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "CLAIM_EXPIRED", "SUBSCRIPTION_LIMIT_REACHED", "ATTESTATION_FAILED", "ATTESTATION_STALE", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR")
 
 #: Every method mapped to the operation class it belongs to.
 OPERATION_CLASS: Final[dict[str, str]] = {
+    "attestElement": "observe",
     "auditTail": "observe",
     "captureWindow": "observe",
     "claimElement": "edit",
+    "commitElement": "destructive",
     "editText": "edit",
     "emergencyStop": "observe",
     "focusWindow": "activate",
@@ -63,13 +65,34 @@ OPERATION_CLASS: Final[dict[str, str]] = {
     "setAttention": "observe",
     "setElementValue": "edit",
     "setObservationMode": "observe",
+    "subscribeElement": "observe",
     "typeKeystrokes": "edit",
     "typeText": "edit",
+    "unsubscribeElement": "observe",
     "waitFor": "observe",
 }
 
 #: Request schema per method, used to reject malformed calls at the boundary.
 PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
+    "attestElement": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "elementId": {
+                "description": "The field whose contents are being attested for a later commit.",
+                "type": "string",
+            },
+        },
+        "required": [
+            "elementId",
+        ],
+        "type": "object",
+    },
     "auditTail": {
         "additionalProperties": False,
         "properties": {
@@ -149,6 +172,39 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         },
         "required": [
             "elementId",
+        ],
+        "type": "object",
+    },
+    "commitElement": {
+        "additionalProperties": False,
+        "properties": {
+            "action": {
+                "description": "The action to trigger, as reported in the element's actions list. Not an index: indices move. When omitted, the element's first action is used.",
+                "type": "string",
+            },
+            "attestationId": {
+                "description": "The attestation returned by attestElement for this field. One attestation admits one commit; a second commit with the same id is refused.",
+                "type": "string",
+            },
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "elementId": {
+                "description": "The field whose attested contents are being sent.",
+                "type": "string",
+            },
+            "settleMs": {
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "elementId",
+            "attestationId",
         ],
         "type": "object",
     },
@@ -324,6 +380,14 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
     "grantScope": {
         "additionalProperties": False,
         "properties": {
+            "anchors": {
+                "description": "Places in the tree this grant hangs on, instead of hanging on whole applications. A grant that names anchors has said where it applies, so anywhere else is outside it — the same rule naming applications individually has always had. Omit to grant across applications as before.",
+                "items": {
+                    "$ref": "#/$defs/scopeAnchor",
+                },
+                "maxItems": 50,
+                "type": "array",
+            },
             "applications": {
                 "description": "Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing.",
                 "items": {
@@ -338,6 +402,15 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             },
             "confirm": {
                 "type": "boolean",
+            },
+            "criteria": {
+                "description": "The questions a commit made under this grant must be answered against. Declared here, at the door, because the party being graded does not write the rubric — a worker cannot reach this field, and the service's own mechanical criteria are asked on top of whatever is named here. A name this service cannot decide is still carried and reported as unchecked, so that asking for review is never worse than asking for nothing.",
+                "items": {
+                    "maxLength": 80,
+                    "type": "string",
+                },
+                "maxItems": 20,
+                "type": "array",
             },
             "operationClasses": {
                 "description": "What this client intends to do. Ask for what the task needs and no more: a grant is also a description of the blast radius in the audit log.",
@@ -645,12 +718,24 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             },
         ],
         "properties": {
+            "ancestors": {
+                "description": "Expand each match upward toward the window root, returning up to this many ancestors in the element's ancestry field. Zero or absent means no ancestor expansion. Capped at 32 because a broken toolkit can hand back a non-terminating parent chain.",
+                "maximum": 32,
+                "minimum": 0,
+                "type": "integer",
+            },
             "clientId": {
                 "type": "string",
             },
             "confirm": {
                 "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
                 "type": "boolean",
+            },
+            "descendants": {
+                "description": "Expand each match downward, populating the element's children field to this many depth levels. Zero or absent means no descendant expansion.",
+                "maximum": 10,
+                "minimum": 0,
+                "type": "integer",
             },
             "limit": {
                 "maximum": 200,
@@ -662,6 +747,10 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             },
             "role": {
                 "type": "string",
+            },
+            "siblings": {
+                "description": "When true, return each match's immediate neighbours (up to a per-hit cap) in the element's siblings field.",
+                "type": "boolean",
             },
             "states": {
                 "items": {
@@ -796,6 +885,24 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "subscribeElement": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+        },
+        "required": [
+            "elementId",
+        ],
+        "type": "object",
+    },
     "typeKeystrokes": {
         "additionalProperties": False,
         "properties": {
@@ -874,6 +981,25 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "unsubscribeElement": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+            "elementId": {
+                "type": "string",
+            },
+        },
+        "required": [
+            "elementId",
+        ],
+        "type": "object",
+    },
     "waitFor": {
         "additionalProperties": False,
         "properties": {
@@ -929,6 +1055,25 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
 }
 
 RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
+    "attestElement": {
+        "additionalProperties": False,
+        "properties": {
+            "attestationId": {
+                "description": "Identifies this attestation. Present it to commitElement within its TTL; one attestation admits exactly one commit.",
+                "type": "string",
+            },
+            "expiresInMs": {
+                "description": "How long before the attestation must be retaken. A stale attestation is not reusable.",
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "attestationId",
+            "expiresInMs",
+        ],
+        "type": "object",
+    },
     "auditTail": {
         "additionalProperties": False,
         "properties": {
@@ -1024,6 +1169,9 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             "revision",
         ],
         "type": "object",
+    },
+    "commitElement": {
+        "$ref": "#/$defs/actionResult",
     },
     "editText": {
         "$ref": "#/$defs/actionResult",
@@ -1244,14 +1392,54 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
     "grantScope": {
         "additionalProperties": False,
         "properties": {
+            "anchors": {
+                "description": "Where this grant now hangs. Returned so a client can tell an anchor that was accepted from one that was quietly dropped.",
+                "items": {
+                    "$ref": "#/$defs/scopeAnchor",
+                },
+                "type": "array",
+            },
             "applications": {
                 "items": {
                     "type": "string",
                 },
                 "type": "array",
             },
+            "breadth": {
+                "additionalProperties": False,
+                "description": "How wide a net this scope casts. The competence dimension: breadth, not depth, is what overwhelms a small model.",
+                "properties": {
+                    "anchors": {
+                        "description": "Element-anchored permissions hung on this grant (A15). Each anchor is a separate place to keep track of, so it counts toward the same spread the applications do.",
+                        "minimum": 0,
+                        "type": "integer",
+                    },
+                    "applications": {
+                        "description": "Distinct applications this grant spans. A weaker model loses track across many.",
+                        "minimum": 0,
+                        "type": "integer",
+                    },
+                    "unbounded": {
+                        "description": "True when the scope names no applications and neither does the ceiling, so it spans every application there is. The count above is then a floor, not a total.",
+                        "type": "boolean",
+                    },
+                },
+                "required": [
+                    "applications",
+                    "anchors",
+                    "unbounded",
+                ],
+                "type": "object",
+            },
             "ceiling": {
                 "description": "The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice.",
+                "items": {
+                    "type": "string",
+                },
+                "type": "array",
+            },
+            "criteria": {
+                "description": "Every criterion a commit under this grant will be judged against, the mechanical ones included whether or not they were asked for. Returned so a client can tell what review it has actually bought without inferring it from a refusal.",
                 "items": {
                     "type": "string",
                 },
@@ -1266,6 +1454,26 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                     "type": "string",
                 },
                 "type": "array",
+            },
+            "severity": {
+                "additionalProperties": False,
+                "description": "How much damage a mistake within this scope can cause. A fact about the classes held, not an opinion about which model should hold them.",
+                "properties": {
+                    "irreversible": {
+                        "description": "True when the grant includes a class whose mistakes cannot be taken back (submit, destructive).",
+                        "type": "boolean",
+                    },
+                    "rank": {
+                        "description": "Ordinal of the highest operation class held: observe=0, edit=1, activate=2, submit=3, destructive=4.",
+                        "minimum": 0,
+                        "type": "integer",
+                    },
+                },
+                "required": [
+                    "rank",
+                    "irreversible",
+                ],
+                "type": "object",
             },
         },
         "required": [
@@ -1593,6 +1801,10 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 "description": "More matches exist than were returned — either the search was cut short or the answer hit its limit with tree left unwalked. A caller seeing this should narrow its filter rather than assume it has seen everything.",
                 "type": "boolean",
             },
+            "neighbourhoodTruncated": {
+                "description": "Expansion was cut short by the node budget or time limit, not the search itself. Distinct from searchTruncated: the search covered the window, but some matches did not get their full neighbourhood.",
+                "type": "boolean",
+            },
             "revision": {
                 "type": "integer",
             },
@@ -1699,11 +1911,46 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "subscribeElement": {
+        "additionalProperties": False,
+        "properties": {
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+            "subscribed": {
+                "type": "boolean",
+            },
+        },
+        "required": [
+            "subscribed",
+            "revision",
+        ],
+        "type": "object",
+    },
     "typeKeystrokes": {
         "$ref": "#/$defs/actionResult",
     },
     "typeText": {
         "$ref": "#/$defs/actionResult",
+    },
+    "unsubscribeElement": {
+        "additionalProperties": False,
+        "properties": {
+            "released": {
+                "description": "True when this call ended a subscription, false when there was nothing of this client's to give up.",
+                "type": "boolean",
+            },
+            "revision": {
+                "minimum": 0,
+                "type": "integer",
+            },
+        },
+        "required": [
+            "released",
+            "revision",
+        ],
+        "type": "object",
     },
     "waitFor": {
         "additionalProperties": False,
@@ -1969,6 +2216,9 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
                     "METHOD_NOT_FOUND",
                     "INVALID_PARAMS",
                     "INTERNAL_ERROR",
+                    "SUBSCRIPTION_LIMIT_REACHED",
+                    "ATTESTATION_FAILED",
+                    "ATTESTATION_STALE",
                 ],
                 "type": "string",
             },
@@ -2064,6 +2314,42 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
         },
         "type": "object",
     },
+    "scopeAnchor": {
+        "additionalProperties": False,
+        "description": "A place in the accessibility tree that a permission hangs on, and what may be done there. An application is the outermost place there is, and most tasks mean something far narrower: 'fill in this form' expressed as 'edit anything in the browser' draws the boundary around the wrong thing. Anchors are resolved against the live tree on every call, never remembered as an answer, and the nearest one covering the target decides — so a subtree granted observe with one field inside it granted edit composes without either rule knowing about the other.",
+        "properties": {
+            "coversDescendants": {
+                "description": "Whether this speaks for everything under it or only for the one node it names. Defaults to false: a grant on a single field that silently reached everything beneath it would be the widening anchors exist to prevent.",
+                "type": "boolean",
+            },
+            "operationClasses": {
+                "description": "What may be done at this place. Faces the ceiling like every other class named in a grant: an anchor is a narrowing device, never a side door.",
+                "items": {
+                    "enum": [
+                        "observe",
+                        "edit",
+                        "activate",
+                        "submit",
+                        "destructive",
+                    ],
+                    "type": "string",
+                },
+                "maxItems": 5,
+                "minItems": 1,
+                "type": "array",
+            },
+            "target": {
+                "description": "The place this hangs on: an element id, a window id, or an application name. Ids are matched exactly, because an id is minted rather than typed and a substring of one is a coincidence. Application names are matched as substrings, the same way they are everywhere else.",
+                "maxLength": 200,
+                "type": "string",
+            },
+        },
+        "required": [
+            "target",
+            "operationClasses",
+        ],
+        "type": "object",
+    },
     "semanticElement": {
         "additionalProperties": False,
         "description": "One thing on the desktop, as a caller sees it.",
@@ -2072,6 +2358,13 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
                 "description": "Action names invokable on this element. For a window this is often the application's whole command set.",
                 "items": {
                     "type": "string",
+                },
+                "type": "array",
+            },
+            "ancestry": {
+                "description": "Ancestor chain for this element, nearest first, up to the requested depth. Present only when the caller asked for ancestor expansion. Each entry is a full element whose id is valid for getElement.",
+                "items": {
+                    "$ref": "#/$defs/semanticElement",
                 },
                 "type": "array",
             },
@@ -2108,6 +2401,13 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
             "role": {
                 "description": "What kind of thing it is, in the backend's vocabulary.",
                 "type": "string",
+            },
+            "siblings": {
+                "description": "Immediate neighbours of this element under the same parent, up to a per-hit cap. Present only when the caller asked for sibling expansion.",
+                "items": {
+                    "$ref": "#/$defs/semanticElement",
+                },
+                "type": "array",
             },
             "states": {
                 "items": {

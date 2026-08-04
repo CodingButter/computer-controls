@@ -67,6 +67,12 @@ class Record:
     from_revision: int = 0
     to_revision: int = 0
     error_code: str = ""
+    #: A submit-class proof, service-assembled below the agent's layer. A verdict
+    #: tally only — which criteria verified, which mismatched, which were
+    #: unchecked — never the contents of a field. The audit log is a fourth sink
+    #: for exactly the values the redaction module exists to withhold, and a
+    #: verdict is a fact about the outcome rather than about the field.
+    attestation_summary: str = ""
 
     def to_json(self, *, at: float) -> str:
         payload: dict[str, Any] = {
@@ -95,6 +101,8 @@ class Record:
             payload["durationMs"] = self.duration_ms
         if self.to_revision or self.from_revision:
             payload["revisions"] = [self.from_revision, self.to_revision]
+        if self.attestation_summary:
+            payload["attestation"] = self.attestation_summary
         # Every field above is named. There is deliberately no free-form bag
         # here: a record with somewhere to put "anything else relevant" is a
         # record that eventually has the contents of a field in it, added by

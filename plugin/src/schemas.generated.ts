@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: e16c1fef044c1ae0
+// Protocol version: 1.0   schema sha256: 375c11d95e161bbc
 
 import { z } from "@mastra/code-sdk/plugin";
 
@@ -25,7 +25,7 @@ export const observedEffectsSchema = z.object({
 });
 
 export const errorDataSchema = z.object({
-  code: z.enum(["APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR"]),
+  code: z.enum(["APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR", "SUBSCRIPTION_LIMIT_REACHED", "ATTESTATION_FAILED", "ATTESTATION_STALE"]),
   detail: z.record(z.string(), z.unknown()).optional(),
   message: z.string().describe("Present when this error travels inside a result rather than as a JSON-RPC error. A failed step inside a batch has no top-level error member to carry its explanation, and a report that says a step failed without saying why is not worth returning.").optional(),
 });
@@ -66,9 +66,16 @@ export const elementClaimSchema = z.object({
   reason: z.string().describe("What the holder said it was doing. Present when it said.").optional(),
 });
 
+export const scopeAnchorSchema = z.object({
+  coversDescendants: z.boolean().describe("Whether this speaks for everything under it or only for the one node it names. Defaults to false: a grant on a single field that silently reached everything beneath it would be the widening anchors exist to prevent.").optional(),
+  operationClasses: z.array(z.enum(["observe", "edit", "activate", "submit", "destructive"])).describe("What may be done at this place. Faces the ceiling like every other class named in a grant: an anchor is a narrowing device, never a side door."),
+  target: z.string().max(200).describe("The place this hangs on: an element id, a window id, or an application name. Ids are matched exactly, because an id is minted rather than typed and a substring of one is a coincidence. Application names are matched as substrings, the same way they are everywhere else."),
+});
+
 export const semanticElementSchema: z.ZodType<unknown> = z.lazy(() =>
   z.object({
     actions: z.array(z.string()).describe("Action names invokable on this element. For a window this is often the application's whole command set."),
+    ancestry: z.array(semanticElementSchema).describe("Ancestor chain for this element, nearest first, up to the requested depth. Present only when the caller asked for ancestor expansion. Each entry is a full element whose id is valid for getElement.").optional(),
     backend: z.enum(["atspi", "compositor"]),
     bounds: boundsSchema.optional(),
     children: z.array(semanticElementSchema).optional(),
@@ -76,11 +83,22 @@ export const semanticElementSchema: z.ZodType<unknown> = z.lazy(() =>
     id: z.string().regex(/^(el|win|app)-[0-9a-f]{12}$/).describe("Stable reference. Valid for the service instance's lifetime. Never reused for a different element."),
     name: z.string().describe("Accessible name. Passed through the value-egress point."),
     role: z.string().describe("What kind of thing it is, in the backend's vocabulary."),
+    siblings: z.array(semanticElementSchema).describe("Immediate neighbours of this element under the same parent, up to a per-hit cap. Present only when the caller asked for sibling expansion.").optional(),
     states: z.array(z.string()),
     truncated: z.boolean().describe("Present and true when this element has children the walk did not return, whether because the node budget ran out or because the depth limit was reached. Never silently omitted: a subtree that was cut off must never be indistinguishable from one that ended. Drill from this element with inspectElement to see what is below it.").optional(),
     value: z.string().describe("Current value, for elements that hold one. Passed through the value-egress point.").optional(),
   }),
 );
+
+export const attestElementParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  elementId: z.string().describe("The field whose contents are being attested for a later commit."),
+});
+export const attestElementResult = z.object({
+  attestationId: z.string().describe("Identifies this attestation. Present it to commitElement within its TTL; one attestation admits exactly one commit."),
+  expiresInMs: z.number().int().min(0).describe("How long before the attestation must be retaken. A stale attestation is not reusable."),
+});
 
 export const auditTailParams = z.object({
   clientId: z.string().optional(),
@@ -127,6 +145,16 @@ export const claimElementResult = z.object({
   claim: elementClaimSchema,
   revision: z.number().int().min(0),
 });
+
+export const commitElementParams = z.object({
+  action: z.string().describe("The action to trigger, as reported in the element's actions list. Not an index: indices move. When omitted, the element's first action is used.").optional(),
+  attestationId: z.string().describe("The attestation returned by attestElement for this field. One attestation admits one commit; a second commit with the same id is refused."),
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  elementId: z.string().describe("The field whose attested contents are being sent."),
+  settleMs: z.number().int().min(0).max(10000).optional(),
+});
+export const commitElementResult = z.record(z.string(), z.unknown());
 
 export const editTextParams = z.object({
   clientId: z.string().optional(),
@@ -230,18 +258,31 @@ export const getRevisionResult = z.object({
 });
 
 export const grantScopeParams = z.object({
+  anchors: z.array(scopeAnchorSchema).describe("Places in the tree this grant hangs on, instead of hanging on whole applications. A grant that names anchors has said where it applies, so anywhere else is outside it — the same rule naming applications individually has always had. Omit to grant across applications as before.").optional(),
   applications: z.array(z.string().max(200)).describe("Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing.").optional(),
   clientId: z.string().optional(),
   confirm: z.boolean().optional(),
+  criteria: z.array(z.string().max(80)).describe("The questions a commit made under this grant must be answered against. Declared here, at the door, because the party being graded does not write the rubric — a worker cannot reach this field, and the service's own mechanical criteria are asked on top of whatever is named here. A name this service cannot decide is still carried and reported as unchecked, so that asking for review is never worse than asking for nothing.").optional(),
   operationClasses: z.array(z.enum(["observe", "edit", "activate", "submit", "destructive"])).describe("What this client intends to do. Ask for what the task needs and no more: a grant is also a description of the blast radius in the audit log."),
   reason: z.string().max(400).describe("What this is for, in the caller's own words. Recorded in the audit log, where the useful question months later is why, not what.").optional(),
   seconds: z.number().int().min(30).max(86400).describe("How long the grant survives without use. Idle time, not a lifetime — a grant being used every second does not expire mid-sentence.").optional(),
 });
 export const grantScopeResult = z.object({
+  anchors: z.array(scopeAnchorSchema).describe("Where this grant now hangs. Returned so a client can tell an anchor that was accepted from one that was quietly dropped.").optional(),
   applications: z.array(z.string()).optional(),
+  breadth: z.object({
+    anchors: z.number().int().min(0).describe("Element-anchored permissions hung on this grant (A15). Each anchor is a separate place to keep track of, so it counts toward the same spread the applications do."),
+    applications: z.number().int().min(0).describe("Distinct applications this grant spans. A weaker model loses track across many."),
+    unbounded: z.boolean().describe("True when the scope names no applications and neither does the ceiling, so it spans every application there is. The count above is then a floor, not a total."),
+  }).describe("How wide a net this scope casts. The competence dimension: breadth, not depth, is what overwhelms a small model.").optional(),
   ceiling: z.array(z.string()).describe("The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice."),
+  criteria: z.array(z.string()).describe("Every criterion a commit under this grant will be judged against, the mechanical ones included whether or not they were asked for. Returned so a client can tell what review it has actually bought without inferring it from a refusal.").optional(),
   expiresInSeconds: z.number().int().optional(),
   operationClasses: z.array(z.string()).describe("What this client now holds. Always includes observe: a client that may edit must be able to check whether its edit worked."),
+  severity: z.object({
+    irreversible: z.boolean().describe("True when the grant includes a class whose mistakes cannot be taken back (submit, destructive)."),
+    rank: z.number().int().min(0).describe("Ordinal of the highest operation class held: observe=0, edit=1, activate=2, submit=3, destructive=4."),
+  }).describe("How much damage a mistake within this scope can cause. A fact about the classes held, not an opinion about which model should hold them.").optional(),
 });
 
 export const helloParams = z.object({
@@ -381,11 +422,14 @@ export const performActionsResult = z.object({
 });
 
 export const queryElementsParams = z.object({
+  ancestors: z.number().int().min(0).max(32).describe("Expand each match upward toward the window root, returning up to this many ancestors in the element's ancestry field. Zero or absent means no ancestor expansion. Capped at 32 because a broken toolkit can hand back a non-terminating parent chain.").optional(),
   clientId: z.string().optional(),
   confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+  descendants: z.number().int().min(0).max(10).describe("Expand each match downward, populating the element's children field to this many depth levels. Zero or absent means no descendant expansion.").optional(),
   limit: z.number().int().min(1).max(200).optional(),
   name: z.string().optional(),
   role: z.string().optional(),
+  siblings: z.boolean().describe("When true, return each match's immediate neighbours (up to a per-hit cap) in the element's siblings field.").optional(),
   states: z.array(z.string()).optional(),
   windowId: z.string(),
 }).refine((value) => value.role !== undefined || value.name !== undefined || value.states !== undefined, { message: "at least one of role, name, states is required" });
@@ -394,6 +438,7 @@ export const queryElementsResult = z.object({
   elements: z.array(semanticElementSchema),
   matchCount: z.number().int(),
   moreResults: z.boolean().describe("More matches exist than were returned — either the search was cut short or the answer hit its limit with tree left unwalked. A caller seeing this should narrow its filter rather than assume it has seen everything.").optional(),
+  neighbourhoodTruncated: z.boolean().describe("Expansion was cut short by the node budget or time limit, not the search itself. Distinct from searchTruncated: the search covered the window, but some matches did not get their full neighbourhood.").optional(),
   revision: z.number().int(),
   searchTruncated: z.boolean().describe("The search gave up before covering the window."),
 });
@@ -447,6 +492,16 @@ export const setObservationModeResult = z.object({
   revision: z.number().int(),
 });
 
+export const subscribeElementParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().optional(),
+  elementId: z.string(),
+});
+export const subscribeElementResult = z.object({
+  revision: z.number().int().min(0),
+  subscribed: z.boolean(),
+});
+
 export const typeKeystrokesParams = z.object({
   clientId: z.string().optional(),
   confirm: z.boolean().optional(),
@@ -468,6 +523,16 @@ export const typeTextParams = z.object({
   wordsPerMinute: z.number().int().min(10).max(220).describe("Typing speed. Defaults to a competent typist. Faster than a person can type is available and is a choice the caller makes knowingly.").optional(),
 });
 export const typeTextResult = z.record(z.string(), z.unknown());
+
+export const unsubscribeElementParams = z.object({
+  clientId: z.string().optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+  elementId: z.string(),
+});
+export const unsubscribeElementResult = z.object({
+  released: z.boolean().describe("True when this call ended a subscription, false when there was nothing of this client's to give up."),
+  revision: z.number().int().min(0),
+});
 
 export const waitForParams = z.object({
   clientId: z.string().optional(),
