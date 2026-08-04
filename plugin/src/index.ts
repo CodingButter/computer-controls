@@ -1,7 +1,9 @@
 import { createTool, defineMastraCodePlugin, z } from "@mastra/code-sdk/plugin";
 
 import { DesktopServiceError } from "./client.ts";
+import type { GrantScopeResult } from "./protocol.generated.ts";
 import { SCHEMA_DIGEST } from "./protocol.generated.ts";
+import { brainFromGrant } from "./scope-brain.ts";
 import * as schemas from "./schemas.generated.ts";
 import { buildPushLane } from "./signals/index.ts";
 import { DesktopSupervisor } from "./supervisor.ts";
@@ -139,6 +141,25 @@ async function request<T>(method: string, params: Record<string, unknown> = {}):
     return describeFailure(error);
   }
 }
+
+/**
+ * A grant, plus how much thinking the scope it describes asks for.
+ *
+ * The service reports severity and breadth and stops there — it has no opinion
+ * about models. Choosing one from those two numbers is a client decision, and
+ * running it here means every grant re-decides, including a mid-run escalation:
+ * a scope change is a model change, and carrying on cheaply after being handed
+ * more is precisely the wrong economy. Swapping the running model on the answer
+ * belongs to whatever hosts this plugin; the choice is what this reports.
+ */
+const grantScopeWithBrain = schemas.grantScopeResult.extend({
+  brain: z.object({
+    tier: z.enum(["minimal", "standard", "heavy"]).describe(
+      "How much thinking this scope asks for. Not a model name: a client maps tiers onto what it runs.",
+    ),
+    reason: z.string().describe("Which of the two dimensions drove the choice."),
+  }).describe("The model tier this scope calls for, re-decided on every grant."),
+});
 
 export default defineMastraCodePlugin({
   id: "desktop-control",
@@ -420,8 +441,11 @@ export default defineMastraCodePlugin({
           "unused for a while, and an expired one comes back as SESSION_EXPIRED, which means " +
           "ask again rather than give up.",
         inputSchema: schemas.grantScopeParams,
-        outputSchema: schemas.grantScopeResult,
-        execute: async (input) => await request("grantScope", { ...input }),
+        outputSchema: grantScopeWithBrain,
+        execute: async (input) => {
+          const granted = await request<GrantScopeResult>("grantScope", { ...input });
+          return { ...granted, brain: brainFromGrant(granted) };
+        },
       }),
     },
 

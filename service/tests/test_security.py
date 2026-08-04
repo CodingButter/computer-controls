@@ -309,6 +309,83 @@ def test_an_existing_file_is_named_as_something_to_widen():
     assert "Widen" in remedy and "does not exist" not in remedy
 
 
+# -- severity_of -------------------------------------------------------------
+
+def test_severity_ranks_a_read_only_grant_as_lowest():
+    result = security.severity_of({"observe"})
+    assert result == {"rank": 0, "irreversible": False}
+
+
+def test_severity_ranks_destructive_as_highest_and_irreversible():
+    result = security.severity_of({"observe", "destructive"})
+    assert result == {"rank": 4, "irreversible": True}
+
+
+def test_severity_treats_submit_as_irreversible():
+    # submit is the cliff: a submitted form cannot be unsubmitted.
+    result = security.severity_of({"observe", "submit"})
+    assert result["rank"] == 3
+    assert result["irreversible"] is True
+
+
+def test_severity_picks_the_highest_held_class_as_the_rank():
+    result = security.severity_of({"observe", "edit", "activate"})
+    assert result == {"rank": 2, "irreversible": False}
+
+
+def test_severity_of_no_classes_is_observe_rank():
+    result = security.severity_of(set())
+    assert result == {"rank": 0, "irreversible": False}
+
+
+# -- breadth_of --------------------------------------------------------------
+
+def test_breadth_counts_named_applications():
+    grant = security.Grant(classes=frozenset({"observe"}), applications=frozenset({"chrome", "editor"}))
+    result = security.breadth_of(grant, security.Ceiling())
+    assert result == {"applications": 2, "anchors": 0, "unbounded": False}
+
+
+def test_breadth_counts_per_application_entries():
+    grant = security.Grant(
+        classes=frozenset({"observe"}),
+        per_application={"chrome": frozenset({"submit"}), "editor": frozenset({"edit"})},
+    )
+    result = security.breadth_of(grant, security.Ceiling())
+    assert result["applications"] == 2
+    assert result["anchors"] == 0
+
+
+def test_breadth_counts_an_overlapping_application_only_once():
+    grant = security.Grant(
+        classes=frozenset({"observe"}),
+        applications=frozenset({"chrome"}),
+        per_application={"chrome": frozenset({"submit"})},
+    )
+    result = security.breadth_of(grant, security.Ceiling())
+    assert result["applications"] == 1
+
+
+def test_breadth_falls_back_to_the_ceiling_when_the_grant_names_nothing():
+    # A grant with no named applications acts against whatever the ceiling
+    # allows, so the breadth is the ceiling's spread, not zero.
+    ceiling = security.Ceiling(applications=frozenset({"chrome", "editor", "notes"}))
+    grant = security.Grant(classes=frozenset({"observe"}))
+    result = security.breadth_of(grant, ceiling)
+    assert result["applications"] == 3
+    assert result["unbounded"] is False
+
+
+def test_a_scope_that_names_nothing_at_all_is_reported_as_unbounded():
+    # Nothing named in the grant and nothing named in the ceiling is every
+    # application there is — the widest scope available. Reported as a count it
+    # would be zero, which reads as the narrowest, and a dispatcher reading that
+    # number would size the model for a scope of one thing.
+    grant = security.Grant(classes=frozenset({"observe"}))
+    result = security.breadth_of(grant, security.Ceiling())
+    assert result["unbounded"] is True
+
+
 class TestPermissionsPerApplication:
     """The shape a real task needs: read here, send there, and never the reverse.
 

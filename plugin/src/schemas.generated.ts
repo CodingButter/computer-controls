@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: bfa45250563894d0
+// Protocol version: 1.0   schema sha256: 0b846a8faf997849
 
 import { z } from "@mastra/code-sdk/plugin";
 
@@ -239,9 +239,18 @@ export const grantScopeParams = z.object({
 });
 export const grantScopeResult = z.object({
   applications: z.array(z.string()).optional(),
+  breadth: z.object({
+    anchors: z.number().int().min(0).describe("Element-anchored permissions. Zero until scope anchors (A15) ship; until then breadth is an application-spread proxy."),
+    applications: z.number().int().min(0).describe("Distinct applications this grant spans. A weaker model loses track across many."),
+    unbounded: z.boolean().describe("True when the scope names no applications and neither does the ceiling, so it spans every application there is. The count above is then a floor, not a total."),
+  }).describe("How wide a net this scope casts. The competence dimension: breadth, not depth, is what overwhelms a small model.").optional(),
   ceiling: z.array(z.string()).describe("The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice."),
   expiresInSeconds: z.number().int().optional(),
   operationClasses: z.array(z.string()).describe("What this client now holds. Always includes observe: a client that may edit must be able to check whether its edit worked."),
+  severity: z.object({
+    irreversible: z.boolean().describe("True when the grant includes a class whose mistakes cannot be taken back (submit, destructive)."),
+    rank: z.number().int().min(0).describe("Ordinal of the highest operation class held: observe=0, edit=1, activate=2, submit=3, destructive=4."),
+  }).describe("How much damage a mistake within this scope can cause. A fact about the classes held, not an opinion about which model should hold them.").optional(),
 });
 
 export const helloParams = z.object({

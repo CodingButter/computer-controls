@@ -62,6 +62,46 @@ def test_a_client_may_ask_for_a_grant_while_holding_nothing(built):
     assert "edit" in granted["operationClasses"]
 
 
+def test_a_grant_reports_its_own_severity_and_breadth(built):
+    # The two numbers a dispatcher needs to size the model it puts behind this
+    # scope. Both are facts about the grant, so nothing has to be asked a model
+    # to learn them.
+    srv, _, _ = built
+    granted = call(
+        srv,
+        "grantScope",
+        operationClasses=["observe", "edit"],
+        applications=["gnome-text-editor"],
+        clientId="scribe",
+    )
+    assert granted["severity"] == {"rank": 1, "irreversible": False}
+    assert granted["breadth"] == {"applications": 1, "anchors": 0, "unbounded": False}
+
+
+def test_a_grant_that_named_no_application_says_it_is_unbounded(built):
+    # The default ceiling names no applications either, so this grant reaches
+    # all of them. Zero would read as the narrowest scope in the system.
+    srv, _, _ = built
+    granted = call(srv, "grantScope", operationClasses=["observe"], clientId="wanderer")
+    assert granted["breadth"]["unbounded"] is True
+
+
+def test_a_wider_grant_reports_a_higher_severity_and_breadth(built):
+    # The same client asking for more mid-run: the report moves with it, which
+    # is what lets a dispatcher re-select rather than carry on cheaply.
+    srv, _, _ = built
+    call(srv, "grantScope", operationClasses=["observe"], applications=["chrome"], clientId="scribe")
+    wider = call(
+        srv,
+        "grantScope",
+        operationClasses=["observe", "submit"],
+        applications=["chrome", "gnome-text-editor", "vesktop"],
+        clientId="scribe",
+    )
+    assert wider["severity"] == {"rank": 3, "irreversible": True}
+    assert wider["breadth"]["applications"] == 3
+
+
 def test_the_refusal_is_recorded_with_its_reason(built):
     srv, _, log = built
     with pytest.raises(DesktopError):
