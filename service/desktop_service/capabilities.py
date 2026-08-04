@@ -20,8 +20,6 @@ import os
 import shutil
 from typing import Any, Callable
 
-from . import policy
-
 
 def _detect_session(discover: Callable[[], dict[str, str]] | None = None) -> dict[str, Any]:
     """Describe the session, preferring our own environment and falling back to
@@ -166,7 +164,6 @@ def build_report(
                 ),
                 "ocr": False,
                 "ocrReason": "deferred by scope: no OCR engine is bundled with this build",
-                "blockedApplications": sorted(policy.blocked_applications()),
             },
         },
         {

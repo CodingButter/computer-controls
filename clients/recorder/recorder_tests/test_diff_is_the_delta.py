@@ -168,6 +168,46 @@ def test_an_unchanged_desktop_still_commits_the_step(recorder, agent):
     assert touched(recorder.store) == {"steps/0001.json"}
 
 
+def test_a_later_thinner_change_does_not_leave_a_stale_last_change(recorder, agent):
+    # A fuller change establishes the element; a later, thinner change — one that
+    # does not name the window — folds on top. The committed document's
+    # lastChange must describe the later change, not the earlier one it replaced,
+    # and what the earlier change established that the later one does not name
+    # (the window) must survive underneath it. An episode is committed forever,
+    # and a lastChange that is subtly wrong about *when* something happened is
+    # worse than one that is missing, because the missing one prompts a question
+    # and the wrong one does not.
+    appeared = conformant(
+        kind="element-appeared",
+        revision=1,
+        windowId="win-a",
+        elementId="el-price",
+        applicationName="Test App",
+        summary="the price field appeared",
+    )
+    flipped = conformant(
+        kind="element-state-changed",
+        revision=2,
+        elementId="el-price",
+        applicationName="Test App",
+        summary="the price field flipped to checked",
+    )
+    episode = recorder.open("watch a listing", agent)
+    episode.step(
+        "it appears, then a state flips",
+        "invokeElement",
+        "el-price",
+        effects_of(appeared, flipped),
+    )
+
+    document = json.loads(
+        (recorder.store.path / "desktop/elements/el-price.json").read_text()
+    )
+    assert document["lastChange"]["revision"] == 2
+    assert document["lastChange"]["kind"] == "element-state-changed"
+    assert document["windowId"] == "win-a"
+
+
 def test_the_recorder_never_reaches_for_the_service_or_a_socket():
     """The structural half of 'no second observation path'.
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import plugin from "./index.ts";
 import { brainFromGrant, selectBrain } from "./scope-brain.ts";
+import { DesktopSupervisor } from "./supervisor.ts";
 
 const observeOnly = { rank: 0, irreversible: false };
 const oneApplication = { applications: 1, anchors: 0, unbounded: false };
@@ -93,28 +93,42 @@ describe("choosing from what the service reported", () => {
   });
 });
 
-describe("the grant tool's answer", () => {
-  const tools = plugin.tools as Record<string, { tool: { outputSchema: any } }>;
-
-  it("carries the tier alongside what was granted", () => {
-    const schema = tools.desktop_grant_scope!.tool.outputSchema;
-    const answer = {
-      ceiling: ["observe", "submit"],
-      operationClasses: ["observe", "submit"],
-      severity: { rank: 3, irreversible: true },
-      breadth: { applications: 1, anchors: 0, unbounded: false },
-      brain: { tier: "heavy", reason: "severity: irreversible" },
-    };
-    expect(schema.safeParse(answer).success).toBe(true);
+describe("where the choice now lives", () => {
+  // A13 removed granting from the agent's hand, so there is no tool whose
+  // answer could carry a tier. The grant response exists in exactly one place:
+  // the supervisor's door opening. That is where the choice is made, and the
+  // host reads it from the supervisor rather than from a tool output.
+  it("exposes no choice before a door has been opened", () => {
+    const fresh = new DesktopSupervisor("scope-brain-test");
+    expect(fresh.brain).toBeUndefined();
   });
 
-  it("will not accept a tier it does not know", () => {
-    const schema = tools.desktop_grant_scope!.tool.outputSchema;
-    const answer = {
-      ceiling: ["observe"],
-      operationClasses: ["observe"],
-      brain: { tier: "gpt-9", reason: "made up" },
-    };
-    expect(schema.safeParse(answer).success).toBe(false);
+  it("only ever answers with a tier a host can map", () => {
+    // The old tool schema enforced the enum at the protocol edge; without the
+    // tool, the guarantee is that the selector cannot produce anything else.
+    const tiers = new Set(["minimal", "standard", "heavy"]);
+    for (const rank of [0, 1, 2, 3, 4]) {
+      for (const applications of [0, 1, 3, 6]) {
+        const choice = selectBrain(
+          { rank, irreversible: rank >= 3 },
+          { applications, anchors: 0, unbounded: applications === 0 },
+        );
+        expect(tiers.has(choice.tier)).toBe(true);
+        expect(choice.reason.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("counts anchored places in what the service reported", () => {
+    // A15 shipped: an anchored grant is not narrow just because it names one
+    // application. Eight anchored fields are eight things to keep track of.
+    const choice = brainFromGrant({
+      ceiling: ["observe", "edit"],
+      operationClasses: ["observe", "edit"],
+      severity: { rank: 1, irreversible: false },
+      breadth: { applications: 1, anchors: 8, unbounded: false },
+    });
+    expect(choice.tier).toBe("heavy");
+    expect(choice.reason).toMatch(/anchors/);
   });
 });

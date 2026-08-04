@@ -185,6 +185,31 @@ class DeltaEngine:
             self._changes.append(snapshot.revision, change)
         return changes
 
+    def report(self, changes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Record changes the diff engine cannot derive from two snapshots.
+
+        A subscription going stale is a semantic fact the diff refuses to guess
+        at: an element absent from both snapshots is not reported as changed,
+        and ``sample_values`` returns empty for both unreachable and
+        never-touched elements. The observe loop resolves 'gone' from
+        'unreachable this pass' and reports it here, where it enters the same
+        change log every change enters.
+
+        Stamps the whole batch at one revision, the way ``observe`` stamps a
+        batch from one snapshot. Advances the revision, because an element going
+        stale IS a desktop state change — a counter that did not tick on it
+        would leave a subscriber's cursor permanently deaf to the one change it
+        most needs to hear.
+        """
+        if not changes:
+            return []
+        revision = self._advance() if self._advance is not None else self._current.revision
+        for change in changes:
+            change["revision"] = revision
+            self._changes.append(revision, change)
+        self._current = replace(self._current, revision=revision)
+        return changes
+
     def since(self, revision: int, asking_client: str = "") -> dict[str, Any]:
         """Everything this asker has not been told, labelled for this asker.
 

@@ -88,8 +88,58 @@ describe.skipIf(!available)("finding a desktop service", () => {
     }
   }, 40_000);
 
+  it("opens the door for the classes it was constructed with, without a tool", async () => {
+    // A13: the model is never handed `grantScope`, so a minted write tool can
+    // only ever succeed if the client asked for the class itself. If this
+    // breaks, an agent configured for `edit` gets edit tools that always
+    // refuse — the failure is silent, and it looks like a broken desktop.
+    process.env.MASTRACODE_DESKTOP_SOCKET = socketPath;
+    const supervisor = new DesktopSupervisor("door-gate");
+    try {
+      supervisor.setScope(["observe", "edit"], "a test that proves the client opens the door");
+      await supervisor.request("getRevision", { clientId: "door-gate" });
+
+      const audit = await supervisor.request<{ entries: { method: string; reason?: string }[] }>(
+        "auditTail",
+        { clientId: "door-gate", limit: 50 },
+      );
+      const grant = audit.entries.find((entry) => entry.method === "grantScope");
+      expect(grant, "the client never asked for the scope it minted tools for").toBeDefined();
+      expect(grant?.reason).toBe("a test that proves the client opens the door");
+
+      // A16: the grant response is the only place the scope's price is ever
+      // reported, so the tier must have been decided here — a real daemon
+      // measured a real grant, and the choice reflects it.
+      expect(supervisor.brain, "the door opened but no brain tier was decided").toBeDefined();
+      expect(["minimal", "standard", "heavy"]).toContain(supervisor.brain!.tier);
+      expect(supervisor.brain!.reason.length).toBeGreaterThan(0);
+    } finally {
+      supervisor.stop();
+    }
+  }, 30_000);
+
+  it("asks for nothing when its scope is observe, which every connection already has", async () => {
+    process.env.MASTRACODE_DESKTOP_SOCKET = socketPath;
+    const supervisor = new DesktopSupervisor("quiet-gate");
+    try {
+      supervisor.setScope(["observe"], "reading only");
+      await supervisor.request("getRevision", { clientId: "quiet-gate" });
+
+      const audit = await supervisor.request<{ entries: { method: string; clientId?: string }[] }>(
+        "auditTail",
+        { clientId: "quiet-gate", limit: 50 },
+      );
+      const asked = audit.entries.some(
+        (entry) => entry.method === "grantScope" && entry.clientId === "quiet-gate",
+      );
+      expect(asked, "an observe-only client asked for a grant it did not need").toBe(false);
+    } finally {
+      supervisor.stop();
+    }
+  }, 30_000);
+
   it("agrees with the service about where a daemon lives", () => {
     delete process.env.MASTRACODE_DESKTOP_SOCKET;
-    expect(daemonSocketPath()).toMatch(/mastracode-desktop\/daemon\.sock$/);
+    expect(daemonSocketPath()).toMatch(/mastracode-desktop\/daemon-[0-9a-f]+\.sock$/);
   });
 });

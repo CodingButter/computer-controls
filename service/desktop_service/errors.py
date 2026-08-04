@@ -38,6 +38,19 @@ class ErrorCode:
     #: claim for. Nothing is in the way — the element is free — so this is a
     #: report about an estimate rather than a refusal about a conflict.
     CLAIM_EXPIRED = "CLAIM_EXPIRED"
+    #: Refused because this connection already holds the per-connection ceiling of
+    #: element subscriptions. The ceiling is carried in the detail, because a
+    #: refusal that names the bound lets a caller choose what to release.
+    SUBSCRIPTION_LIMIT_REACHED = "SUBSCRIPTION_LIMIT_REACHED"
+    #: The service could not assemble a proof for a submit-class action, so the
+    #: action was never dispatched. Not a permission answer: the caller may do
+    #: this, but the service could not confirm what it would be doing it to, and
+    #: a commit the service cannot describe is a commit nobody can review.
+    ATTESTATION_FAILED = "ATTESTATION_FAILED"
+    #: The target moved between the proof and the commit. An approval obtained
+    #: for one thing must not be applied to another, and the difference is named
+    #: in the detail so the caller can prove the field again rather than guess.
+    ATTESTATION_STALE = "ATTESTATION_STALE"
     TIMEOUT = "TIMEOUT"
     METHOD_NOT_FOUND = "METHOD_NOT_FOUND"
     INVALID_PARAMS = "INVALID_PARAMS"

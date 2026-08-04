@@ -33,7 +33,7 @@ export interface ScopeSeverity {
 export interface ScopeBreadth {
   /** Distinct applications the scope spans. */
   applications: number;
-  /** Element-anchored permissions handed out. Zero until scope anchors ship. */
+  /** Element-anchored permissions hung on the grant (A15). Each is a separate place to keep track of. */
   anchors: number;
   /** Whether the scope names no applications at all, and so spans every one there is. */
   unbounded: boolean;
