@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { DEFAULT_PLUGIN_ALLOWLIST } from "./plugins.ts";
+import { parseVoiceProviderId, type VoiceProviderId } from "./voice/providers.ts";
 
 /**
  * Where the hub keeps its state and what it serves.
@@ -39,6 +40,14 @@ export type ClientConfig = {
   pluginAllowlist: string[];
   /** Directory the browser UI is served from. */
   uiRoot: string;
+  /**
+   * Which mouth the person picked, when they picked one. Absent means "the one
+   * that is connected" — the behaviour a machine with a single voice account
+   * already had, and the reason connecting an account is all it takes to get a
+   * voice. Naming a provider here is what makes switching a setting rather than
+   * an edit.
+   */
+  voiceProvider?: VoiceProviderId;
 };
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -71,6 +80,10 @@ function readAllowlist(raw: string | undefined): string[] {
 
 export function resolveClientConfig(env: NodeJS.ProcessEnv = process.env): ClientConfig {
   const root = env.COMCON_CLIENT_ROOT ? path.resolve(env.COMCON_CLIENT_ROOT) : packageRoot;
+  // An unrecognised name falls through to "the one that is connected" rather
+  // than refusing to boot: a stale setting should cost a person their preferred
+  // voice, not their hub.
+  const voiceProvider = parseVoiceProviderId(env.COMCON_VOICE_PROVIDER);
   return {
     host: env.COMCON_CLIENT_HOST ?? "127.0.0.1",
     port: readPort(env.COMCON_CLIENT_PORT),
@@ -83,5 +96,6 @@ export function resolveClientConfig(env: NodeJS.ProcessEnv = process.env): Clien
     pluginHome: env.COMCON_PLUGIN_HOME ? path.resolve(env.COMCON_PLUGIN_HOME) : os.homedir(),
     pluginAllowlist: [...DEFAULT_PLUGIN_ALLOWLIST, ...readAllowlist(env.COMCON_PLUGIN_ALLOWLIST)],
     uiRoot: path.join(packageRoot, "public"),
+    ...(voiceProvider ? { voiceProvider } : {}),
   };
 }

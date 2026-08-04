@@ -87,8 +87,30 @@ test("the voice routes serve through the booted hub, not just their own module",
   };
   expect(voiceHealth.voice).toBeDefined();
   if (!voiceHealth.voice!.enabled) {
-    expect(voiceHealth.voice!.reason).toMatch(/OpenAI/);
+    expect(voiceHealth.voice!.reason).toMatch(/OpenAI|Google/);
   }
+
+  // The list of mouths a person may pick from, read off the running process
+  // against whatever this machine actually has. On a machine with no voice
+  // account it is empty — that is the "no key, no offer" rule holding at boot,
+  // not a failure — and either way no credential may appear in it.
+  const offered = await fetch(`${baseUrl}/api/voice/providers`);
+  expect(offered.status).toBe(200);
+  const offeredBody = (await offered.json()) as {
+    providers: Array<{ provider: string; usable: boolean }>;
+  };
+  expect(Array.isArray(offeredBody.providers)).toBe(true);
+  expect(JSON.stringify(offeredBody)).not.toMatch(/access|refresh|sk-|eyJ/);
+
+  // Whatever is offered must be a provider this hub actually knows.
+  for (const entry of offeredBody.providers) {
+    expect(["openai", "gemini-live"]).toContain(entry.provider);
+  }
+
+  // The settings section renders that list rather than a copy of it, so the
+  // page has to point at this route or the two answers can drift apart.
+  const settings = await fetch(`${baseUrl}/settings/accounts`).then((r) => r.text());
+  expect(settings).toContain("/api/voice/providers");
 });
 
 test("test_desktop_tools_are_minted_at_observe_scope", async () => {

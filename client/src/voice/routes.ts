@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { CompositeVoice } from "@mastra/core/voice";
 import { safeReason } from "../safe-reason.ts";
+import type { VoiceProviderView } from "./providers.ts";
 
 /**
  * The hub has exactly one agent, the session, so the `:agentId` position in
@@ -14,13 +15,28 @@ import { safeReason } from "../safe-reason.ts";
 export const SESSION_AGENT_ID = "session";
 
 export type VoiceMount = {
-  /** The ear and the mouth, or undefined when there is no OpenAI credential. */
+  /** The ear and the mouth, or undefined when there is no usable credential. */
   voice?: CompositeVoice;
   /** Why voice is off, phrased for a person; present exactly when voice is not. */
   reason?: string;
+  /**
+   * The providers this machine can offer, asked per request rather than
+   * captured at boot: connecting an account in the settings section has to
+   * change this answer without a restart.
+   */
+  providers?: () => VoiceProviderView[];
 };
 
 const VOICE_BASE = `/api/agents/${SESSION_AGENT_ID}/voice`;
+
+/**
+ * Where the settings section reads the list of mouths from.
+ *
+ * Not under the agent path: which providers this machine could use is a fact
+ * about the machine's credentials, true before any agent resolves and unchanged
+ * by which one did.
+ */
+export const VOICE_PROVIDERS_PATH = "/api/voice/providers";
 
 /** What a refusal says when the provider's own words cannot be repeated. */
 const PROVIDER_REFUSED = "The voice provider refused the request.";
@@ -96,6 +112,11 @@ export function buildVoiceApp(mount: VoiceMount): Hono {
     // stack that would explain it is not the caller's business.
     return c.json({ error: "Voice is temporarily unavailable." }, 500);
   });
+
+  // No key, no offer. An empty list is the honest answer on a machine with no
+  // voice credentials at all, and it is the same shape the settings section
+  // renders either way.
+  app.get(VOICE_PROVIDERS_PATH, (c) => c.json({ providers: mount.providers?.() ?? [] }));
 
   app.get(`${VOICE_BASE}/speakers`, async (c) => {
     const voice = mount.voice;

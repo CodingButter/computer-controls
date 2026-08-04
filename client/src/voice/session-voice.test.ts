@@ -39,7 +39,11 @@ const openaiAtTheWire: typeof globalThis.fetch = async (input, init) => {
   return Response.json({ text: HEARD });
 };
 
-const OPENAI_CREDENTIAL = { kind: "api-key" as const, key: "sk-test" };
+const OPENAI_CREDENTIAL = {
+  kind: "api-key" as const,
+  key: "sk-test",
+  provider: "openai" as const,
+};
 const NO_OPENAI_CREDENTIAL = { reason: "no OpenAI account is connected" };
 
 const sessionVoice = (credential: Parameters<typeof createSessionVoice>[0]) =>

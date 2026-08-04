@@ -9,7 +9,8 @@ import { prepareHub } from "./hub.ts";
 import {
   createSessionVoice,
   isRefusal,
-  resolveVoiceCredential,
+  listVoiceProviders,
+  resolveVoiceProvider,
 } from "./voice/index.ts";
 import { buildVoiceApp } from "./voice/routes.ts";
 
@@ -34,13 +35,19 @@ const providerAuth = createProviderAuth({ storage });
 
 /**
  * The ear and the mouth resolve from the same store the sign-in surface
- * writes, at boot: connect an OpenAI account and the next start has a voice.
+ * writes, at boot: connect a voice account and the next start has a voice.
  * No credential, no voice; the reason travels to the UI through /api/health.
+ *
+ * Which account, when more than one is connected, is the person's setting —
+ * `config.voiceProvider`. The list of mouths they could pick from is read per
+ * request instead, because connecting one must not require a restart to show up
+ * in the settings section.
  */
-const voiceCredential = await resolveVoiceCredential(storage);
+const voiceCredential = await resolveVoiceProvider(storage, config.voiceProvider);
 const voice = {
   app: buildVoiceApp({
     voice: createSessionVoice(voiceCredential),
+    providers: () => listVoiceProviders(storage),
     ...(isRefusal(voiceCredential) ? { reason: voiceCredential.reason } : {}),
   }),
   ...(isRefusal(voiceCredential) ? { reason: voiceCredential.reason } : {}),
