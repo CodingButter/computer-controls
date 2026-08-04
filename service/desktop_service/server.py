@@ -998,6 +998,15 @@ def _method_type_keystrokes(params: dict[str, Any]) -> dict[str, Any]:
     is read back and compared inside the backend, exactly as `typeText` is. A
     dumb write channel with an honest proof channel is a usable thing; without
     the proof it would only be hope.
+
+    With one field the proof channel cannot reach. A composer that answers with a
+    single embedded-object character reads the same whether it is empty or holding
+    a sentence, and the reading is taken before the write as well as after so that
+    such a field can be told apart from one that simply refused the text. When the
+    two readings agree and neither is what was typed, the verdict is
+    `unverifiable` rather than `mismatch`: the field is opaque, and reporting its
+    contents on the authority of a field that never reports its contents would be
+    a claim nothing here can make.
     """
     element_id = _str_param(params, "elementId", required=True)
     text = _str_param(params, "text", required=True)
@@ -1080,6 +1089,15 @@ def _method_type_keystrokes(params: dict[str, Any]) -> dict[str, Any]:
         # needs to trace text that went astray.
         progress["focusedWindow"] = held_window
 
+        # What the field said before anything was typed into it, as a digest
+        # rather than as text: the only thing that needs it is a comparison made
+        # back inside the backend, so the contents never reach this layer and
+        # cannot reach the caller. Taken before the clear below, because a
+        # reading taken after it is empty on every field, and two empty readings
+        # agreeing with each other would turn a write that went nowhere into a
+        # field that keeps its own counsel.
+        before = on_loop(lambda: atspi.text_digest(_resolve_element(element_id)))
+
         if replace and not synthesise(atspi.clear_field_by_keystrokes):
             progress["stoppedBecause"] = "the field would not clear"
             return False
@@ -1109,7 +1127,9 @@ def _method_type_keystrokes(params: dict[str, Any]) -> dict[str, Any]:
         # be confirmed and only the verdict leaves.
         try:
             verdict = on_loop(
-                lambda: atspi.text_matches(_resolve_element(element_id), text, exact=replace)
+                lambda: atspi.text_matches(
+                    _resolve_element(element_id), text, exact=replace, before=before
+                )
             )
         except DesktopError as unreachable:
             progress["verified"] = "unknown"
@@ -1117,9 +1137,12 @@ def _method_type_keystrokes(params: dict[str, Any]) -> dict[str, Any]:
             return False
         progress["verified"] = verdict
         if verdict == "unverifiable":
+            # Either the field masks its contents, or it reports the same thing
+            # before and after a write and so cannot witness one. The claim made
+            # here is only the one this method can stand behind.
             progress["stoppedBecause"] = progress.get("stoppedBecause") or (
-                "the field masks its own contents, so what was typed cannot be read back — "
-                "every character was accepted"
+                "the field does not report its own contents, so what was typed cannot be "
+                "read back — every character was accepted by the keyboard"
             )
             return not progress.get("charactersTyped", 0) < progress["charactersPlanned"]
         if verdict == "mismatch":
