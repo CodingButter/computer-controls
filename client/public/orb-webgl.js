@@ -269,19 +269,27 @@ void main() {
   vec3 viewDir = normalize(-vViewPos);
   float facing = abs(dot(vNormal, viewDir));
 
-  float t = uTime * 0.12;
-  float s1 = snoise(vPos * 1.3 + vec3(t, t * 0.6, -t * 0.8));
-  float s2 = snoise(vPos * 2.6 - vec3(t * 0.7, -t, t * 0.5) + 23.0);
-  float smoke = smoothstep(-0.1, 0.9, s1 * 0.7 + s2 * 0.5);
+  // Swirl: the sampling space itself twists around the vertical axis, with
+  // the twist angle varying by height, so the haze visibly churns rather
+  // than merely drifting.
+  float ang = uTime * 0.22 + vPos.y * 1.8;
+  mat2 rot = mat2(cos(ang), -sin(ang), sin(ang), cos(ang));
+  vec3 p = vPos;
+  p.xz = rot * p.xz;
 
-  // Haze lives at the silhouette and thins to nothing face-on, so the orb
-  // and its M stay readable through it.
-  float shell = pow(1.0 - facing, 1.4);
+  float t = uTime * 0.18;
+  float s1 = snoise(p * 1.3 + vec3(t, t * 0.6, -t * 0.8));
+  float s2 = snoise(p * 2.6 - vec3(t * 0.7, -t, t * 0.5) + 23.0);
+  float smoke = smoothstep(-0.25, 0.75, s1 * 0.7 + s2 * 0.5);
+
+  // Haze is heaviest at the silhouette and thins face-on, so the orb and
+  // its M stay readable through it.
+  float shell = pow(1.0 - facing, 1.0);
 
   vec3 haze = mix(vec3(0.42, 0.22, 0.7), vec3(0.85, 0.3, 0.8), s2 * 0.5 + 0.5);
   haze = mix(haze, uColor * 1.3, 0.3);
 
-  float alpha = smoke * shell * 0.4;
+  float alpha = smoke * shell * 0.65;
   gl_FragColor = vec4(haze, alpha);
 }
 `;
@@ -389,8 +397,8 @@ export async function mountWebGlOrb({ canvas, reducedMotion = false }) {
 
     mesh.rotation.y += dt * 0.1 * motionScale;
     // The smoke turns against the sphere, so the two layers visibly slide.
-    smoke.rotation.y -= dt * 0.05 * motionScale;
-    smoke.rotation.z += dt * 0.02 * motionScale;
+    smoke.rotation.y -= dt * 0.12 * motionScale;
+    smoke.rotation.z += dt * 0.04 * motionScale;
 
     renderer.render(scene, camera);
   }
