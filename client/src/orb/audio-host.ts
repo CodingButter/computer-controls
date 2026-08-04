@@ -55,7 +55,10 @@ export const DEFAULT_PLAYBACK_COMMAND = [
 
 /** The slice of a child process this module actually touches. */
 export type ChildLike = {
-  stdin?: { write(chunk: Buffer, cb: (error?: Error | null) => void): unknown } | null;
+  stdin?: {
+    write(chunk: Buffer, cb: (error?: Error | null) => void): unknown;
+    on?(event: "error", listener: (error: Error) => void): unknown;
+  } | null;
   stdout?: {
     on(event: "data", listener: (chunk: Buffer) => void): unknown;
   } | null;
@@ -146,6 +149,12 @@ export function commandSpeaker(options: CommandSpeakerOptions = {}): Speaker {
     };
     spawned.on("exit", forget);
     spawned.on("error", forget);
+    // The barge-in kill races any write still in flight: the player dies,
+    // the write lands EPIPE on this stream, and a stream error with no
+    // listener takes the whole hub down. The write callback already
+    // reports the failure to the caller — this listener exists so the
+    // duplicate stream-level event has somewhere harmless to go.
+    spawned.stdin?.on?.("error", () => {});
     child = spawned;
     return spawned;
   }

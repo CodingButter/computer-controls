@@ -19,11 +19,16 @@ class FakeChild implements ChildLike {
   private listeners = new Map<string, Array<(...args: unknown[]) => void>>();
   private dataListeners: Array<(chunk: Buffer) => void> = [];
 
+  stdinErrorListeners: Array<(error: Error) => void> = [];
+
   stdin = {
     write: (chunk: Buffer, cb: (error?: Error | null) => void): boolean => {
       this.written.push(chunk);
       cb(null);
       return true;
+    },
+    on: (_event: "error", listener: (error: Error) => void): void => {
+      this.stdinErrorListeners.push(listener);
     },
   };
 
@@ -154,5 +159,20 @@ describe("the speaker", () => {
 
     await speaker.play(new Uint8Array([1]), controller.signal);
     expect(children).toHaveLength(0);
+  });
+
+  it("listens for stdin stream errors, so a dying player cannot take the hub with it", async () => {
+    // The barge-in kill races any write still in flight: without a stream
+    // error listener the EPIPE becomes an unhandled 'error' event and the
+    // whole process exits — which is exactly how the hub died in production.
+    const { children, spawnProcess } = fakeSpawner();
+    const speaker = commandSpeaker({ spawnProcess });
+
+    await speaker.play(new Uint8Array([1]), new AbortController().signal);
+
+    expect(children[0].stdinErrorListeners.length).toBeGreaterThan(0);
+    for (const listener of children[0].stdinErrorListeners) {
+      expect(() => listener(new Error("write EPIPE"))).not.toThrow();
+    }
   });
 });
