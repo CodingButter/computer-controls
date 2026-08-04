@@ -33,24 +33,27 @@ environment. The row returns here the first time the script runs against a live
 desktop and writes `deletion-is-reported-as-deletion.md`. Until then, the claim
 stands on `tests/test_typing.py` and the code, not on an artifact.
 
-### Parked: which-credential-the-voice-lane-accepts
+### which-credential-the-voice-lane-accepts
 
-The voice lane can be handed either kind of OpenAI credential — a token minted by
-signing in with a ChatGPT account, or a platform API key — and which of them
+The voice lane can be handed either kind of OpenAI credential: a token minted by
+signing in with a ChatGPT account, or a platform API key. Which of them
 OpenAI's speech endpoint actually accepts decides whether "sign in with your
 ChatGPT account" is enough for the product to have a mouth and ears.
 `scripts/prove-voice-credential.mjs` answers it by spending each credential the
 machine holds on one real request, and writes
-`which-credential-the-voice-lane-accepts.md`. It has not been deposited: this
-branch was cut from a machine with no OpenAI account connected at all, and the
-script refuses to write an artifact for a run it could not make. It was exercised
-against the live endpoint with a deliberately invalid key, so the refusal path is
-known to work — but a refusal by a key nobody owns proves nothing about a key
-somebody does, and that run was not kept.
+`which-credential-the-voice-lane-accepts.md`.
 
-Until it runs, the client treats both credential kinds as possible rather than
-assuming one, which is why `resolveVoiceCredential` carries the kind instead of
-flattening it to a string.
+Deposited 2026-08-04, from a machine holding a real ChatGPT device-flow token.
+The verdict reads THE CLAIM DOES NOT HOLD, and one nuance in the recorded
+response is worth naming: the refusal was `429 insufficient_quota`, not
+`401 invalid credential`. The endpoint authenticated the ChatGPT token and then
+refused on billing, because the account it maps to holds no platform API
+credits. So the mechanism works and the wallet does not, and for the product
+the two failures look the same: a person who signed in with ChatGPT alone must
+be told, in the UI, that voice needs one more thing. The pasted-key path is
+load-bearing, and `resolveVoiceCredential` keeps carrying the kind, because a
+billing refusal is the one kind of no that can turn into a yes without a code
+change.
 
 ## Rules
 
