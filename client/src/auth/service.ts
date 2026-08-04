@@ -16,6 +16,7 @@
  * the same guarantee written so that forgetting one line breaks it silently.
  */
 
+import { safeReason } from "../safe-reason.ts";
 import type { CredentialStore, ProviderConnection } from "./credentials.ts";
 import type { ProviderLoginFlows } from "./flows.ts";
 import {
@@ -279,24 +280,11 @@ function describeFailure(error: unknown): string {
 }
 
 /**
- * Why a failed sign-in is not simply relayed.
- *
- * A failure reason is the one string on this surface that originates upstream
- * rather than here, and the SDK builds some of them by interpolating the
- * provider's raw response body — `Token exchange failed: ${await res.text()}`
- * in the Anthropic exchange, and the poll status text in the Codex one. That
- * body is whatever the provider chose to send on a bad day, which is not a
- * thing we get to make promises about. Relaying it would make "no response ever
- * carries a token" a claim about somebody else's error formatting.
- *
- * So the reason is trimmed to its first line, capped, and dropped entirely if
- * it looks like it is carrying a secret. What survives is enough to tell a
- * mistyped code from an expired one, which is all a human needs.
+ * A failed sign-in says why, within limits. The limits — first line, capped,
+ * dropped if it looks like it is carrying a secret — are `safeReason`, which
+ * the voice lane shares; what belongs here is only what a sign-in says when
+ * the provider's own words cannot be repeated.
  */
-const CREDENTIAL_SHAPED = /(access|refresh|id)[-_ ]?token|api[-_ ]?key|secret|bearer\s|code_verifier|eyJ[A-Za-z0-9_-]{10}|sk-[A-Za-z0-9_-]{10}/i;
-
 export function safeFailureReason(reason: string): string {
-  const firstLine = reason.split("\n")[0]!.trim();
-  if (firstLine.length === 0 || firstLine.length > 200) return "Sign-in failed.";
-  return CREDENTIAL_SHAPED.test(firstLine) ? "Sign-in failed." : firstLine;
+  return safeReason(reason, "Sign-in failed.");
 }
