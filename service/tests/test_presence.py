@@ -119,3 +119,67 @@ def test_the_recency_bound_includes_its_own_edge(idle):
 def test_just_past_the_recency_bound_is_absence():
     w, _ = watch(idle=presence.HUMAN_RECENT_MS + 1, active="win-editor")
     assert not w.took("win-editor")
+
+
+def test_presence_discounts_the_services_own_keystrokes():
+    """The idle timer counts our synthetic keys too, and they are not a person.
+
+    Without this the keystroke tier stops on its own first character: it typed,
+    the timer reset, it raised the window it typed into, and both halves of the
+    rule then matched against its own reflection.
+    """
+    clock = Clock()
+    w, state = watch(idle=90_000, active="win-editor", clock=clock)
+
+    w.synthesised_input()
+    clock.advance(0.2)
+    state["idle"] = 200  # the only thing that touched this desktop was us
+
+    assert not w.reading().human_is_here
+    assert not w.took("win-editor")
+
+
+def test_a_real_person_typing_between_keystrokes_still_takes_the_field():
+    """Input the stamp cannot account for is a person, exactly as before."""
+    clock = Clock()
+    w, state = watch(idle=90_000, active="win-editor", clock=clock)
+
+    w.synthesised_input()
+    clock.advance(0.6)
+    state["idle"] = 20  # somebody touched the keyboard after we did
+
+    assert w.reading().human_is_here
+    assert w.took("win-editor")
+
+
+def test_the_discount_expires_with_the_key_that_earned_it():
+    """The stamp accounts for one moment, not for the rest of the session.
+
+    A person who sits down long after the writing finished is a person, and a
+    latch that stayed true would be the takeover rule quietly switched off.
+    """
+    clock = Clock()
+    w, state = watch(idle=90_000, active="win-editor", clock=clock)
+
+    w.synthesised_input()
+    clock.advance(30.0)
+    state["idle"] = 100
+
+    assert w.took("win-editor")
+
+
+def test_the_discount_touches_the_idle_half_only():
+    """Our own keystroke in one window says nothing about another window.
+
+    Destination still carries the test: the discount answers "was that us", and
+    the active window answers "was it here". Neither stands in for the other.
+    """
+    clock = Clock()
+    w, state = watch(idle=90_000, active="win-chat", clock=clock)
+
+    w.synthesised_input()
+    clock.advance(0.6)
+    state["idle"] = 20  # a person, in their own window rather than ours
+
+    assert w.reading().human_is_here
+    assert not w.took("win-editor")
