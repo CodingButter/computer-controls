@@ -84,17 +84,24 @@
       #orb[data-off="true"] { opacity: 0.35; cursor: not-allowed; animation: none; }
 
       /* The WebGL canvas replaces the button when a 3D context is available.
-         Same 180px footprint, higher render resolution for sharpness. */
+         A wider footprint than the sphere itself, so the smoke that swirls
+         around the orb has room to live. Higher render resolution for
+         sharpness. */
       #orb-canvas {
-        width: 180px;
-        height: 180px;
+        width: 260px;
+        height: 260px;
         cursor: pointer;
       }
       #orb-canvas[hidden] { display: none; }
 
       /* The Mastra M, resting inside the orb. It ignores the pointer so every
          click still lands on the orb beneath it. */
-      #orb-holder { position: relative; }
+      #orb-holder {
+        position: relative;
+        /* A faded reflection on the floor beneath the whole presence. */
+        -webkit-box-reflect: below 6px
+          linear-gradient(transparent 62%, rgba(0, 0, 0, 0.22));
+      }
       #orb-m {
         position: absolute;
         inset: 0;
@@ -188,7 +195,7 @@
     <main id="stage">
       <div id="orb-holder">
         <button id="orb" data-state="idle" aria-label="Toggle listening"></button>
-        <canvas id="orb-canvas" width="360" height="360" aria-label="Toggle listening" hidden></canvas>
+        <canvas id="orb-canvas" width="520" height="520" aria-label="Toggle listening" hidden></canvas>
         <!-- The Mastra M. Path from the Mastra playground asset, unmodified. -->
         <svg id="orb-m" viewBox="0 0 34 21" fill="none" aria-hidden="true">
           <path

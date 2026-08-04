@@ -238,6 +238,54 @@ void main() {
 }
 `;
 
+// The smoke that swirls around the orb: a larger shell whose surface is slow
+// layered noise, edge-weighted so it reads as haze hugging the sphere rather
+// than a second solid. It writes no depth and renders after the orb.
+const SMOKE_VERTEX_SHADER = /* glsl */ `
+varying vec3 vNormal;
+varying vec3 vViewPos;
+varying vec3 vPos;
+
+void main() {
+  vNormal = normalize(normalMatrix * normal);
+  vPos = position;
+  vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+  vViewPos = mvPos.xyz;
+  gl_Position = projectionMatrix * mvPos;
+}
+`;
+
+const SMOKE_FRAGMENT_SHADER = /* glsl */ `
+uniform float uTime;
+uniform vec3 uColor;
+
+varying vec3 vNormal;
+varying vec3 vViewPos;
+varying vec3 vPos;
+
+${SIMPLEX_NOISE}
+
+void main() {
+  vec3 viewDir = normalize(-vViewPos);
+  float facing = abs(dot(vNormal, viewDir));
+
+  float t = uTime * 0.12;
+  float s1 = snoise(vPos * 1.3 + vec3(t, t * 0.6, -t * 0.8));
+  float s2 = snoise(vPos * 2.6 - vec3(t * 0.7, -t, t * 0.5) + 23.0);
+  float smoke = smoothstep(-0.1, 0.9, s1 * 0.7 + s2 * 0.5);
+
+  // Haze lives at the silhouette and thins to nothing face-on, so the orb
+  // and its M stay readable through it.
+  float shell = pow(1.0 - facing, 1.4);
+
+  vec3 haze = mix(vec3(0.42, 0.22, 0.7), vec3(0.85, 0.3, 0.8), s2 * 0.5 + 0.5);
+  haze = mix(haze, uColor * 1.3, 0.3);
+
+  float alpha = smoke * shell * 0.4;
+  gl_FragColor = vec4(haze, alpha);
+}
+`;
+
 /**
  * Mount the WebGL orb on a canvas.
  *
@@ -255,11 +303,13 @@ export async function mountWebGlOrb({ canvas, reducedMotion = false }) {
   const motionScale = reducedMotion ? 0.2 : 1.0;
 
   const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-  renderer.setSize(360, 360, false);
+  renderer.setSize(520, 520, false);
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-  camera.position.z = 3;
+  // Pulled back so the smoke shell around the sphere stays in frame while
+  // the sphere itself keeps roughly its old on-screen size.
+  camera.position.z = 4.3;
 
   const geometry = new THREE.IcosahedronGeometry(1, 5);
 
@@ -279,10 +329,26 @@ export async function mountWebGlOrb({ canvas, reducedMotion = false }) {
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
     transparent: true,
+    depthWrite: false,
   });
 
   const mesh = new THREE.Mesh(geometry, material);
+  mesh.renderOrder = 0;
   scene.add(mesh);
+
+  // The smoke shell, sharing the orb's mood color uniform so the haze
+  // follows the conversation the way the sphere does.
+  const smokeGeometry = new THREE.IcosahedronGeometry(1.55, 4);
+  const smokeMaterial = new THREE.ShaderMaterial({
+    uniforms: { uTime: uniforms.uTime, uColor: uniforms.uColor },
+    vertexShader: SMOKE_VERTEX_SHADER,
+    fragmentShader: SMOKE_FRAGMENT_SHADER,
+    transparent: true,
+    depthWrite: false,
+  });
+  const smoke = new THREE.Mesh(smokeGeometry, smokeMaterial);
+  smoke.renderOrder = 1;
+  scene.add(smoke);
 
   // Subtle idle drift — the sphere slowly rotates so the fresnel edge is
   // never perfectly still, even at zero level.
@@ -322,6 +388,9 @@ export async function mountWebGlOrb({ canvas, reducedMotion = false }) {
     c.z += (moodTarget[2] - c.z) * 0.05;
 
     mesh.rotation.y += dt * 0.1 * motionScale;
+    // The smoke turns against the sphere, so the two layers visibly slide.
+    smoke.rotation.y -= dt * 0.05 * motionScale;
+    smoke.rotation.z += dt * 0.02 * motionScale;
 
     renderer.render(scene, camera);
   }
@@ -329,6 +398,8 @@ export async function mountWebGlOrb({ canvas, reducedMotion = false }) {
   function dispose() {
     geometry.dispose();
     material.dispose();
+    smokeGeometry.dispose();
+    smokeMaterial.dispose();
     renderer.dispose();
   }
 
