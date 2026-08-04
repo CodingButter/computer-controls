@@ -52,7 +52,7 @@ export function stateToParams(state) {
  */
 export function moodToColor(mood) {
   const colors = {
-    neutral: [0.24, 0.28, 0.56],
+    neutral: [0.62, 0.3, 0.88],
     frustrated: [0.85, 0.25, 0.2],
     excited: [0.95, 0.65, 0.15],
     calm: [0.2, 0.56, 0.42],
@@ -165,6 +165,7 @@ uniform float uPulseFreq;
 
 varying vec3 vNormal;
 varying vec3 vViewPos;
+varying vec3 vPos;
 
 ${SIMPLEX_NOISE}
 
@@ -176,6 +177,7 @@ void main() {
   vec3 pos = position + normal * displacement;
 
   vNormal = normalize(normalMatrix * normal);
+  vPos = position;
   vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
   vViewPos = mvPos.xyz;
 
@@ -183,24 +185,56 @@ void main() {
 }
 `;
 
+// The look is the concept art: a translucent glass shell whose interior is
+// swirling ribbons of magenta, violet and cyan, brightest where they tangle.
+// Three noise fields at different scales and drift directions, sharpened into
+// bands, each carrying one of the three ribbon colors. The mood color tints
+// the whole interior without owning it.
 const FRAGMENT_SHADER = /* glsl */ `
 uniform vec3 uColor;
 uniform float uFresnelPower;
 uniform float uLevel;
+uniform float uTime;
+uniform float uNoiseSpeed;
 
 varying vec3 vNormal;
 varying vec3 vViewPos;
+varying vec3 vPos;
+
+${SIMPLEX_NOISE}
 
 void main() {
   vec3 viewDir = normalize(-vViewPos);
-  float fresnel = pow(1.0 - abs(dot(vNormal, viewDir)), uFresnelPower);
+  float facing = abs(dot(vNormal, viewDir));
+  float fresnel = pow(1.0 - facing, uFresnelPower);
 
-  vec3 base = uColor * 0.3;
-  vec3 glow = uColor * 1.5;
-  vec3 color = mix(base, glow, fresnel);
+  float t = uTime * (0.25 + uNoiseSpeed * 0.2);
+  float n1 = snoise(vPos * 2.2 + vec3(t, -t * 0.7, t * 0.4));
+  float n2 = snoise(vPos * 3.1 + vec3(-t * 0.6, t, t * 0.8) + 11.0);
+  float n3 = snoise(vPos * 1.6 + vec3(t * 0.5, t * 0.3, -t) + 47.0);
+
+  float w1 = smoothstep(0.1, 0.7, n1);
+  float w2 = smoothstep(0.15, 0.75, n2);
+  float w3 = smoothstep(0.2, 0.8, n3);
+
+  vec3 magenta = vec3(0.92, 0.25, 0.86);
+  vec3 violet  = vec3(0.55, 0.32, 0.95);
+  vec3 cyan    = vec3(0.30, 0.75, 0.95);
+
+  vec3 wisps = magenta * w1 + violet * w2 + cyan * w3 * 0.65;
+  float wispStrength = max(w1, max(w2, w3));
+
+  // Lavender rim: the glass shell of the sphere.
+  vec3 rim = vec3(0.78, 0.62, 1.0) * fresnel * 1.35;
+
+  vec3 color = wisps * (0.55 + uLevel * 0.8) + rim;
+  color *= mix(vec3(1.0), uColor * 1.7, 0.4);
   color += uColor * uLevel * 0.5;
 
-  gl_FragColor = vec4(color, 1.0);
+  // Translucent center, luminous ribbons, bright shell.
+  float alpha = clamp(0.16 + fresnel * 0.75 + wispStrength * 0.5, 0.0, 1.0);
+
+  gl_FragColor = vec4(color, alpha);
 }
 `;
 
@@ -244,6 +278,7 @@ export async function mountWebGlOrb({ canvas, reducedMotion = false }) {
     uniforms,
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
+    transparent: true,
   });
 
   const mesh = new THREE.Mesh(geometry, material);
