@@ -2,7 +2,7 @@
 
 Generated from `protocol/schema.json` — do not edit.
 Run: `node scripts/generate-tool-api-doc.mjs`
-Protocol version: 1.0   schema sha256: df835e41b95f379e
+Protocol version: 1.0   schema sha256: 5dd8bf765e6bda5c
 
 The contract between any client and the desktop service. Frozen at 1.0. Additive changes only: new methods and new optional fields. Removing a method, renaming or removing a field, narrowing a type, changing an error code, or adding a required request field is a breaking change and requires a major version.
 
@@ -18,7 +18,7 @@ What a method does to the world. Declared here at freeze time so enforcement can
 | `submit` | Triggers an application's own action. Consequences belong to the application. |
 | `destructive` | May discard or overwrite user data, or is not reversible. |
 
-## Methods (33)
+## Methods (35)
 
 ### `attestElement`
 
@@ -213,6 +213,27 @@ Raise and focus a window by id. Addressed semantically; no coordinates on either
 | `windowId` | string | yes |  |
 
 **Result:** [`actionResult`](#actionresult)
+
+---
+
+### `getApplicationPermissions`
+
+**Operation class:** `observe`
+
+Return the live permissions registry: which applications the user has permitted agents to interact with, and which are known but withheld. The first call arms the registry, seeding every application the ceiling already permits as permitted — the user has not taken anything away yet. Subsequent calls reflect the user’s checkboxes. This method is reachable on the socket but is deliberately absent from the agent tool catalogue: no prompt can induce a model to call it, so the registry is a user-owned layer the agent can never widen.
+
+**Params**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clientId` | string | no | Which client is asking. Multiple clients share one service instance and one element namespace; this is for audit and scope, not for addressing. |
+| `confirm` | boolean | no | Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. |
+
+**Result**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `applications` | object[] | yes | Every known application and whether the user has permitted agents to interact with it. An application absent from this list is one the service has not detected; an application present and not permitted is one the user has explicitly withheld. |
 
 ---
 
@@ -651,6 +672,30 @@ Give a claimed element back before its lease runs out. Releasing what you do not
 | `heldForMs` | integer | no |  |
 | `released` | boolean | yes | True when this call gave up a claim, false when there was nothing of this client's to give up. |
 | `revision` | integer | yes |  |
+
+---
+
+### `setApplicationPermission`
+
+**Operation class:** `observe`
+
+Set a single application’s permission in the live registry. This is the hub’s write path: checking or unchecking a box on the permissions page takes effect immediately, without restarting the daemon or hub. Classified as observe because it is a configuration write, not a desktop action. Like getApplicationPermissions, it is on the socket but absent from the agent tool catalogue, so the registry cannot be widened by anything the agent sends.
+
+**Params**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `application` | string | yes | The application name as the user sees it on the permissions page. Matched by exact casefolded name, not the ceiling’s substring matching, because the page is driven by names the service has already resolved. |
+| `clientId` | string | no | Which client is asking. Multiple clients share one service instance and one element namespace; this is for audit and scope, not for addressing. |
+| `confirm` | boolean | no | Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. |
+| `permitted` | boolean | yes |  |
+
+**Result**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `application` | string | yes |  |
+| `permitted` | boolean | yes |  |
 
 ---
 

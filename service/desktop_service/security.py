@@ -31,10 +31,15 @@ and the human, where it belongs.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import threading
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Any
 
 from . import attestation, protocol_generated
 from .errors import DesktopError, ErrorCode, PermissionDenied, SessionExpired
@@ -228,6 +233,16 @@ class Ceiling:
 
 def _normalise(names) -> set[str]:
     return {str(name).strip().casefold() for name in names or () if str(name).strip()}
+
+
+def _normalise_name(name: str) -> str:
+    return (name or "").strip().casefold()
+
+
+def _default_permissions_path() -> Path:
+    """The permissions file, following the convention config.py already set."""
+    home = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return Path(home) / "mastracode-desktop" / "permissions.json"
 
 
 #: The prefixes the backend mints ids with. An anchor whose target carries one
@@ -467,6 +482,143 @@ class Decision:
         )
 
 
+class PermissionRegistry:
+    """A live, user-owned list of which applications agents may touch.
+
+    The ceiling is frozen at startup and nothing over the socket can raise it.
+    This registry is the mutable layer beside it: the hub writes it, the service
+    enforces it, and a checkbox takes effect without a restart. It can only
+    narrow — no method reachable from an agent can add an application to the
+    permitted set, because no agent tool is ever declared for the write path.
+
+    Until the registry is armed (the first time the hub opens the permissions
+    page), it passes every application through — preserving the behaviour a
+    machine had before the page existed. Once armed, an application the user has
+    not checked is absent from every listing and every targeted call, exactly as
+    a ceiling-blocked application is absent rather than refused.
+    """
+
+    def __init__(self, path: Path | str | None = None) -> None:
+        self._path = Path(path) if path else _default_permissions_path()
+        self._lock = threading.Lock()
+        self._armed = False
+        self._permissions: dict[str, bool] = {}
+        self._load()
+
+    @property
+    def armed(self) -> bool:
+        return self._armed
+
+    def permits(self, application: str) -> bool:
+        """Whether the user has allowed agents to touch this application.
+
+        An unarmed registry passes everything through — the feature has not
+        been turned on yet, and an app visible before the page existed should
+        not vanish because the page was added. Once armed, only applications
+        the user has explicitly checked are permitted; an unknown application
+        is denied, which is how a newly installed application defaults to
+        unpermitted.
+        """
+        if not self._armed:
+            return True
+        name = _normalise_name(application)
+        if not name:
+            return True
+        with self._lock:
+            return self._permissions.get(name, False)
+
+    def arm(self, known_applications: Sequence[str]) -> None:
+        """Activate the registry, seeding it with applications already visible.
+
+        Applications visible under the ceiling are permitted: they were already
+        in the agent's view, and arming the page should not take them out of
+        it. Applications registered as unpermitted by an earlier detection
+        keep their setting — arming is additive, not a reset.
+        """
+        with self._lock:
+            for app in known_applications:
+                name = _normalise_name(app)
+                if name and name not in self._permissions:
+                    self._permissions[name] = True
+            self._armed = True
+            self._save()
+
+    def set_permission(self, application: str, permitted: bool) -> None:
+        """The hub write path: check or uncheck an application."""
+        with self._lock:
+            name = _normalise_name(application)
+            if name:
+                self._permissions[name] = permitted
+                self._save()
+
+    def register(self, application: str, permitted: bool = False) -> None:
+        """The detection path (#115): a newly installed application lands here.
+
+        Defaults to unpermitted — a new install is not handed to agents until
+        the user opts in. Does not overwrite a setting the user already made.
+        """
+        with self._lock:
+            name = _normalise_name(application)
+            if name and name not in self._permissions:
+                self._permissions[name] = permitted
+                self._save()
+
+    def remove(self, application: str) -> None:
+        with self._lock:
+            name = _normalise_name(application)
+            if name and name in self._permissions:
+                del self._permissions[name]
+                self._save()
+
+    def applications(self) -> list[dict[str, Any]]:
+        """The page contents: every known application and its setting."""
+        with self._lock:
+            return [
+                {"name": name, "permitted": self._permissions[name]}
+                for name in sorted(self._permissions)
+            ]
+
+    def is_known_but_unpermitted(self, application: str) -> bool:
+        """Whether this app is on the page but unchecked.
+
+        The hub uses this to decide whether to speak the doorknob signal: an
+        agent that hit APPLICATION_NOT_FOUND against an app the user has not
+        yet permitted is told the real reason — through the orb, not through
+        the protocol.
+        """
+        with self._lock:
+            name = _normalise_name(application)
+            return name in self._permissions and not self._permissions[name]
+
+    def _load(self) -> None:
+        if not self._path.exists():
+            return
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            log.warning("permissions file at %s is unreadable; starting empty", self._path)
+            return
+        if not isinstance(data, dict):
+            return
+        self._armed = bool(data.get("armed", False))
+        apps = data.get("applications")
+        if isinstance(apps, dict):
+            self._permissions = {
+                str(k): bool(v) for k, v in apps.items() if isinstance(v, bool)
+            }
+
+    def _save(self) -> None:
+        payload = {
+            "armed": self._armed,
+            "applications": dict(sorted(self._permissions.items())),
+        }
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError as error:
+            log.warning("could not persist permissions to %s: %s", self._path, error)
+
+
 class Consent:
     """The grants held by every client attached to this service.
 
@@ -475,8 +627,15 @@ class Consent:
     from the thing it protects would be worse than no permission at all.
     """
 
-    def __init__(self, ceiling: Ceiling | None = None, *, now=time.monotonic) -> None:
+    def __init__(
+        self,
+        ceiling: Ceiling | None = None,
+        *,
+        now=time.monotonic,
+        registry: PermissionRegistry | None = None,
+    ) -> None:
         self._ceiling = ceiling or Ceiling()
+        self._registry = registry or PermissionRegistry()
         self._now = now
         self._grants: dict[str, Grant] = {}
         self._stopped = False
@@ -485,6 +644,10 @@ class Consent:
     @property
     def ceiling(self) -> Ceiling:
         return self._ceiling
+
+    @property
+    def registry(self) -> PermissionRegistry:
+        return self._registry
 
     @property
     def stopped(self) -> bool:
@@ -728,6 +891,12 @@ class Consent:
                 diagnostic=(
                     f"this desktop's configuration does not expose {application!r} to any client"
                 ),
+            )
+        if application and not self._registry.permits(application):
+            return deny(
+                "No application matching that target was found.",
+                disguised_as=ErrorCode.APPLICATION_NOT_FOUND,
+                diagnostic=f"the user has not given permission for {application!r}",
             )
 
         grant = self._grants.get(client_id)

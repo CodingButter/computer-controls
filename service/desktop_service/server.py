@@ -164,7 +164,12 @@ def _withheld(rows: list[dict[str, Any]], *keys: str) -> list[dict[str, Any]]:
     reappears from behind the wall is still noticed as having moved.
     """
     ceiling = _consent.ceiling
-    if not ceiling.blocked_applications and not ceiling.applications:
+    registry = _consent.registry
+    if (
+        not ceiling.blocked_applications
+        and not ceiling.applications
+        and not registry.armed
+    ):
         return rows
 
     def identity(row: dict[str, Any]) -> str:
@@ -180,7 +185,7 @@ def _withheld(rows: list[dict[str, Any]], *keys: str) -> list[dict[str, Any]]:
                 return value
         return ""
 
-    return [row for row in rows if ceiling.permits_application(identity(row))]
+    return [row for row in rows if ceiling.permits_application(identity(row)) and registry.permits(identity(row))]
 
 
 def _attended(
@@ -222,11 +227,18 @@ def _visible_absences(params: dict[str, Any], rows: list[dict[str, Any]]) -> lis
     names must not announce itself here under another.
     """
     ceiling = _consent.ceiling
+    registry = _consent.registry
     want = attention.of(_client_id(params))
     visible: list[dict[str, Any]] = []
     for row in rows:
         candidates = row.get("identityCandidates") or []
         if not ceiling.permits_weakly_identified_application(*candidates):
+            continue
+        # An unpermitted application is absent from every listing, including
+        # this one — the absences list exists so an agent does not conclude a
+        # browser is not running, but an app the user has not permitted must
+        # vanish as completely as one the ceiling blocks.
+        if registry.armed and not any(registry.permits(c) for c in candidates):
             continue
         if not want.covers(*candidates):
             continue
@@ -495,7 +507,8 @@ def configure(
             settings.get("scopes"),
             str(config_path or ""),
             exists=config_exists,
-        )
+        ),
+        registry=security.PermissionRegistry(),
     )
     _audit = audit.AuditLog(
         settings.get("auditPath") or None,
@@ -1824,6 +1837,38 @@ def _method_audit_tail(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _method_get_application_permissions(_params: dict[str, Any]) -> dict[str, Any]:
+    """Return the permissions registry for the permissions page.
+
+    The first call arms the registry: every application the agent currently
+    sees — the ones the ceiling already permits — is seeded as permitted,
+    because the user has not taken anything away yet. Apps the user has
+    already checked off are left as they are, so this is additive, not a reset.
+    """
+    registry = _consent.registry
+    if not registry.armed:
+        visible = [
+            row.get("name")
+            for row in loop.call_on_loop(atspi.list_applications)
+            if row.get("name")
+        ]
+        registry.arm(visible)
+    return {"applications": registry.applications()}
+
+
+def _method_set_application_permission(params: dict[str, Any]) -> dict[str, Any]:
+    """Set a single application's permission — the hub write path.
+
+    The registry is a user-owned layer. Nothing the agent sends can widen it:
+    this method is reachable on the socket but is not in the plugin's tool
+    catalogue, so no prompt can induce the model to call it.
+    """
+    application = _str_param(params, "application", required=True)
+    permitted = _bool_param(params, "permitted")
+    _consent.registry.set_permission(application, permitted)
+    return {"application": application, "permitted": permitted}
+
+
 def _method_list_installable_applications(_params: dict[str, Any]) -> dict[str, Any]:
     applications = loop.call_on_loop(launcher.list_installable)
     return {
@@ -2552,6 +2597,8 @@ def build_server(socket_path: str) -> JsonRpcServer:
     server.register("grantScope", _method_grant_scope)
     server.register("emergencyStop", _method_emergency_stop)
     server.register("auditTail", _method_audit_tail)
+    server.register("getApplicationPermissions", _method_get_application_permissions)
+    server.register("setApplicationPermission", _method_set_application_permission)
     return base
 
 

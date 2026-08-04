@@ -120,6 +120,27 @@ describe("construction-time scope minting", () => {
     expect(empty).not.toContain("desktop_grant_scope");
   });
 
+  it("never mints a permissions tool regardless of scope", () => {
+    // Issue #116 ruling 1: no agent-facing API can widen a permission. The
+    // registry methods live on the daemon socket but were left out of ALL_TOOLS
+    // — the same defence that holds grantScope. No prompt can induce a model to
+    // call a tool it does not have. This is the only defence in the system that
+    // does not depend on a model behaving.
+    for (const scope of [
+      "observe,edit,activate,submit,destructive",
+      "observe",
+      "",
+    ]) {
+      const names = Object.keys((plugin.tools as Function)(ctx(scope ? { scope } : {})));
+      expect(names).not.toContain("desktop_get_application_permissions");
+      expect(names).not.toContain("desktop_set_application_permission");
+      // Belt and braces: no minted tool references permissions at all.
+      for (const name of names) {
+        expect(name).not.toMatch(/permission/i);
+      }
+    }
+  });
+
   it("mints only observe-class tools when scope is observe", () => {
     const names = Object.keys((plugin.tools as Function)(ctx({ scope: "observe" })));
     // Observe tools present.

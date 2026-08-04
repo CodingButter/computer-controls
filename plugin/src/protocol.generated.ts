@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: df835e41b95f379e
+// Protocol version: 1.0   schema sha256: 5dd8bf765e6bda5c
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "df835e41b95f379e" as const;
+export const SCHEMA_DIGEST = "5dd8bf765e6bda5c" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -304,6 +304,21 @@ export interface FocusWindowParams {
   windowId: string;
 }
 export type FocusWindowResult = ActionResult;
+
+/** Return the live permissions registry: which applications the user has permitted agents to interact with, and which are known but withheld. The first call arms the registry, seeding every application the ceiling already permits as permitted — the user has not taken anything away yet. Subsequent calls reflect the user’s checkboxes. This method is reachable on the socket but is deliberately absent from the agent tool catalogue: no prompt can induce a model to call it, so the registry is a user-owned layer the agent can never widen. (operation class: observe) */
+export interface GetApplicationPermissionsParams {
+  /** Which client is asking. Multiple clients share one service instance and one element namespace; this is for audit and scope, not for addressing. */
+  clientId?: string;
+  /** Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. */
+  confirm?: boolean;
+}
+export interface GetApplicationPermissionsResult {
+  /** Every known application and whether the user has permitted agents to interact with it. An application absent from this list is one the service has not detected; an application present and not permitted is one the user has explicitly withheld. */
+  applications: {
+    name: string;
+    permitted: boolean;
+  }[];
+}
 
 /** Everything that changed since a revision the caller already knows about, attributed for this caller. The same engine answers this and pushes unsolicited deltas, so a caller that polls and a caller that listens are never told different stories about one desktop. (operation class: observe) */
 export interface GetDeltaSinceParams {
@@ -657,6 +672,21 @@ export interface ReleaseElementResult {
   revision: number;
 }
 
+/** Set a single application’s permission in the live registry. This is the hub’s write path: checking or unchecking a box on the permissions page takes effect immediately, without restarting the daemon or hub. Classified as observe because it is a configuration write, not a desktop action. Like getApplicationPermissions, it is on the socket but absent from the agent tool catalogue, so the registry cannot be widened by anything the agent sends. (operation class: observe) */
+export interface SetApplicationPermissionParams {
+  /** The application name as the user sees it on the permissions page. Matched by exact casefolded name, not the ceiling’s substring matching, because the page is driven by names the service has already resolved. */
+  application: string;
+  /** Which client is asking. Multiple clients share one service instance and one element namespace; this is for audit and scope, not for addressing. */
+  clientId?: string;
+  /** Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required. */
+  confirm?: boolean;
+  permitted: boolean;
+}
+export interface SetApplicationPermissionResult {
+  application: string;
+  permitted: boolean;
+}
+
 /** Declare what this connection is looking at. Attention is not permission: it narrows what this one client is shown and how deep it may look, always inside what the consent ceiling already allows. It is per connection, so two agents on one service can watch different things. The call declares the whole attention — a field left out takes its default, and a call with no fields returns the connection to the whole desktop. (operation class: observe) */
 export interface SetAttentionParams {
   /** Applications this connection cares about, by id or by name. Empty means the whole desktop, which is what an undeclared connection gets. */
@@ -786,7 +816,7 @@ export interface WaitForResult {
   waitedMs: number;
 }
 
-export type MethodName = "attestElement" | "auditTail" | "captureWindow" | "claimElement" | "commitElement" | "editText" | "emergencyStop" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "grantScope" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "releaseElement" | "setAttention" | "setElementValue" | "setObservationMode" | "subscribeElement" | "typeKeystrokes" | "typeText" | "unsubscribeElement" | "waitFor";
+export type MethodName = "attestElement" | "auditTail" | "captureWindow" | "claimElement" | "commitElement" | "editText" | "emergencyStop" | "focusWindow" | "getApplicationPermissions" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "grantScope" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "releaseElement" | "setApplicationPermission" | "setAttention" | "setElementValue" | "setObservationMode" | "subscribeElement" | "typeKeystrokes" | "typeText" | "unsubscribeElement" | "waitFor";
 
 export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   attestElement: "observe",
@@ -797,6 +827,7 @@ export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   editText: "edit",
   emergencyStop: "observe",
   focusWindow: "activate",
+  getApplicationPermissions: "observe",
   getDeltaSince: "observe",
   getDesktopCapabilities: "observe",
   getDesktopState: "observe",
@@ -814,6 +845,7 @@ export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   performActions: "submit",
   queryElements: "observe",
   releaseElement: "edit",
+  setApplicationPermission: "observe",
   setAttention: "observe",
   setElementValue: "edit",
   setObservationMode: "observe",
@@ -833,6 +865,7 @@ export interface MethodMap {
   editText: { params: EditTextParams; result: EditTextResult };
   emergencyStop: { params: EmergencyStopParams; result: EmergencyStopResult };
   focusWindow: { params: FocusWindowParams; result: FocusWindowResult };
+  getApplicationPermissions: { params: GetApplicationPermissionsParams; result: GetApplicationPermissionsResult };
   getDeltaSince: { params: GetDeltaSinceParams; result: GetDeltaSinceResult };
   getDesktopCapabilities: { params: GetDesktopCapabilitiesParams; result: GetDesktopCapabilitiesResult };
   getDesktopState: { params: GetDesktopStateParams; result: GetDesktopStateResult };
@@ -850,6 +883,7 @@ export interface MethodMap {
   performActions: { params: PerformActionsParams; result: PerformActionsResult };
   queryElements: { params: QueryElementsParams; result: QueryElementsResult };
   releaseElement: { params: ReleaseElementParams; result: ReleaseElementResult };
+  setApplicationPermission: { params: SetApplicationPermissionParams; result: SetApplicationPermissionResult };
   setAttention: { params: SetAttentionParams; result: SetAttentionResult };
   setElementValue: { params: SetElementValueParams; result: SetElementValueResult };
   setObservationMode: { params: SetObservationModeParams; result: SetObservationModeResult };

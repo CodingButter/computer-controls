@@ -12,6 +12,9 @@ import { pocEarChain } from "./orb/ear-poc.ts";
 import { diskClipStore, unwiredSpeaker } from "./orb/host.ts";
 import { mountOrb } from "./orb/index.ts";
 import { geminiLiveProvider } from "./orb/live-gemini.ts";
+import { DaemonRegistryClient } from "./permissions/daemon-client.ts";
+import { withDoorknobSignal } from "./permissions/doorknob.ts";
+import { createPermissions } from "./permissions/index.ts";
 import {
   createSessionVoice,
   isRefusal,
@@ -22,6 +25,19 @@ import { buildVoiceApp } from "./voice/routes.ts";
 
 const config = resolveClientConfig();
 const hub = await prepareHub(config);
+
+/**
+ * The registry client: one connection to the daemon, shared by the permissions
+ * page and the doorknob signal so the hub does not open a socket per request.
+ */
+const registryClient = new DaemonRegistryClient();
+
+/**
+ * The agent turn, wrapped so a reply that names an unpermitted application
+ * carries the real reason to the user. The orb speaks it because the orb rides
+ * the same turn; the chat page shows it because it reads the same reply.
+ */
+const chat = withDoorknobSignal(hub.chat, registryClient);
 
 /**
  * The literal stays here, in the entry module, on purpose: the deployer's
@@ -80,7 +96,7 @@ let orbFaceCount: ((count: number) => void) | undefined;
 
 const orb = await mountOrb({
   credentials: storage,
-  turn: hub.chat,
+  turn: chat,
   clips: diskClipStore(config.root),
   ...(orbLive
     ? {
@@ -114,12 +130,13 @@ if (orbLive && orb.orb) {
 }
 
 const app = buildApp({
-  chat: hub.chat,
+  chat,
   uiRoot: config.uiRoot,
   status: hub.status,
   auth: providerAuth.app,
   voice,
   orb,
+  permissions: createPermissions({ client: registryClient }).app,
 });
 
 let announce: (url: string) => void;

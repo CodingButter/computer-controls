@@ -45,6 +45,12 @@ export type AppDeps = {
    * keeps working regardless.
    */
   orb?: { app: Hono; reason?: string };
+  /**
+   * The application permissions page. A user-facing surface, not an agent tool:
+   * the registry write path lives on the daemon's socket but was deliberately
+   * left out of the plugin's tool catalogue, so no prompt can widen it.
+   */
+  permissions?: Hono;
 };
 
 /**
@@ -97,6 +103,7 @@ export function buildApp(deps: AppDeps): Hono {
   if (deps.auth) app.route("/", deps.auth);
   if (deps.voice) app.route("/", deps.voice.app);
   if (deps.orb) app.route("/", deps.orb.app);
+  if (deps.permissions) app.route("/", deps.permissions);
 
   app.get("*", (c) => {
     const asset = readUiAsset(deps.uiRoot, c.req.path);

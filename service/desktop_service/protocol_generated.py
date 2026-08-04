@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: df835e41b95f379e
+# Protocol version: 1.0   schema sha256: 5dd8bf765e6bda5c
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "df835e41b95f379e"
+SCHEMA_DIGEST: Final = "5dd8bf765e6bda5c"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -45,6 +45,7 @@ OPERATION_CLASS: Final[dict[str, str]] = {
     "editText": "edit",
     "emergencyStop": "observe",
     "focusWindow": "activate",
+    "getApplicationPermissions": "observe",
     "getDeltaSince": "observe",
     "getDesktopCapabilities": "observe",
     "getDesktopState": "observe",
@@ -62,6 +63,7 @@ OPERATION_CLASS: Final[dict[str, str]] = {
     "performActions": "submit",
     "queryElements": "observe",
     "releaseElement": "edit",
+    "setApplicationPermission": "observe",
     "setAttention": "observe",
     "setElementValue": "edit",
     "setObservationMode": "observe",
@@ -294,6 +296,20 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         "required": [
             "windowId",
         ],
+        "type": "object",
+    },
+    "getApplicationPermissions": {
+        "additionalProperties": False,
+        "properties": {
+            "clientId": {
+                "description": "Which client is asking. Multiple clients share one service instance and one element namespace; this is for audit and scope, not for addressing.",
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+        },
         "type": "object",
     },
     "getDeltaSince": {
@@ -786,6 +802,31 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         ],
         "type": "object",
     },
+    "setApplicationPermission": {
+        "additionalProperties": False,
+        "properties": {
+            "application": {
+                "description": "The application name as the user sees it on the permissions page. Matched by exact casefolded name, not the ceiling’s substring matching, because the page is driven by names the service has already resolved.",
+                "type": "string",
+            },
+            "clientId": {
+                "description": "Which client is asking. Multiple clients share one service instance and one element namespace; this is for audit and scope, not for addressing.",
+                "type": "string",
+            },
+            "confirm": {
+                "description": "Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.",
+                "type": "boolean",
+            },
+            "permitted": {
+                "type": "boolean",
+            },
+        },
+        "required": [
+            "application",
+            "permitted",
+        ],
+        "type": "object",
+    },
     "setAttention": {
         "additionalProperties": False,
         "properties": {
@@ -1198,6 +1239,35 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
     },
     "focusWindow": {
         "$ref": "#/$defs/actionResult",
+    },
+    "getApplicationPermissions": {
+        "additionalProperties": False,
+        "properties": {
+            "applications": {
+                "description": "Every known application and whether the user has permitted agents to interact with it. An application absent from this list is one the service has not detected; an application present and not permitted is one the user has explicitly withheld.",
+                "items": {
+                    "additionalProperties": False,
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                        },
+                        "permitted": {
+                            "type": "boolean",
+                        },
+                    },
+                    "required": [
+                        "name",
+                        "permitted",
+                    ],
+                    "type": "object",
+                },
+                "type": "array",
+            },
+        },
+        "required": [
+            "applications",
+        ],
+        "type": "object",
     },
     "getDeltaSince": {
         "additionalProperties": False,
@@ -1875,6 +1945,22 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
         "required": [
             "released",
             "revision",
+        ],
+        "type": "object",
+    },
+    "setApplicationPermission": {
+        "additionalProperties": False,
+        "properties": {
+            "application": {
+                "type": "string",
+            },
+            "permitted": {
+                "type": "boolean",
+            },
+        },
+        "required": [
+            "application",
+            "permitted",
         ],
         "type": "object",
     },

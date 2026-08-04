@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: df835e41b95f379e
+// Protocol version: 1.0   schema sha256: 5dd8bf765e6bda5c
 
 import { z } from "@mastra/code-sdk/plugin";
 
@@ -187,6 +187,17 @@ export const focusWindowParams = z.object({
   windowId: z.string(),
 });
 export const focusWindowResult = z.record(z.string(), z.unknown());
+
+export const getApplicationPermissionsParams = z.object({
+  clientId: z.string().describe("Which client is asking. Multiple clients share one service instance and one element namespace; this is for audit and scope, not for addressing.").optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+});
+export const getApplicationPermissionsResult = z.object({
+  applications: z.array(z.object({
+    name: z.string(),
+    permitted: z.boolean(),
+  })).describe("Every known application and whether the user has permitted agents to interact with it. An application absent from this list is one the service has not detected; an application present and not permitted is one the user has explicitly withheld."),
+});
 
 export const getDeltaSinceParams = z.object({
   clientId: z.string().describe("Who is asking. Attribution is computed for this caller: the same change reads as 'self' to the client that caused it and 'external' to everyone else.").optional(),
@@ -459,6 +470,17 @@ export const releaseElementResult = z.object({
   heldForMs: z.number().int().min(0).optional(),
   released: z.boolean().describe("True when this call gave up a claim, false when there was nothing of this client's to give up."),
   revision: z.number().int().min(0),
+});
+
+export const setApplicationPermissionParams = z.object({
+  application: z.string().describe("The application name as the user sees it on the permissions page. Matched by exact casefolded name, not the ceiling’s substring matching, because the page is driven by names the service has already resolved."),
+  clientId: z.string().describe("Which client is asking. Multiple clients share one service instance and one element namespace; this is for audit and scope, not for addressing.").optional(),
+  confirm: z.boolean().describe("Caller's explicit confirmation for an operation whose class requires one. Optional forever: a method that needs it and does not get it fails with PERMISSION_DENIED rather than the field becoming required.").optional(),
+  permitted: z.boolean(),
+});
+export const setApplicationPermissionResult = z.object({
+  application: z.string(),
+  permitted: z.boolean(),
 });
 
 export const setAttentionParams = z.object({
