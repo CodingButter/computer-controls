@@ -10,6 +10,52 @@ feels better about it.
 
 ---
 
+## A browser with no accessibility tree is not a browser that is not running
+
+**Application** — Google Chrome, and every Chromium-family browser by extension.
+
+**Symptom** — a live session was asked to search the web. Chrome was open, on the
+right-hand monitor, with a search page loaded and a window title X11 was happy to
+report. It was absent from the accessibility desktop entirely: not an application
+with an empty tree, but no application at all. `listApplications` could not name
+it and `inspectWindow` had nothing to walk, so the only reading available to the
+caller was that the browser was not running.
+
+**Reproduce** — open Chrome with no assistive client on the session, then call
+`listApplications`. The row now appears under `invisibleApplications` with the
+process pid, its window count and a reason; before this change there was no row
+of any kind.
+
+**Explanation, and it is no longer a hypothesis about our instrument** —
+Chromium builds no accessibility tree until an assistive client announces itself
+on the session. This is the same mechanism as the 1-node-to-30-node growth
+recorded in the entry below: what changed there was not our depth limit but the
+arrival of a real AT. That entry proposed an experiment to settle it. The
+experiment is now unnecessary for this question, because the condition is
+measured rather than argued: the capability report reads `org.a11y.Status` and
+reports `browserAccessibility` in the accessibility tier's detail, with the two
+things that satisfy it — run your own assistive client, or start the browser with
+`--force-renderer-accessibility`.
+
+**What this service will not do about it.** Set the property. Turning
+`ScreenReaderEnabled` on starts the screen reader on the desktop of whoever is
+sitting at it — a person would be spoken to out loud because an agent wanted to
+read a page. It will not relaunch anybody's browser to gain visibility either.
+Both are the user's decisions, and this build's job is to say clearly which one
+is missing, not to make it. The condition is reported as a setup step; a future
+installer may offer to arrange it, and offering is a different act from doing.
+
+**Still open** — whether a browser started under `--force-renderer-accessibility`
+exposes a tree of comparable quality to one enabled by an attached AT, and at
+what cost. `scripts/prove-browser-visibility-live.py` walks the conditions one at
+a time on a real desktop and appends what each produced; it sets nothing up, the
+operator names the condition.
+
+**Tier that picks it up** — accessibility, once the condition is met. The
+Chromium DevTools Protocol tier remains the answer for page DOM semantics.
+
+---
+
 ## Electron is not opaque; our depth ceiling is
 
 **Applications** — Discord 1.0.151, Visual Studio Code 1.131.0, Google Chrome,

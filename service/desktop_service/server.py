@@ -146,6 +146,9 @@ def _method_capabilities(_params: dict[str, Any]) -> dict[str, Any]:
         session_token=_session.token,
         observation_mode=_session.mode,
         discover_session=session_env.discover,
+        probe_assistive_status=lambda: loop.call_on_loop(
+            atspi.assistive_client_announced, timeout=10.0
+        ),
     )
 
 
@@ -207,10 +210,40 @@ def _visible(params: dict[str, Any], rows: list[dict[str, Any]], *keys: str) -> 
     return _attended(_withheld(rows, *keys), attention.of(_client_id(params)), *keys)
 
 
+def _visible_absences(params: dict[str, Any], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The ceiling and then the attention, applied to rows with no accessible name.
+
+    Same order as `_visible`, for the same reason: the ceiling decides what may be seen
+    and attention can only shrink that. What differs is the question the ceiling is
+    asked. These rows are identified by what the display server and `/proc` call the
+    process, which is weaker evidence than an accessible name, so the conservative
+    matcher is used — every name the application answers to must clear the block list,
+    and the match runs in both directions. An application walled off under one of its
+    names must not announce itself here under another.
+    """
+    ceiling = _consent.ceiling
+    want = attention.of(_client_id(params))
+    visible: list[dict[str, Any]] = []
+    for row in rows:
+        candidates = row.get("identityCandidates") or []
+        if not ceiling.permits_weakly_identified_application(*candidates):
+            continue
+        if not want.covers(*candidates):
+            continue
+        visible.append({key: value for key, value in row.items() if key != "identityCandidates"})
+    return visible
+
+
 def _method_list_applications(params: dict[str, Any]) -> dict[str, Any]:
     applications = loop.call_on_loop(atspi.list_applications)
+    absent = loop.call_on_loop(atspi.applications_absent_from_the_tree)
     return {
         "applications": _visible(params, applications, "name", "id"),
+        # In the same answer as the applications that can be read, rather than behind a
+        # second method. A caller who has to know to ask a follow-up question is a
+        # caller who will conclude from the first answer that the browser it was sent
+        # to use is not running.
+        "invisibleApplications": _visible_absences(params, absent),
         "backend": atspi.BACKEND_NAME,
     }
 

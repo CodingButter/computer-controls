@@ -2,7 +2,7 @@
 
 Generated from `protocol/schema.json` — do not edit.
 Run: `node scripts/generate-tool-api-doc.mjs`
-Protocol version: 1.0   schema sha256: 375c11d95e161bbc
+Protocol version: 1.0   schema sha256: df835e41b95f379e
 
 The contract between any client and the desktop service. Frozen at 1.0. Additive changes only: new methods and new optional fields. Removing a method, renaming or removing a field, narrowing a type, changing an error code, or adding a required request field is a breaking change and requires a major version.
 
@@ -516,6 +516,7 @@ Applications currently running on the desktop.
 |---|---|---|---|
 | `applications` | object[] | yes |  |
 | `backend` | string | yes |  |
+| `invisibleApplications` | object[] | no | Applications the display server can see and the accessibility layer cannot: they have windows open but no application on the accessibility bus, so nothing about them can be read or acted on. Reported so that an application which is running and unreadable is distinguishable from one that is not running. These rows carry no element ids and no window titles, because there is nothing to inspect and the title is the sensitive half of a window. |
 | `revision` | integer | no |  |
 
 ---

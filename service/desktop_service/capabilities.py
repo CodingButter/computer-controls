@@ -138,12 +138,51 @@ def _keystroke_reason(accessibility: dict[str, Any], display_server: str) -> str
     return None
 
 
+#: What "browser accessibility" means, carried whether or not the condition is met.
+#: A caller that finds only `browserAccessibility: false` learns that something is off
+#: and has no idea what would turn it on — the same mistake the keystroke entry made
+#: before it started carrying its own note.
+_BROWSER_ACCESSIBILITY_NOTE = (
+    "Chromium-family browsers build no accessibility tree until an assistive client "
+    "announces itself on the session, so a browser can be running, visible and "
+    "completely unreadable — it appears under listApplications' invisibleApplications "
+    "rather than as an empty tree. This service will not announce one for you: the "
+    "switch that does it starts the screen reader on this desktop, and a person would "
+    "be spoken to because an agent wanted to read a page. Two things satisfy the "
+    "condition without this service touching anything: run your own assistive client "
+    "(a screen reader, or any AT that registers on the accessibility bus), or start "
+    "the browser with --force-renderer-accessibility."
+)
+
+
+def _browser_accessibility(status: dict[str, Any]) -> tuple[bool, str | None]:
+    """Whether a browser on this session would build a tree, and why not when it would not.
+
+    Reported as a condition, never as a measurement of a particular browser. Whether
+    any given browser actually answers is what walking it proves, and this report has
+    never claimed to have walked anything.
+    """
+    if not status.get("available"):
+        return False, (
+            "whether an assistive client has announced itself could not be read: "
+            f"{status.get('reason')}"
+        )
+    if status.get("isEnabled") or status.get("screenReaderEnabled"):
+        return True, None
+    return False, (
+        "no assistive client has announced itself on this session "
+        "(org.a11y.Status reports IsEnabled false and ScreenReaderEnabled false), so "
+        "Chromium-family browsers are building no accessibility tree"
+    )
+
+
 def build_report(
     probe_accessibility: Callable[[], dict[str, Any]],
     probe_capture: Callable[[], str],
     session_token: str,
     observation_mode: str,
     discover_session: Callable[[], dict[str, str]] | None = None,
+    probe_assistive_status: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     session = {"token": session_token, **_detect_session(discover_session)}
     accessibility = probe_accessibility()
@@ -151,6 +190,9 @@ def build_report(
     # reason come from one probe and cannot disagree with each other.
     capture_reason = probe_capture()
     keystroke_reason = _keystroke_reason(accessibility, session["displayServer"])
+    browser_ok, browser_reason = _browser_accessibility(
+        probe_assistive_status() if probe_assistive_status else {"available": False, "reason": "not probed"}
+    )
 
     tiers = [
         {
@@ -184,6 +226,12 @@ def build_report(
                 "keystrokes": keystroke_reason is None,
                 "keystrokesReason": keystroke_reason,
                 "keystrokesNote": _KEYSTROKE_NOTE,
+                # A setup condition, reported in the same place as the tier it
+                # conditions. The bus can be perfectly healthy while the one
+                # application the caller was sent to use has nothing on it.
+                "browserAccessibility": browser_ok,
+                "browserAccessibilityReason": browser_reason,
+                "browserAccessibilityNote": _BROWSER_ACCESSIBILITY_NOTE,
             },
         },
         {
