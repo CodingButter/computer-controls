@@ -1523,6 +1523,11 @@ def _method_grant_scope(params: dict[str, Any]) -> dict[str, Any]:
         reason=params.get("reason") or "",
         criteria=params.get("criteria") or (),
     )
+    # Severity is over the union of every class held anywhere in the grant,
+    # general and per-application alike: a submit in one app is still a submit.
+    all_classes = grant.classes | {
+        c for classes in grant.per_application.values() for c in classes
+    }
     return {
         "operationClasses": sorted(grant.classes),
         "applications": sorted(grant.applications),
@@ -1546,6 +1551,8 @@ def _method_grant_scope(params: dict[str, Any]) -> dict[str, Any]:
         ],
         "expiresInSeconds": int(grant.idle_seconds),
         "ceiling": sorted(_consent.ceiling.classes),
+        "severity": security.severity_of(all_classes),
+        "breadth": security.breadth_of(grant, _consent.ceiling),
     }
 
 

@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 8891bb8b28a73331
+// Protocol version: 1.0   schema sha256: e55ff83a4364192f
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "8891bb8b28a73331" as const;
+export const SCHEMA_DIGEST = "e55ff83a4364192f" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -411,6 +411,15 @@ export interface GrantScopeResult {
   /** Where this grant now hangs. Returned so a client can tell an anchor that was accepted from one that was quietly dropped. */
   anchors?: ScopeAnchor[];
   applications?: string[];
+  /** How wide a net this scope casts. The competence dimension: breadth, not depth, is what overwhelms a small model. */
+  breadth?: {
+    /** Element-anchored permissions hung on this grant (A15). Each anchor is a separate place to keep track of, so it counts toward the same spread the applications do. */
+    anchors: number;
+    /** Distinct applications this grant spans. A weaker model loses track across many. */
+    applications: number;
+    /** True when the scope names no applications and neither does the ceiling, so it spans every application there is. The count above is then a floor, not a total. */
+    unbounded: boolean;
+  };
   /** The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice. */
   ceiling: string[];
   /** Every criterion a commit under this grant will be judged against, the mechanical ones included whether or not they were asked for. Returned so a client can tell what review it has actually bought without inferring it from a refusal. */
@@ -418,6 +427,13 @@ export interface GrantScopeResult {
   expiresInSeconds?: number;
   /** What this client now holds. Always includes observe: a client that may edit must be able to check whether its edit worked. */
   operationClasses: string[];
+  /** How much damage a mistake within this scope can cause. A fact about the classes held, not an opinion about which model should hold them. */
+  severity?: {
+    /** True when the grant includes a class whose mistakes cannot be taken back (submit, destructive). */
+    irreversible: boolean;
+    /** Ordinal of the highest operation class held: observe=0, edit=1, activate=2, submit=3, destructive=4. */
+    rank: number;
+  };
 }
 
 /** Version handshake. First call on a connection. (operation class: observe) */

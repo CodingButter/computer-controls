@@ -62,6 +62,48 @@ CONFIRM_BY_DEFAULT: frozenset[str] = frozenset({"submit", "destructive"})
 DEFAULT_IDLE_EXPIRY_SECONDS = 30 * 60
 
 
+def severity_of(classes) -> dict:
+    """How much damage a mistake with these classes can cause.
+
+    rank is the ordinal of the highest held class in OPERATION_CLASSES
+    (observe=0 … destructive=4) — the severity ladder the class list already
+    encodes. irreversible is True when any held class is in
+    CONFIRM_BY_DEFAULT, the ones a confirm dialog was born for. Both are
+    facts about the classes held, not opinions about which model should hold
+    them.
+    """
+    held = [c for c in OPERATION_CLASSES if c in classes]
+    rank = OPERATION_CLASSES.index(held[-1]) if held else 0
+    irreversible = bool(set(classes) & CONFIRM_BY_DEFAULT)
+    return {"rank": rank, "irreversible": irreversible}
+
+
+def breadth_of(grant: "Grant", ceiling: "Ceiling") -> dict:
+    """How wide a net this grant casts.
+
+    applications is the count of distinct application identities the grant
+    could act against. anchors is the count of element-anchored permissions
+    hung on the grant (A15) — each one is a separate place to keep track of,
+    so it counts toward the same spread the applications do.
+
+    A grant that names no applications inherits the ceiling's list, and a
+    ceiling that names none means every application there is. Reporting that
+    as zero would read as the narrowest possible scope when it is the widest
+    one available, so it is counted and flagged rather than summed: the count
+    is what is nameable, `unbounded` is the warning that the real number is
+    however many applications happen to be running.
+    """
+    anchors = len(grant.anchors)
+    apps = set(grant.applications) | set(grant.per_application.keys())
+    if apps:
+        return {"applications": len(apps), "anchors": anchors, "unbounded": False}
+    return {
+        "applications": len(ceiling.applications),
+        "anchors": anchors,
+        "unbounded": not ceiling.applications,
+    }
+
+
 class ScopeError(PermissionDenied):
     """Raised when a caller asks for more than the configuration allows."""
 

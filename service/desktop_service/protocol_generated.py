@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: 8891bb8b28a73331
+# Protocol version: 1.0   schema sha256: e55ff83a4364192f
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "8891bb8b28a73331"
+SCHEMA_DIGEST: Final = "e55ff83a4364192f"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -1364,6 +1364,32 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 },
                 "type": "array",
             },
+            "breadth": {
+                "additionalProperties": False,
+                "description": "How wide a net this scope casts. The competence dimension: breadth, not depth, is what overwhelms a small model.",
+                "properties": {
+                    "anchors": {
+                        "description": "Element-anchored permissions hung on this grant (A15). Each anchor is a separate place to keep track of, so it counts toward the same spread the applications do.",
+                        "minimum": 0,
+                        "type": "integer",
+                    },
+                    "applications": {
+                        "description": "Distinct applications this grant spans. A weaker model loses track across many.",
+                        "minimum": 0,
+                        "type": "integer",
+                    },
+                    "unbounded": {
+                        "description": "True when the scope names no applications and neither does the ceiling, so it spans every application there is. The count above is then a floor, not a total.",
+                        "type": "boolean",
+                    },
+                },
+                "required": [
+                    "applications",
+                    "anchors",
+                    "unbounded",
+                ],
+                "type": "object",
+            },
             "ceiling": {
                 "description": "The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice.",
                 "items": {
@@ -1387,6 +1413,26 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                     "type": "string",
                 },
                 "type": "array",
+            },
+            "severity": {
+                "additionalProperties": False,
+                "description": "How much damage a mistake within this scope can cause. A fact about the classes held, not an opinion about which model should hold them.",
+                "properties": {
+                    "irreversible": {
+                        "description": "True when the grant includes a class whose mistakes cannot be taken back (submit, destructive).",
+                        "type": "boolean",
+                    },
+                    "rank": {
+                        "description": "Ordinal of the highest operation class held: observe=0, edit=1, activate=2, submit=3, destructive=4.",
+                        "minimum": 0,
+                        "type": "integer",
+                    },
+                },
+                "required": [
+                    "rank",
+                    "irreversible",
+                ],
+                "type": "object",
             },
         },
         "required": [

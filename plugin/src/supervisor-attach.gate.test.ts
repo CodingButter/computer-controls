@@ -106,6 +106,13 @@ describe.skipIf(!available)("finding a desktop service", () => {
       const grant = audit.entries.find((entry) => entry.method === "grantScope");
       expect(grant, "the client never asked for the scope it minted tools for").toBeDefined();
       expect(grant?.reason).toBe("a test that proves the client opens the door");
+
+      // A16: the grant response is the only place the scope's price is ever
+      // reported, so the tier must have been decided here — a real daemon
+      // measured a real grant, and the choice reflects it.
+      expect(supervisor.brain, "the door opened but no brain tier was decided").toBeDefined();
+      expect(["minimal", "standard", "heavy"]).toContain(supervisor.brain!.tier);
+      expect(supervisor.brain!.reason.length).toBeGreaterThan(0);
     } finally {
       supervisor.stop();
     }

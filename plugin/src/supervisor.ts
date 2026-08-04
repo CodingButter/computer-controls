@@ -4,7 +4,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { DesktopClient, DesktopServiceError } from "./client.ts";
+import type { GrantScopeResult } from "./protocol.generated.ts";
 import { PROTOCOL_VERSION, SCHEMA_DIGEST } from "./protocol.generated.ts";
+import { brainFromGrant, type BrainChoice } from "./scope-brain.ts";
 
 /**
  * Gets this plugin a desktop service to talk to, by one of two routes.
@@ -47,6 +49,7 @@ export class DesktopSupervisor {
   #scope: readonly string[] = [];
   #scopeReason = "";
   #criteria: readonly string[] = [];
+  #brain: BrainChoice | undefined;
   readonly #sessionName: string;
 
   constructor(sessionName = `mc-${process.pid}`) {
@@ -87,6 +90,17 @@ export class DesktopSupervisor {
   }
 
   /**
+   * How much thinking the granted scope asks for, per the service's own
+   * severity and breadth report (A16). Undefined until a door has been opened —
+   * an observe-only scope asks for nothing and so reports nothing. Re-decided
+   * on every connection, so a host that reads it after a reconnect sees the
+   * price of the scope it holds now, not the one it started with.
+   */
+  get brain(): BrainChoice | undefined {
+    return this.#brain;
+  }
+
+  /**
    * Ask for the client's scope on a freshly connected client.
    *
    * A failure here is not fatal to the connection: the tools are already
@@ -97,12 +111,24 @@ export class DesktopSupervisor {
   async #openDoor(client: DesktopClient): Promise<void> {
     if (this.#scope.length === 0) return;
     try {
-      await client.request("grantScope", {
+      const granted = await client.request<GrantScopeResult>("grantScope", {
         clientId: this.#sessionName,
         operationClasses: [...this.#scope],
         reason: this.#scopeReason,
         ...(this.#criteria.length > 0 ? { criteria: [...this.#criteria] } : {}),
       });
+      // A16: the service reports what the scope costs — severity and breadth —
+      // and stops there. Turning those two numbers into a model tier is a
+      // client decision, and this is the only place a grant response exists
+      // now that A13 removed the granting tool from the agent's hand. The
+      // choice is re-decided on every door opening, including a reconnection:
+      // a scope change is a model change, and carrying on cheaply after being
+      // handed more is precisely the wrong economy. Swapping the running model
+      // on the answer belongs to whatever hosts this plugin.
+      this.#brain = brainFromGrant(granted);
+      console.error(
+        `[desktop-control] scope granted; brain tier "${this.#brain.tier}" (${this.#brain.reason})`,
+      );
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       console.error(`[desktop-control] the configured scope was refused: ${detail}`);

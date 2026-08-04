@@ -2,7 +2,7 @@
 
 Generated from `protocol/schema.json` — do not edit.
 Run: `node scripts/generate-tool-api-doc.mjs`
-Protocol version: 1.0   schema sha256: 8891bb8b28a73331
+Protocol version: 1.0   schema sha256: e55ff83a4364192f
 
 The contract between any client and the desktop service. Frozen at 1.0. Additive changes only: new methods and new optional fields. Removing a method, renaming or removing a field, narrowing a type, changing an error code, or adding a required request field is a breaking change and requires a major version.
 
@@ -360,10 +360,12 @@ Ask for the operation classes this client may use, within the ceiling the user's
 |---|---|---|---|
 | `anchors` | [`scopeAnchor`](#scopeanchor)[] | no | Where this grant now hangs. Returned so a client can tell an anchor that was accepted from one that was quietly dropped. |
 | `applications` | string[] | no |  |
+| `breadth` | object | no | How wide a net this scope casts. The competence dimension: breadth, not depth, is what overwhelms a small model. |
 | `ceiling` | string[] | yes | The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice. |
 | `criteria` | string[] | no | Every criterion a commit under this grant will be judged against, the mechanical ones included whether or not they were asked for. Returned so a client can tell what review it has actually bought without inferring it from a refusal. |
 | `expiresInSeconds` | integer | no |  |
 | `operationClasses` | string[] | yes | What this client now holds. Always includes observe: a client that may edit must be able to check whether its edit worked. |
+| `severity` | object | no | How much damage a mistake within this scope can cause. A fact about the classes held, not an opinion about which model should hold them. |
 
 ---
 
