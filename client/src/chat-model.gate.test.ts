@@ -22,6 +22,13 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), "comcon-chat-gate-"));
 let app: ReturnType<typeof buildApp>;
 
 beforeAll(async () => {
+  // The SDK swaps in a fake credential whenever it sees a test environment,
+  // which is the right guard for every lane except this one: the entire job
+  // of this test is to spend a real credential on purpose. Under vitest the
+  // VITEST flag is always set, so without this the lane can never pass on
+  // any machine, signed in or not.
+  delete process.env.VITEST;
+  process.env.NODE_ENV = "production";
   const config = resolveClientConfig({ ...process.env, COMCON_CLIENT_ROOT: root });
   const hub = await prepareHub(config);
   new Mastra(hub.mastraArgs);
