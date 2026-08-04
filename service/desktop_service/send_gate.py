@@ -45,15 +45,26 @@ class _Attestation:
     expected_text: str
     created_at: float
     expires_at: float
+    #: The desktop's revision when the photograph was taken. The TTL says how
+    #: long the caller may take to think; this says whether anything moved while
+    #: it thought. Text equality alone cannot tell: a field that changed and
+    #: changed back reads identical, and so does a change that leaves the text
+    #: alone but not the thing around it.
+    proof_revision: int = 0
     spent: bool = False
 
 
-def attest(*, client_id: str, element_id: str, text: str) -> tuple[str, int]:
+def attest(
+    *, client_id: str, element_id: str, text: str, revision: int = 0
+) -> tuple[str, int]:
     """Record what the service read. Returns (attestation_id, expires_in_ms).
 
     The text never leaves this register except through ``redeem``, and is
     never written to the audit log or any other persistent sink. It exists
     to be compared, and then it is gone.
+
+    The revision is stamped alongside it, because an approval refers to the
+    desktop as it was at one moment and the commit happens at another.
     """
     global _counter
     now = time.monotonic()
@@ -68,12 +79,13 @@ def attest(*, client_id: str, element_id: str, text: str) -> tuple[str, int]:
             expected_text=text,
             created_at=now,
             expires_at=now + ATTESTATION_TTL_SECONDS,
+            proof_revision=revision,
         )
         return attestation_id, int(ATTESTATION_TTL_SECONDS * 1000)
 
 
-def redeem(*, client_id: str, attestation_id: str, element_id: str) -> str:
-    """Return the attested text and mark the attestation spent.
+def redeem(*, client_id: str, attestation_id: str, element_id: str) -> tuple[str, int]:
+    """Return the attested text and revision, and mark the attestation spent.
 
     Raises PERMISSION_DENIED if the attestation does not exist, has expired,
     was already spent, belongs to a different client, or names a different
@@ -108,7 +120,7 @@ def redeem(*, client_id: str, attestation_id: str, element_id: str) -> str:
                 "One attestation admits one commit; re-attest to commit again.",
             )
         entry.spent = True
-        return entry.expected_text
+        return entry.expected_text, entry.proof_revision
 
 
 def release_client(client_id: str) -> None:

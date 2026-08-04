@@ -157,6 +157,11 @@ def test_a_mutation_between_attest_and_commit_is_refused(desktop):
 
     This is the core acceptance criterion: a commit must re-read the target and
     refuse when it differs from what was approved, with the difference named.
+
+    The refusal is ATTESTATION_FAILED rather than PERMISSION_DENIED because the
+    two are different facts: this caller may commit here, and its proof did not
+    hold. Answering "denied" would send it back to ask for permission it already
+    has, when what it needs is to attest again.
     """
     srv, field, _ = desktop
     attest = call(srv, "attestElement", elementId="el-1", clientId="agent")
@@ -173,8 +178,8 @@ def test_a_mutation_between_attest_and_commit_is_refused(desktop):
             confirm=True,
             clientId="agent",
         )
-    assert raised.value.code == ErrorCode.PERMISSION_DENIED
-    assert "changed" in raised.value.message.lower()
+    assert raised.value.code == ErrorCode.ATTESTATION_FAILED
+    assert "contents-match mismatch" in raised.value.message
     assert not field.action_called, "a refused commit must not trigger the action"
 
 
