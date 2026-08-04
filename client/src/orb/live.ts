@@ -83,6 +83,14 @@ export interface RealtimeSession {
   mute(): void;
   unmute(): void;
   readonly muted: boolean;
+  /**
+   * Whether a live socket currently backs this session. False during a
+   * reconnect gap. A transport that never drops may simply return true;
+   * one that redials should treat `unmute()` as a reason to redial NOW —
+   * a person starting to talk is the worst moment to be waiting out a
+   * backoff.
+   */
+  readonly connected: boolean;
   close(): Promise<void>;
 }
 

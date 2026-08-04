@@ -126,7 +126,11 @@ export class UtteranceBank {
   async clipFor(intent: IntentClass): Promise<Clip | undefined> {
     const clipClass = clipClassFor(intent);
     if (!clipClass) return undefined;
+    return this.clipFrom(clipClass);
+  }
 
+  /** A clip straight off a named shelf, for callers whose reason is not an intent. */
+  async clipFrom(clipClass: ClipClass): Promise<Clip | undefined> {
     const count = CLIP_TEXT[clipClass].length;
     const start = this.#pick(count);
     for (let offset = 0; offset < count; offset += 1) {

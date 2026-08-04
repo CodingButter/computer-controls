@@ -28,6 +28,7 @@ function fakeSession(): RealtimeSession & {
   audio: Uint8Array[];
   texts: string[];
   results: { id: string; result: string }[];
+  connected: boolean;
 } {
   let muted = false;
   const audio: Uint8Array[] = [];
@@ -53,6 +54,7 @@ function fakeSession(): RealtimeSession & {
     get muted() {
       return muted;
     },
+    connected: true,
     close: async () => {},
   };
 }
@@ -253,6 +255,18 @@ describe("test_a_filler_clip_plays_from_cache_and_never_from_a_live_synth_call",
     await tick();
 
     expect(played).toEqual([]);
+  });
+
+  it("covers a reconnect gap with a thinking clip instead of dead air", async () => {
+    const { orb, session, vad, played } = build({ transcript: "computer open the browser" });
+    session.connected = false;
+
+    await say(orb, vad);
+    await tick();
+
+    // The person spoke into a gap. They hear "one moment", not the command
+    // acknowledgement — nothing was heard on the far side to acknowledge.
+    expect(played).toEqual(["let me check"]);
   });
 });
 

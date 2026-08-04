@@ -230,9 +230,22 @@ export function geminiLiveProvider(
           });
         });
 
+      /**
+       * Resolving this skips whatever remains of the current backoff wait.
+       * The wake gate pulls it through unmute(): a person starting to talk
+       * is the worst moment to be patiently waiting out a retry schedule.
+       */
+      let nudge: (() => void) | undefined;
+
       const redial = async (): Promise<void> => {
         for (let attempt = 0; !closedByUs; attempt++) {
-          await retryWait(attempt);
+          await Promise.race([
+            retryWait(attempt),
+            new Promise<void>((resolve) => {
+              nudge = resolve;
+            }),
+          ]);
+          nudge = undefined;
           if (closedByUs) return;
           try {
             await dial();
@@ -298,9 +311,15 @@ export function geminiLiveProvider(
         },
         unmute(): void {
           muted = false;
+          // The gate just opened. If we are sitting in a redial gap, dial
+          // now instead of finishing the backoff — the person is talking.
+          nudge?.();
         },
         get muted(): boolean {
           return muted;
+        },
+        get connected(): boolean {
+          return !closedByUs && current !== undefined;
         },
 
         async close(): Promise<void> {

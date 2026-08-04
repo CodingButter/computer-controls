@@ -78,6 +78,7 @@ function recordingSession(): RealtimeSession & { audio: Uint8Array[]; texts: str
     get muted() {
       return muted;
     },
+    connected: true,
     close: async () => {},
   };
 }

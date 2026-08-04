@@ -196,6 +196,11 @@ export class Orb {
   }
 
   #onWake(hearing: Hearing): void {
+    // Reading `connected` before unmute(), because unmute is also the
+    // transport's cue to redial immediately — afterwards the gap may
+    // already be closing, and the answer here decides whether a covering
+    // clip is owed.
+    const wasDisconnected = !this.#session.connected;
     this.#session.unmute();
     this.#setState("listening");
     if (hearing.transcript) {
@@ -207,6 +212,13 @@ export class Orb {
     // this object. The next utterance replaces it and no record of this one
     // survives anywhere in the process.
     this.#emit({ type: "mood", mood: hearing.sentiment });
+    if (wasDisconnected) {
+      // Somebody spoke into a reconnect gap. The honest sound is "one
+      // moment" — a thinking clip whose duration is spent on the redial
+      // handshake, the same trade the hub filler makes with its round trip.
+      void this.#playCoveringClip();
+      return;
+    }
     // A wake that was already actionable gets its filler now rather than waiting
     // for the provider to decide it needs the hub: the round trip has started.
     if (isActionable(hearing.intent)) void this.#playFiller(hearing);
@@ -223,6 +235,12 @@ export class Orb {
 
   async #playFiller(hearing: Hearing): Promise<void> {
     const clip = await this.#bank.clipFor(hearing.intent);
+    if (!clip) return;
+    await this.#mouth.speak(clipUtterance(clip, this.#speaker));
+  }
+
+  async #playCoveringClip(): Promise<void> {
+    const clip = await this.#bank.clipFrom("thinking");
     if (!clip) return;
     await this.#mouth.speak(clipUtterance(clip, this.#speaker));
   }

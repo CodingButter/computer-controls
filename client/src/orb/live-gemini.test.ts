@@ -274,6 +274,22 @@ describe("when the server hangs up", () => {
     expect(sockets).toHaveLength(2);
   });
 
+  it("unmute during the gap skips the backoff and dials right now", async () => {
+    // A backoff that never resolves: the only way a redial can happen in
+    // this test is the nudge.
+    const { provider, sockets } = reconnectingProvider(() => new Promise<void>(() => {}));
+    const session = await provider.connect(realtimeConfig({ apiKey: "k", events: events() }));
+
+    sockets[0].emit("close", {});
+    await settle();
+    expect(sockets).toHaveLength(1);
+
+    session.unmute();
+    await settle();
+    expect(sockets).toHaveLength(2);
+    expect(session.connected).toBe(true);
+  });
+
   it("a close from this side stays closed — no redial", async () => {
     const { provider, sockets } = reconnectingProvider();
     const session = await provider.connect(realtimeConfig({ apiKey: "k", events: events() }));

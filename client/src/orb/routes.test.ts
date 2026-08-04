@@ -26,6 +26,7 @@ function fakeSession(): RealtimeSession {
     get muted() {
       return muted;
     },
+    connected: true,
     close: async () => {},
   };
 }
