@@ -1,5 +1,8 @@
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { DEFAULT_PLUGIN_ALLOWLIST } from "./plugins.ts";
 
 /**
  * Where the hub keeps its state and what it serves.
@@ -23,6 +26,17 @@ export type ClientConfig = {
    * and the honest default opens nothing that changes the desktop.
    */
   desktopScope: string;
+  /**
+   * Home directory the hub reads this machine's installed plugins from. Read as
+   * candidates for the allowlist, never as instructions — see ./plugins.ts.
+   */
+  pluginHome: string;
+  /**
+   * Plugin ids the hub will mount. Anything else installed on this machine is
+   * refused, and only this boot-time config can extend the list: the agent and
+   * the plugins it holds have no say in what else gets mounted beside them.
+   */
+  pluginAllowlist: string[];
   /** Directory the browser UI is served from. */
   uiRoot: string;
 };
@@ -40,6 +54,21 @@ function readPort(raw: string | undefined): number {
   return port;
 }
 
+/**
+ * Extra plugin ids the operator admits, comma-separated.
+ *
+ * Extends the default list rather than replacing it: the desktop plugin is the
+ * reason this hub exists, and an allowlist that could be emptied by an
+ * environment variable would be a different feature.
+ */
+function readAllowlist(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
+}
+
 export function resolveClientConfig(env: NodeJS.ProcessEnv = process.env): ClientConfig {
   const root = env.COMCON_CLIENT_ROOT ? path.resolve(env.COMCON_CLIENT_ROOT) : packageRoot;
   return {
@@ -51,6 +80,8 @@ export function resolveClientConfig(env: NodeJS.ProcessEnv = process.env): Clien
       ? path.resolve(env.COMCON_DESKTOP_PLUGIN_PATH)
       : path.resolve(packageRoot, "..", "plugin"),
     desktopScope: env.COMCON_DESKTOP_SCOPE ?? "observe",
+    pluginHome: env.COMCON_PLUGIN_HOME ? path.resolve(env.COMCON_PLUGIN_HOME) : os.homedir(),
+    pluginAllowlist: [...DEFAULT_PLUGIN_ALLOWLIST, ...readAllowlist(env.COMCON_PLUGIN_ALLOWLIST)],
     uiRoot: path.join(packageRoot, "public"),
   };
 }

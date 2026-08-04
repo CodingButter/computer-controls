@@ -1,38 +1,35 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { getPluginScopePaths } from "@mastra/code-sdk/plugins/paths";
-import {
-  loadPluginRegistry,
-  savePluginRegistry,
-  setPluginRecord,
-} from "@mastra/code-sdk/plugins/registry";
+import type { InstalledPluginRecord } from "@mastra/code-sdk/plugins/types";
 
 export const DESKTOP_PLUGIN_ID = "desktop-control";
 
 const ENTRY = "src/index.ts";
 
 export type DesktopPluginRegistration = {
-  projectRoot: string;
-  configDir: string;
   pluginPath: string;
   scope: string;
 };
 
 /**
- * Put the desktop plugin in the project registry Mastra Code reads at boot, at
- * the configured operation scope.
+ * The registry record that mounts the desktop plugin at the configured
+ * operation scope.
  *
- * This writes the record rather than calling `PluginManager.installLocal`
+ * This mints the record rather than calling `PluginManager.installLocal`
  * deliberately: install links a `mastracode` package into the plugin directory
  * for TUI-installed plugins, and that package is not a dependency of this hub.
  * The plugin already lives in this repository beside us — there is nothing to
  * fetch, and the registry record is the entire installation.
  *
- * The scope is written on every boot, so the door the agent finds is the one
- * this process configured and not one a previous run left open.
+ * The record is built on every boot, so the door the agent finds is the one
+ * this process configured and not one a previous run left open. Where it gets
+ * written is `./plugins.ts`'s business: the desktop plugin is admitted the same
+ * way every other plugin is, by being on the allowlist.
  */
-export function registerDesktopPlugin(registration: DesktopPluginRegistration): string {
+export function desktopPluginRecord(
+  registration: DesktopPluginRegistration,
+): InstalledPluginRecord {
   const pluginPath = path.resolve(registration.pluginPath);
   const entryPath = path.join(pluginPath, ENTRY);
   if (!fs.existsSync(entryPath)) {
@@ -42,23 +39,12 @@ export function registerDesktopPlugin(registration: DesktopPluginRegistration): 
     );
   }
 
-  const { root, registryPath } = getPluginScopePaths("project", {
-    projectRoot: registration.projectRoot,
-    configDir: registration.configDir,
-  });
-  fs.mkdirSync(root, { recursive: true });
-
-  savePluginRegistry(
-    registryPath,
-    setPluginRecord(loadPluginRegistry(registryPath), DESKTOP_PLUGIN_ID, {
-      enabled: true,
-      source: "local",
-      specifier: pluginPath,
-      path: pluginPath,
-      entry: ENTRY,
-      config: { scope: registration.scope },
-    }),
-  );
-
-  return registryPath;
+  return {
+    enabled: true,
+    source: "local",
+    specifier: pluginPath,
+    path: pluginPath,
+    entry: ENTRY,
+    config: { scope: registration.scope },
+  };
 }

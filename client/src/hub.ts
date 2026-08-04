@@ -4,7 +4,7 @@ import type { ClientStatus } from "./app.ts";
 import { createAgentTurn } from "./chat.ts";
 import type { AgentTurn, HubSession } from "./chat.ts";
 import type { ClientConfig } from "./config.ts";
-import { registerDesktopPlugin } from "./desktop-plugin.ts";
+import { mountAllowedPlugins } from "./plugins.ts";
 import { HANDS_OFF_TOOL_NAMES, hubWorkspace, listSessionTools } from "./toolbox.ts";
 
 /** The browser is one caller, so its turns share one session and one thread history. */
@@ -20,11 +20,12 @@ const BROWSER_RESOURCE_ID = "local-browser";
  * only recognises a Mastra config when it finds that expression there.
  */
 export async function prepareHub(config: ClientConfig) {
-  registerDesktopPlugin({
+  const { pluginManager, refused } = mountAllowedPlugins({
     projectRoot: config.root,
     configDir: config.configDir,
-    pluginPath: config.desktopPluginPath,
-    scope: config.desktopScope,
+    homeDir: config.pluginHome,
+    allowlist: config.pluginAllowlist,
+    desktop: { pluginPath: config.desktopPluginPath, scope: config.desktopScope },
   });
 
   const { base, mastraArgs, finalize } = await prepareAgentControllerMount({
@@ -40,6 +41,11 @@ export async function prepareHub(config: ClientConfig) {
     // without a scope check and without an audit line. See ./toolbox.ts.
     workspace: hubWorkspace,
     disabledTools: HANDS_OFF_TOOL_NAMES,
+    // Left to itself the runtime resolves plugins from this project *and* from
+    // the operator's home directory, which handed a session that holds a
+    // desktop every plugin the operator ever installed for their terminal. This
+    // manager loads the allowlist and nothing else. See ./plugins.ts.
+    pluginManager,
     // Both of these read this machine's coding-agent config and turn it into
     // effects: MCP servers mint tools of unknown reach, hooks run shell
     // commands around tool calls. Neither passes through the daemon, so
@@ -78,6 +84,15 @@ export async function prepareHub(config: ClientConfig) {
   const status = async (): Promise<ClientStatus> => ({
     tools: await listSessionTools({ controller: base.controller, session: await getSession() }),
     desktopScope: config.desktopScope,
+    plugins: {
+      // Read off the manager rather than from the admission decision: what was
+      // asked for and what loaded are different facts, and only the second one
+      // is worth reporting. Refusals have no loaded record to read, so they
+      // come from the decision itself — a plugin missing from both lists is one
+      // that is not installed on this machine at all.
+      admitted: (base.pluginManager?.getLoadedPlugins() ?? []).map((plugin) => plugin.id).sort(),
+      refused,
+    },
   });
 
   return { base, mastraArgs, finalize, chat, status, getSession };
