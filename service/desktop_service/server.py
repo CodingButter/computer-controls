@@ -1040,6 +1040,27 @@ def _method_type_keystrokes(params: dict[str, Any]) -> dict[str, Any]:
     def on_loop(work):
         return loop.call_on_loop(work, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
 
+    def synthesise(work):
+        """Send input, then tell presence it was us.
+
+        Every keystroke this method sends resets the display server's idle timer,
+        which is the only clock the takeover rule has — and this method raised the
+        window to type into it, so the other half of that rule matches too.
+        Without this stamp the write stops on its own first character and reports
+        that a person took the field, which is a lie about a human being.
+
+        The stamp is taken after the event has gone, including when the call
+        failed or timed out: a key that may have landed has to be accounted for,
+        while a stamp for a key that never went costs only the slack interval of
+        sensitivity. It is recorded here rather than inside the synthesis
+        functions because this is the seam that knows a key was sent on this
+        service's behalf — the backend cannot tell its own callers apart.
+        """
+        try:
+            return on_loop(work)
+        finally:
+            _presence.synthesised_input()
+
     def run() -> bool:
         held_window = _display_window_of(element_id)
 
@@ -1059,7 +1080,7 @@ def _method_type_keystrokes(params: dict[str, Any]) -> dict[str, Any]:
         # needs to trace text that went astray.
         progress["focusedWindow"] = held_window
 
-        if replace and not on_loop(atspi.clear_field_by_keystrokes):
+        if replace and not synthesise(atspi.clear_field_by_keystrokes):
             progress["stoppedBecause"] = "the field would not clear"
             return False
 
@@ -1072,7 +1093,7 @@ def _method_type_keystrokes(params: dict[str, Any]) -> dict[str, Any]:
             if _yielded(progress, element_id, held_window, _client_id(params)):
                 break
             try:
-                landed = on_loop(
+                landed = synthesise(
                     lambda character=character: atspi.type_keysym(atspi.keysym_for(character))
                 )
             except DesktopError as stalled:

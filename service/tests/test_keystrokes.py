@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from desktop_service import errors, holds, server
+from desktop_service import errors, holds, presence, server
 
 
 class FakeField:
@@ -284,3 +284,93 @@ def test_it_goes_through_the_same_claim_registry_as_every_other_write(keyboard):
         assert keyboard.text == ""
     finally:
         holds.release("el-a", holder_id="someone-else")
+
+
+class Desktop:
+    """A desktop whose idle timer is reset by every key, including ours.
+
+    The suites above fake the idle timer and the keyboard separately, and the
+    fakes never feed each other — which is exactly why nothing caught the tier
+    yielding to its own reflection. Here one clock is shared: a synthetic key
+    resets the same timer presence reads, the window being typed into is the
+    active one, and time only moves when the pacing waits.
+    """
+
+    WALKED_AWAY_SECONDS = 90.0
+
+    def __init__(self, window: str = "3001") -> None:
+        self.t = 1000.0
+        self.last_input = self.t - self.WALKED_AWAY_SECONDS
+        self.active = window
+
+    def now(self) -> float:
+        return self.t
+
+    def advance(self, seconds: float) -> None:
+        self.t += seconds
+
+    def key(self) -> None:
+        """A key reached the X server. It does not record whose."""
+        self.last_input = self.t
+
+    def idle_ms(self) -> int:
+        return int((self.t - self.last_input) * 1000)
+
+
+def shared_desktop(keyboard, monkeypatch, *, interrupt_after: int | None = None) -> Desktop:
+    desk = Desktop()
+
+    def type_keysym(keysym: int) -> bool:
+        keyboard.text += chr(keysym)
+        desk.key()
+        return True
+
+    def wait(seconds: float) -> None:
+        desk.advance(seconds)
+        if interrupt_after is not None and len(keyboard.text) >= interrupt_after:
+            # A person, pressing a key of their own after ours and before the
+            # next check. Nothing here says it was them; the timer cannot.
+            desk.key()
+
+    monkeypatch.setattr(server.atspi, "type_keysym", type_keysym)
+    monkeypatch.setattr(server.time, "sleep", wait)
+    monkeypatch.setattr(server, "_display_window_of", lambda element_id: desk.active)
+    monkeypatch.setattr(
+        server,
+        "_presence",
+        presence.Watch(desk.idle_ms, lambda: desk.active, now=desk.now),
+    )
+    return desk
+
+
+def test_the_tier_does_not_yield_to_its_own_keystrokes(keyboard, monkeypatch):
+    """The whole message is typed on a desktop nobody is sitting at.
+
+    Every character resets the idle timer and the window being typed into is the
+    active one, so before the discount this stopped after the first character
+    and blamed a person who was not there.
+    """
+    shared_desktop(keyboard, monkeypatch)
+
+    result = type_keystrokes(text="keystroke tier proof")
+
+    assert result["ok"] is True
+    assert keyboard.text == "keystroke tier proof"
+    progress = result["progress"]
+    assert progress["charactersTyped"] == progress["charactersPlanned"] == 20
+    assert "yieldedTo" not in progress
+
+
+def test_a_person_still_takes_the_field_from_the_keystroke_tier(keyboard, monkeypatch):
+    """The yield survives the discount, and still costs at most one character."""
+    shared_desktop(keyboard, monkeypatch, interrupt_after=4)
+
+    result = type_keystrokes(text="a message they interrupted")
+
+    assert result["ok"] is False
+    progress = result["progress"]
+    assert progress["yieldedTo"] == "user"
+    assert progress["charactersTyped"] == 4
+    assert keyboard.text == "a me"
+    # Stopped and withheld in one breath, so calling again cannot win the race.
+    assert server._presence.holder_of("el-a") is not None
