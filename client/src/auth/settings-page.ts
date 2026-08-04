@@ -13,6 +13,7 @@
  * see.
  */
 
+import { VOICE_PROVIDERS_PATH } from "../voice/routes.ts";
 import { PROVIDER_AUTH_BASE_PATH } from "./routes.ts";
 
 const STYLES = `
@@ -31,6 +32,8 @@ const STYLES = `
   .step[hidden] { display: none; }
   code { font-size: 1.05em; letter-spacing: .08em; }
   .error { color: #b3261e; font-size: .9rem; margin-top: .5rem; }
+  .voice { margin: 0 0 .35rem; font-size: .9rem; }
+  .voice:last-child { margin-bottom: 0; }
 `;
 
 const SCRIPT = String.raw`
@@ -127,6 +130,33 @@ async function poll(section, session) {
 
 async function refresh() {
   render((await call("/flows")).providers);
+  await refreshVoices();
+}
+
+/**
+ * The mouths this machine can wear. Rendered from what the server offers and
+ * nothing else: a provider with no credential is not in the response, so there
+ * is nothing here that decides whether to hide it.
+ */
+async function refreshVoices() {
+  const list = document.getElementById("voices");
+  const response = await fetch("__VOICE_PROVIDERS__", { credentials: "same-origin" });
+  const { providers } = await response.json();
+
+  if (!providers.length) {
+    list.textContent = "Connect an account above to give the agent a voice.";
+    return;
+  }
+
+  list.replaceChildren(...providers.map((provider) => {
+    const row = document.createElement("p");
+    row.className = "voice";
+    row.dataset.provider = provider.provider;
+    row.textContent = provider.usable
+      ? provider.name + " — ready"
+      : provider.name + " — " + provider.reason;
+    return row;
+  }));
 }
 
 refresh().catch((problem) => { document.getElementById("providers").textContent = problem.message; });
@@ -144,6 +174,9 @@ export function renderSettingsPage(basePath: string = PROVIDER_AUTH_BASE_PATH): 
   <h1>Model accounts</h1>
   <p class="lede">Sign in with your own Anthropic and OpenAI accounts. Credentials stay on this machine.</p>
   <div id="providers"></div>
+  <h1>Voice</h1>
+  <p class="lede">Which account the agent speaks and listens with. Set <code>COMCON_VOICE_PROVIDER</code> to pick one; otherwise the connected one is used.</p>
+  <section id="voices"></section>
 </main>
 <template id="provider-template">
   <section>
@@ -167,6 +200,9 @@ export function renderSettingsPage(basePath: string = PROVIDER_AUTH_BASE_PATH): 
     <p class="error" role="alert"></p>
   </section>
 </template>
-<script type="module">${SCRIPT.replace("__BASE__", basePath)}</script>
+<script type="module">${SCRIPT.replace("__BASE__", basePath).replace(
+  "__VOICE_PROVIDERS__",
+  VOICE_PROVIDERS_PATH,
+)}</script>
 </html>`;
 }

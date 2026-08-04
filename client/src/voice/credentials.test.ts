@@ -27,7 +27,7 @@ describe("resolving the credential the voice lane may use", () => {
       storeHolding({}, { [OPENAI_PROVIDER_ID]: "sk-pasted" }),
     );
 
-    expect(resolved).toEqual({ kind: "api-key", key: "sk-pasted" });
+    expect(resolved).toEqual({ kind: "api-key", key: "sk-pasted", provider: "openai" });
   });
 
   it("asks the store for the OAuth token so an expired one is refreshed there, not here", async () => {
@@ -46,6 +46,7 @@ describe("resolving the credential the voice lane may use", () => {
     expect(resolved).toEqual({
       kind: "chatgpt-oauth",
       key: "freshly-refreshed-token",
+      provider: "openai",
     });
     expect(store.getApiKey).toHaveBeenCalledWith(OPENAI_PROVIDER_ID);
   });
