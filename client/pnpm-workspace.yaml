@@ -17,3 +17,8 @@ allowBuilds:
   protobufjs: false
 minimumReleaseAgeExclude:
   - '@rolldown/binding-android-arm64@1.2.2'
+
+# One zod, one @mastra/core: a second zod major splits the peer graph and
+# mints a second nominally-distinct copy of core, which tsc then refuses.
+overrides:
+  zod: 3.25.76
