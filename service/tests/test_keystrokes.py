@@ -14,6 +14,8 @@ window the person running the suite had open.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from desktop_service import errors, holds, presence, server
@@ -69,7 +71,15 @@ def keyboard(monkeypatch):
     monkeypatch.setattr(
         server.atspi,
         "text_matches",
-        lambda obj, expected, exact: server.atspi.verdict_for(obj.text, expected, exact=exact),
+        lambda obj, expected, exact, before="": server.atspi.verdict_for(
+            obj.text, expected, exact=exact, before=before
+        ),
+    )
+    # Delegated rather than reimplemented, for the reason `verdict_for` gives in
+    # its own docstring: the last copy of this rule that lived in a stub went on
+    # answering an old question long after the real one had moved.
+    monkeypatch.setattr(
+        server.atspi, "text_digest", lambda obj: server.atspi.digest_of(obj.text)
     )
     monkeypatch.setattr(server.atspi, "read_back", lambda obj, element_id="": obj.text)
     monkeypatch.setattr(server, "_snapshot", lambda: server.state.Snapshot(revision=1, windows={}, values={}))
@@ -212,6 +222,103 @@ def test_a_masked_field_is_unverifiable_rather_than_failed(keyboard, monkeypatch
 
     assert result["ok"] is True
     assert result["progress"]["verified"] == "unverifiable"
+
+
+def test_a_field_whose_readback_never_changes_is_unverifiable_not_mismatch(keyboard, monkeypatch):
+    """The Discord composer: one embedded-object character, empty or full.
+
+    Its reading is the same before the write and after it, and is neither what
+    was typed nor a mask. Calling that a mismatch would report the field's
+    contents on the authority of a field that never reports its contents, and
+    would invite the caller to type the message a second time into a composer
+    that already holds it.
+    """
+    monkeypatch.setattr(server.atspi, "type_keysym", lambda keysym: True)
+    monkeypatch.setattr(keyboard, "text", "\ufffc")
+    result = type_keystrokes(text="keystroke tier proof")
+
+    assert result["ok"] is True
+    progress = result["progress"]
+    assert progress["verified"] == "unverifiable"
+    assert progress["charactersTyped"] == progress["charactersPlanned"] == 20
+    # Nothing to show, and the marker is not worth showing. `actualText` is for
+    # a caller deciding what to do about a half-typed message; there is no such
+    # decision to make about a field that says nothing either way.
+    assert "actualText" not in progress
+    assert "every character was accepted by the keyboard" in progress["stoppedBecause"]
+
+
+def test_a_readback_that_changes_to_the_wrong_text_is_still_a_mismatch(keyboard, monkeypatch):
+    """The opacity rule must not swallow the failure it sits next to.
+
+    This field had something to say before the write and says something
+    different afterwards, so the read-back is a witness and it disagrees.
+    """
+    keyboard.text = "prior text: "
+
+    def drop_after_three(keysym: int) -> bool:
+        if len(keyboard.text) >= len("prior text: ") + 3:
+            return True  # the X server took it; the application did not keep it
+        keyboard.text += chr(keysym)
+        return True
+
+    monkeypatch.setattr(server.atspi, "type_keysym", drop_after_three)
+    result = type_keystrokes(text="a whole sentence")
+
+    assert result["ok"] is False
+    progress = result["progress"]
+    assert progress["verified"] == "mismatch"
+    assert progress["actualText"] == "prior text: a w"
+
+
+def test_a_field_that_stays_empty_is_still_a_mismatch(keyboard, monkeypatch):
+    """The failure the opacity rule could otherwise hide.
+
+    A field that reports nothing before and nothing afterwards has not
+    demonstrated that it is withholding anything — it has demonstrated that the
+    keystrokes went nowhere, which is the commonest way for this tier to fail.
+    """
+    monkeypatch.setattr(server.atspi, "type_keysym", lambda keysym: True)
+    result = type_keystrokes(text="into the void")
+
+    assert result["ok"] is False
+    assert result["progress"]["verified"] == "mismatch"
+
+
+def test_the_pre_write_reading_never_leaves_the_backend(keyboard, monkeypatch):
+    """The verdict travels; what the field held before it does not.
+
+    The reading is taken to tell an opaque field apart from a field that refused
+    the text, and that comparison happens in the backend. A caller receives the
+    answer it produced and no part of what it was computed from — the same
+    bargain the three-way verdict has always made about the field's contents.
+    """
+    monkeypatch.setattr(server.atspi, "type_keysym", lambda keysym: True)
+    monkeypatch.setattr(keyboard, "text", "the previous message")
+    result = type_keystrokes(text="keystroke tier proof")
+
+    assert result["progress"]["verified"] == "unverifiable"
+    rendered = json.dumps(result)
+    assert "the previous message" not in rendered
+    assert server.atspi.digest_of("the previous message") not in rendered
+
+
+def test_the_rule_itself_reads_an_unchanged_field_as_opaque_and_nothing_else():
+    """The decision point, asserted directly, the way `typeText`'s tests do.
+
+    Four cases because the interesting ones are the boundaries: a reading that
+    did not move is opaque, one that moved is wrong, a field that says what was
+    asked for is verified however it got there, and a caller that supplied no
+    earlier reading gets exactly the answers it got before.
+    """
+    marker = server.atspi.digest_of("\ufffc")
+    assert server.atspi.verdict_for("\ufffc", "typed", before=marker) == "unverifiable"
+    assert server.atspi.verdict_for("something else", "typed", before=marker) == "mismatch"
+    assert server.atspi.verdict_for("typed", "typed", before=server.atspi.digest_of("typed")) == "verified"
+    assert server.atspi.verdict_for("\ufffc", "typed") == "mismatch"
+    # An empty reading is not evidence of anything, so it cannot be evidence of
+    # opacity either.
+    assert server.atspi.verdict_for("", "typed", before=server.atspi.digest_of("")) == "mismatch"
 
 
 def test_a_newline_is_refused_by_name_because_return_is_the_send_button(keyboard):

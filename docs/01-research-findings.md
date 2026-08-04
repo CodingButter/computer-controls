@@ -192,11 +192,23 @@ again — into a field that already contains it (`atspi.py:900-926`).
 
 - **`verified`** — the text matches.
 - **`mismatch`** — the text does not match and is not a mask.
-- **`unverifiable`** — the field contains only mask characters
+- **`unverifiable`** — the read-back is not a witness. Two causes, one meaning.
+  Either the field contains only mask characters
   (`_MASK_CHARACTERS = frozenset("•*●·⬤∙")`, `atspi.py:903`) where the caller
-  expected something else. The field may or may not contain the password; the
-  accessibility layer cannot tell, and neither can the caller, so the honest
-  answer is "I cannot verify this," not "it failed."
+  expected something else, or the field reported the same thing before the write
+  as after it and neither reading is what was written — a Discord composer
+  answers with one embedded-object character whether it is empty or holding a
+  sentence, so it cannot testify about a write it received. The field may or may
+  not contain the text; the accessibility layer cannot tell, and neither can the
+  caller, so the honest answer is "I cannot verify this," not "it failed."
+
+  The pre-write reading is taken and compared as a digest, never as text
+  (`atspi.text_digest`), for the same reason the verdict is the whole egress: a
+  reading needed only for a comparison inside the layer has no business leaving
+  it. An empty reading has no digest at all, deliberately — a field that reports
+  nothing has not shown that it is withholding anything, and two empty readings
+  agreeing with each other would turn a write that went nowhere into a field
+  that keeps its own counsel.
 
 Critically, only the verdict leaves the layer. The raw text never does
 (`atspi.py:844-897`). A password's contents are not echoed back as a mismatch

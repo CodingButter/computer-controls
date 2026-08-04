@@ -1104,7 +1104,7 @@ def read_for_attest(obj: Atspi.Accessible) -> str | None:
     return text
 
 
-def text_matches(obj: Atspi.Accessible, expected: str, exact: bool) -> str:
+def text_matches(obj: Atspi.Accessible, expected: str, exact: bool, before: str = "") -> str:
     """Does the field now say what it was supposed to say?
 
     Three answers, not two. The comparison happens here, against the raw text,
@@ -1119,9 +1119,14 @@ def text_matches(obj: Atspi.Accessible, expected: str, exact: bool) -> str:
     its password did not go in when it did, and inviting it to type the thing
     again. `unverifiable` says what is actually true: the words were delivered
     and nothing on this desktop can confirm the result.
+
+    `before` is a digest of the same field taken before the write — see
+    `text_digest`. A caller that supplies one gets the second route to that
+    third answer: a field whose reading did not move for a write it was
+    supposed to receive is not reporting its contents at all.
     """
     role = _safe(obj.get_role_name, "") or ""
-    return verdict_for(_text_value(obj, role), expected, exact=exact)
+    return verdict_for(_text_value(obj, role), expected, exact=exact, before=before)
 
 
 #: Characters toolkits substitute for a password's real contents. A field made
@@ -1136,13 +1141,28 @@ def _is_masked(actual: str, expected: str) -> bool:
     return set(actual) <= _MASK_CHARACTERS
 
 
-def verdict_for(actual: str, expected: str, *, exact: bool = True, contains: bool = False) -> str:
+def verdict_for(
+    actual: str,
+    expected: str,
+    *,
+    exact: bool = True,
+    contains: bool = False,
+    before: str = "",
+) -> str:
     """The three-way answer, decided in one place.
 
     Split out from the two functions above so that the rule lives once. The
     version of this that mattered was written twice — once here and once in a
     test's stub — and the copy in the stub kept saying `True` for a masked
     field long after this one had learned better.
+
+    `before` is the digest of this field taken before the write. It buys the
+    second route to `unverifiable`: a reading that did not move for a write it
+    was supposed to receive, and does not say what was written, is not a
+    witness to anything. A Discord composer answers with one embedded-object
+    character whether it is empty or holding a sentence. Calling that a
+    mismatch would report a field's contents on the authority of a field that
+    never reports its contents.
     """
     if _is_masked(actual, expected):
         return "unverifiable"
@@ -1150,7 +1170,34 @@ def verdict_for(actual: str, expected: str, *, exact: bool = True, contains: boo
         matched = expected in actual
     else:
         matched = actual == expected if exact else actual.endswith(expected)
-    return "verified" if matched else "mismatch"
+    if matched:
+        return "verified"
+    if before and digest_of(actual) == before:
+        return "unverifiable"
+    return "mismatch"
+
+
+def digest_of(text: str) -> str:
+    """A reading reduced to something that cannot be turned back into text.
+
+    Empty text has no digest, deliberately. A field that reports nothing has
+    not demonstrated that it is withholding anything, and two empty readings
+    agreeing with each other would turn a write that went nowhere into a field
+    that keeps its own counsel.
+    """
+    return hashlib.sha256(text.encode("utf-8")).hexdigest() if text else ""
+
+
+def text_digest(obj: Atspi.Accessible) -> str:
+    """What the field says right now, as a digest its reader cannot undo.
+
+    The pre-write reading is taken through this rather than as text because the
+    only place it is needed is a comparison that happens back inside this
+    module. Nothing outside needs the contents, so nothing outside is given
+    them — the same reason `read_for_attest` refuses to hand back a mask.
+    """
+    role = _safe(obj.get_role_name, "") or ""
+    return digest_of(_text_value(obj, role))
 
 
 def set_numeric_value(obj: Atspi.Accessible, amount: float) -> bool:
