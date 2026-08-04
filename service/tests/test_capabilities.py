@@ -5,6 +5,7 @@ build cannot do, say so with a reason rather than staying quiet about it.
 """
 
 from desktop_service import capabilities, protocol_generated, validate
+from desktop_service.backends import atspi
 
 
 def working_probe():
@@ -265,6 +266,126 @@ def test_raw_input_refusal_does_not_deny_the_keystroke_tier():
 
     for value in (keystrokes["keystrokesReason"], keystrokes["keystrokesNote"]):
         assert "out of scope" not in (value or "")
+
+
+def announced_status():
+    return {"available": True, "isEnabled": True, "screenReaderEnabled": False}
+
+
+def silent_status():
+    return {"available": True, "isEnabled": False, "screenReaderEnabled": False}
+
+
+def test_the_capability_report_names_browser_accessibility_as_a_setup_condition():
+    """A healthy bus is not enough to read a browser, and the report has to say so.
+
+    This is the failure that produced the issue: the tree was enumerable, dozens of
+    applications answered, and the one application the caller had been sent to use
+    was not on the bus at all. Nothing in this document explained why, so the only
+    available conclusion was that the browser was not running.
+
+    Reported as a condition with a reason and a note, in the tier it conditions.
+    """
+    detail = tier(
+        capabilities.build_report(
+            working_probe,
+            no_capture,
+            session_token="tok12345",
+            observation_mode="active",
+            probe_assistive_status=silent_status,
+        ),
+        "accessibility",
+    )["detail"]
+
+    assert detail["browserAccessibility"] is False
+    assert "assistive client" in detail["browserAccessibilityReason"]
+    assert "--force-renderer-accessibility" in detail["browserAccessibilityNote"]
+
+    satisfied = tier(
+        capabilities.build_report(
+            working_probe,
+            no_capture,
+            session_token="tok12345",
+            observation_mode="active",
+            probe_assistive_status=announced_status,
+        ),
+        "accessibility",
+    )["detail"]
+
+    assert satisfied["browserAccessibility"] is True
+    assert satisfied["browserAccessibilityReason"] is None
+    # Carried even when the condition is met, for the reason the keystroke note is:
+    # a caller reading a satisfied report still learns what satisfied it, and so
+    # can recognise the same desktop tomorrow when it is not.
+    assert "--force-renderer-accessibility" in satisfied["browserAccessibilityNote"]
+
+
+def test_the_report_never_writes_the_accessibility_status(monkeypatch):
+    """Reading the switch is reporting. Setting it would be acting on the user's desktop.
+
+    Turning `ScreenReaderEnabled` on starts the screen reader on the desktop of
+    whoever is sitting at it: a person would suddenly be spoken to because an agent
+    wanted to read a page. So this is pinned where it can actually be broken — at
+    the D-Bus call itself, recording every member the probe invokes, rather than at
+    a stub that could not write even if the code wanted to.
+    """
+    calls = []
+
+    class FakeBus:
+        def call_sync(self, name, obj_path, interface, member, *_rest):
+            calls.append((interface, member))
+            return FakeReply()
+
+    class FakeReply:
+        def unpack(self):
+            return ({"IsEnabled": False, "ScreenReaderEnabled": False},)
+
+    monkeypatch.setattr(atspi, "bus_reachable", lambda: (True, None))
+    monkeypatch.setattr(atspi.Gio, "bus_get_sync", lambda *_a, **_k: FakeBus())
+
+    status = atspi.assistive_client_announced()
+
+    assert status == {"available": True, "isEnabled": False, "screenReaderEnabled": False}
+    assert calls == [("org.freedesktop.DBus.Properties", "GetAll")]
+    assert not any(member.startswith("Set") for _interface, member in calls)
+
+    detail = tier(
+        capabilities.build_report(
+            working_probe,
+            no_capture,
+            session_token="tok12345",
+            observation_mode="active",
+            probe_assistive_status=atspi.assistive_client_announced,
+        ),
+        "accessibility",
+    )["detail"]
+    assert detail["browserAccessibility"] is False
+    assert "will not announce one for you" in detail["browserAccessibilityNote"]
+
+
+def test_an_unreadable_status_is_a_reason_not_a_verdict():
+    """A probe that could not answer must not be reported as a browser that will not work.
+
+    The two are different facts, and a caller that cannot tell them apart will go
+    looking for a screen reader on a machine whose session bus was simply not there.
+    """
+    detail = tier(
+        capabilities.build_report(
+            working_probe,
+            no_capture,
+            session_token="tok12345",
+            observation_mode="active",
+            probe_assistive_status=lambda: {
+                "available": False,
+                "reason": "org.a11y.Status did not answer: no such name",
+            },
+        ),
+        "accessibility",
+    )["detail"]
+
+    assert detail["browserAccessibility"] is False
+    assert "could not be read" in detail["browserAccessibilityReason"]
+    assert "did not answer" in detail["browserAccessibilityReason"]
 
 
 def test_recommended_backends_only_lists_available_tiers():

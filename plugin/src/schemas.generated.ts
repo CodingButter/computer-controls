@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 375c11d95e161bbc
+// Protocol version: 1.0   schema sha256: df835e41b95f379e
 
 import { z } from "@mastra/code-sdk/plugin";
 
@@ -369,6 +369,13 @@ export const listApplicationsResult = z.object({
     windowCount: z.number().int().optional(),
   })),
   backend: z.string(),
+  invisibleApplications: z.array(z.object({
+    backend: z.string(),
+    name: z.string().describe("What the display server or the kernel calls this application, since it has no accessible name to report."),
+    pid: z.number().int(),
+    reason: z.string().describe("Why this application has no accessibility tree, and what would give it one."),
+    windowCount: z.number().int(),
+  })).describe("Applications the display server can see and the accessibility layer cannot: they have windows open but no application on the accessibility bus, so nothing about them can be read or acted on. Reported so that an application which is running and unreadable is distinguishable from one that is not running. These rows carry no element ids and no window titles, because there is nothing to inspect and the title is the sensitive half of a window.").optional(),
   revision: z.number().int().optional(),
 });
 

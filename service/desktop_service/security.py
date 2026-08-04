@@ -194,6 +194,37 @@ class Ceiling:
             return True
         return any(allowed in name for allowed in self.applications)
 
+    def permits_weakly_identified_application(self, *candidates: str) -> bool:
+        """Whether an application known only by display-server names may be mentioned.
+
+        An application that never joined the accessibility bus has no accessible name,
+        so the only names it can be judged by are the ones X11 and `/proc` carry:
+        `Google-chrome`, `chrome`. Those are weaker evidence than the name every other
+        row in this file is matched on, and the matching therefore errs toward silence.
+
+        Two differences from `permits_application`. Every candidate must clear the
+        block list, not just the one that happens to be reported — otherwise the row
+        could be named by whichever of its names the configuration failed to mention.
+        And the block match runs in both directions: a ceiling blocking
+        `google-chrome` must still withhold a window that only calls itself `chrome`,
+        or the walled-off browser announces its existence through the very list that
+        exists to describe what cannot be read.
+        """
+        names = [candidate.strip().casefold() for candidate in candidates]
+        names = [name for name in names if name]
+        if not names:
+            # Unlike `permits_application`, silence here is refusal. An action with no
+            # application attached is an action against the desktop; a *row* with no
+            # name is a row the ceiling cannot judge, and one of those must never be
+            # reported at all.
+            return False
+        for blocked in self.blocked_applications:
+            if any(blocked in name or name in blocked for name in names):
+                return False
+        if not self.applications:
+            return True
+        return any(allowed in name for name in names for allowed in self.applications)
+
 
 def _normalise(names) -> set[str]:
     return {str(name).strip().casefold() for name in names or () if str(name).strip()}

@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 375c11d95e161bbc
+// Protocol version: 1.0   schema sha256: df835e41b95f379e
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "375c11d95e161bbc" as const;
+export const SCHEMA_DIGEST = "df835e41b95f379e" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -542,6 +542,16 @@ export interface ListApplicationsResult {
     windowCount?: number;
   }[];
   backend: string;
+  /** Applications the display server can see and the accessibility layer cannot: they have windows open but no application on the accessibility bus, so nothing about them can be read or acted on. Reported so that an application which is running and unreadable is distinguishable from one that is not running. These rows carry no element ids and no window titles, because there is nothing to inspect and the title is the sensitive half of a window. */
+  invisibleApplications?: {
+    backend: string;
+    /** What the display server or the kernel calls this application, since it has no accessible name to report. */
+    name: string;
+    pid: number;
+    /** Why this application has no accessibility tree, and what would give it one. */
+    reason: string;
+    windowCount: number;
+  }[];
   revision?: number;
 }
 

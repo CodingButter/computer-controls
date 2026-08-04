@@ -172,6 +172,54 @@ def _ask_the_bus() -> tuple[bool, str | None]:
     return True, None
 
 
+def assistive_client_announced() -> dict[str, Any]:
+    """Whether anything on this session has announced itself as an assistive client.
+
+    Read-only, and only ever read. `org.a11y.Status` is the property Chromium itself
+    consults before deciding whether to build an accessibility tree at all, which is
+    why it is worth reporting: a browser with no tree is not broken, it is waiting for
+    this to be true. Nothing here writes it. Setting `ScreenReaderEnabled` starts the
+    screen reader on the desktop of whoever is sitting at it — the user would suddenly
+    be spoken to because an agent wanted to read a web page.
+
+    This is not the `toolkit-accessibility` gsetting that `probe_desktop` refuses to
+    trust, and the distinction is the difference between a preference and a gate. That
+    setting is a stated intention that the bridge routinely contradicts, which is why
+    the bus is measured instead of consulted. This property is the thing applications
+    actually read, and it is reported as a condition — never as a claim that anything
+    works, which stays the walk's job.
+    """
+    reachable, reason = bus_reachable()
+    if not reachable:
+        return {"available": False, "reason": reason}
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        reply = bus.call_sync(
+            "org.a11y.Bus",
+            "/org/a11y/bus",
+            "org.freedesktop.DBus.Properties",
+            "GetAll",
+            GLib.Variant("(s)", ("org.a11y.Status",)),
+            GLib.VariantType("(a{sv})"),
+            Gio.DBusCallFlags.NONE,
+            BUS_PROBE_TIMEOUT_MS,
+            None,
+        )
+    except GLib.Error as exc:
+        return {"available": False, "reason": f"org.a11y.Status did not answer: {exc.message}"}
+    except Exception as exc:  # noqa: BLE001 - a broken session bus is not our bug
+        return {
+            "available": False,
+            "reason": f"org.a11y.Status did not answer: {type(exc).__name__}: {exc}",
+        }
+    status = reply.unpack()[0]
+    return {
+        "available": True,
+        "isEnabled": bool(status.get("IsEnabled", False)),
+        "screenReaderEnabled": bool(status.get("ScreenReaderEnabled", False)),
+    }
+
+
 def _desktop() -> Atspi.Accessible | None:
     """The one door to the toolkit's root, and the only place that opens it.
 
@@ -254,6 +302,81 @@ def list_applications() -> list[dict[str, Any]]:
             }
         )
     return applications
+
+
+#: Why an application with windows can still have no accessible tree. Stated once,
+#: attached to every row it explains, because the row is useless without it: a caller
+#: told only that something is missing has no way to find out what would fix it.
+ABSENT_FROM_TREE_REASON = (
+    "this application has windows on the display server but no application on the "
+    "accessibility bus, so nothing about it can be read or acted on. Chromium-family "
+    "browsers are the usual cause: they build no accessibility tree until an assistive "
+    "client announces itself. This service will not turn that on for you — see the "
+    "accessibility tier's 'browserAccessibilityNote' in the capability report for what "
+    "satisfies the condition."
+)
+
+
+def _process_name(pid: int) -> str:
+    """What the kernel calls this process, or empty when it is already gone."""
+    try:
+        with open(f"/proc/{pid}/comm", "r", encoding="utf-8", errors="replace") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def applications_absent_from_the_tree() -> list[dict[str, Any]]:
+    """Applications the display server can see and the accessibility layer cannot.
+
+    `list_applications` answers honestly and incompletely: it reports the applications
+    on the accessibility bus, and an application that never joined it is simply not
+    mentioned. A caller cannot tell that apart from an empty desktop, and the difference
+    matters enormously — one means nothing is running, the other means the thing you
+    were asked to work with is running and unreadable. So the two layers are compared,
+    and the leftovers are reported as what they are.
+
+    The comparison is on process identity, which is the fact both layers report; it is
+    the same match `xid_for` already makes in the other direction.
+
+    Three kinds of window are dropped rather than reported. One with no pid cannot be
+    grouped into an application. One that is not a normal window is a dock, a menu or
+    the desktop's icon layer, none of which is an application anybody meant. And one
+    that carries no name at all is a row the consent ceiling could not judge — reporting
+    it would put an unjudgeable row in front of a caller, which is worse than the
+    silence it replaces.
+
+    No title appears on these rows. The title is the sensitive half of a window — it is
+    what the consent ceiling withholds when it withholds anything — and the question
+    being answered here is only which applications exist.
+    """
+    known_pids = {pid for pid in application_pids().values() if pid > 0}
+    windows_by_pid: dict[int, list[x11.X11Window]] = {}
+    for window in x11.toplevels():
+        if window.pid <= 0 or window.pid in known_pids or not window.normal:
+            continue
+        windows_by_pid.setdefault(window.pid, []).append(window)
+
+    absent: list[dict[str, Any]] = []
+    for pid, windows in sorted(windows_by_pid.items()):
+        candidates = [name for name in (windows[0].wm_class, _process_name(pid)) if name]
+        if not candidates:
+            continue
+        absent.append(
+            {
+                "name": model.egress_value(
+                    candidates[0], field=model.APPLICATION_NAME, role="application"
+                ),
+                "pid": pid,
+                "windowCount": len(windows),
+                "reason": ABSENT_FROM_TREE_REASON,
+                "backend": x11.BACKEND,
+                # Not for the wire. The ceiling is checked against every name this
+                # application answers to, and the server drops this before replying.
+                "identityCandidates": candidates,
+            }
+        )
+    return absent
 
 
 def _windows_of(app: Atspi.Accessible) -> list[Atspi.Accessible]:

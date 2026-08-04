@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: 375c11d95e161bbc
+# Protocol version: 1.0   schema sha256: df835e41b95f379e
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "375c11d95e161bbc"
+SCHEMA_DIGEST: Final = "df835e41b95f379e"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -1644,6 +1644,40 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             },
             "backend": {
                 "type": "string",
+            },
+            "invisibleApplications": {
+                "description": "Applications the display server can see and the accessibility layer cannot: they have windows open but no application on the accessibility bus, so nothing about them can be read or acted on. Reported so that an application which is running and unreadable is distinguishable from one that is not running. These rows carry no element ids and no window titles, because there is nothing to inspect and the title is the sensitive half of a window.",
+                "items": {
+                    "additionalProperties": False,
+                    "properties": {
+                        "backend": {
+                            "type": "string",
+                        },
+                        "name": {
+                            "description": "What the display server or the kernel calls this application, since it has no accessible name to report.",
+                            "type": "string",
+                        },
+                        "pid": {
+                            "type": "integer",
+                        },
+                        "reason": {
+                            "description": "Why this application has no accessibility tree, and what would give it one.",
+                            "type": "string",
+                        },
+                        "windowCount": {
+                            "type": "integer",
+                        },
+                    },
+                    "required": [
+                        "name",
+                        "pid",
+                        "windowCount",
+                        "reason",
+                        "backend",
+                    ],
+                    "type": "object",
+                },
+                "type": "array",
             },
             "revision": {
                 "type": "integer",

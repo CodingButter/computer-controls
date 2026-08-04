@@ -23,6 +23,28 @@ because the field-level read-back returned only U+FFFC, so the characters cannot
 be shown to have landed; that defect is filed as issue #89. A failing artifact
 that names its open issue is the record working as intended.
 
+### Parked: which-condition-makes-a-browser-readable
+
+`scripts/prove-browser-visibility-live.py` asks a real desktop which condition
+makes a Chromium-family browser build an accessibility tree, and appends one row
+per condition: the baseline, a session with an assistive client attached, and a
+browser started with `--force-renderer-accessibility`. The artifact is not
+deposited yet for the same reason the deletion proof is not — this branch was cut
+from a headless environment, and every row has to be measured on the desktop the
+browser is actually running on.
+
+The script arranges no condition itself, and that is a design decision rather than
+an omission. Arranging them means starting a screen reader on somebody's desktop
+or relaunching their browser, which is exactly what the service refuses to do; a
+proof that did it would be measuring a machine nobody would let it near twice. The
+operator sets the condition up and names it with `--condition`.
+
+Until the rows exist, the claim stands on `tests/test_invisible_applications.py`
+and `tests/test_capabilities.py`: a browser the accessibility layer cannot read is
+reported as running and unreadable rather than omitted, and the condition that
+would make it readable is named in the capability report. If no condition produces
+a walkable tree, that verdict is the artifact.
+
 ### Parked: deletion-is-reported-as-deletion
 
 The deletion-detection logic shipped in `service/desktop_service/state.py` and

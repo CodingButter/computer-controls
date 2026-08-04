@@ -191,7 +191,7 @@ const ALL_TOOLS = {
       tool: createTool({
         id: "desktop_list_applications",
         description:
-          "List the applications currently running on the desktop, with their toolkit and how many windows each has. Application ids are stable for the lifetime of the application process.",
+          "List the applications currently running on the desktop, with their toolkit and how many windows each has. Application ids are stable for the lifetime of the application process. A running application the accessibility layer cannot read is not missing from this answer: it appears under invisibleApplications, with a reason and no id, because nothing about it can be inspected or acted on. Browsers are the usual case. An empty or short list is never evidence that nothing is running.",
         inputSchema: schemas.listApplicationsParams,
         outputSchema: schemas.listApplicationsResult,
         execute: async () => await request("listApplications"),

@@ -47,11 +47,20 @@ _SUBSTRUCTURE_REDIRECT = 1 << 20
 
 @dataclass(frozen=True)
 class X11Window:
-    """One toplevel window as the display server describes it."""
+    """One toplevel window as the display server describes it.
+
+    `wm_class` and `normal` exist for the windows the accessibility layer never
+    mentions. A window with no application behind it on the accessibility bus can
+    still be reported as running, but only if it can be named and only if it is the
+    kind of window an application puts its content in — so both facts are read here,
+    where the display server is already being asked about the window anyway.
+    """
 
     xid: int
     pid: int
     title: str
+    wm_class: str = ""
+    normal: bool = True
 
 
 class _Xlib:
@@ -89,13 +98,16 @@ class _Xlib:
             raise OSError("cannot open the X display")
         self.root = self.lib.XDefaultRootWindow(self.display)
 
+    def atom(self, name: str) -> int:
+        return self.lib.XInternAtom(self.display, name.encode(), False)
+
     def property_of(self, window: int, name: str) -> list[int] | bytes | None:
         """Read one window property, or None when the window does not carry it.
 
         A window that vanished between being listed and being read is not an error
         here; it is the normal state of a desktop, and the caller gets None.
         """
-        atom = self.lib.XInternAtom(self.display, name.encode(), False)
+        atom = self.atom(name)
         actual_type = ctypes.c_ulong()
         actual_format = ctypes.c_int()
         count = ctypes.c_ulong()
@@ -252,6 +264,36 @@ def _decode(value: list[int] | bytes | None) -> str:
     return ""
 
 
+def _wm_class(value: list[int] | bytes | None) -> str:
+    """The application name out of `WM_CLASS`, or empty when there is none.
+
+    `WM_CLASS` is two NUL-terminated strings: the instance the window was started as,
+    then the class the application registered under. The class is preferred because it
+    is the name a desktop's own configuration uses — the same vocabulary the consent
+    ceiling is written in — and the instance is the fallback for the applications that
+    set only one of the two.
+    """
+    if not isinstance(value, bytes):
+        return ""
+    parts = [part.decode("utf-8", "replace").strip() for part in value.split(b"\0")]
+    named = [part for part in parts if part]
+    if not named:
+        return ""
+    return named[-1] if len(named) > 1 else named[0]
+
+
+def _is_normal(types: list[int] | bytes | None, normal_atom: int) -> bool:
+    """Whether this is a window an application puts its content in.
+
+    Docks, menus, tooltips and the desktop's own icon layer are toplevels too, and they
+    have no business being reported as applications. A window that declares no type at
+    all counts as normal: that is what every window manager means by the omission.
+    """
+    if not isinstance(types, list) or not types:
+        return True
+    return normal_atom in types
+
+
 def active_xid() -> int | None:
     """The X id of the active window, or None when nothing is active."""
     xlib = _connect()
@@ -276,6 +318,7 @@ def toplevels() -> list[X11Window]:
     clients = xlib.property_of(xlib.root, "_NET_CLIENT_LIST")
     if not isinstance(clients, list):
         return []
+    normal_atom = xlib.atom("_NET_WM_WINDOW_TYPE_NORMAL")
     windows = []
     for xid in clients:
         pid_value = xlib.property_of(xid, "_NET_WM_PID")
@@ -283,7 +326,15 @@ def toplevels() -> list[X11Window]:
         title = _decode(xlib.property_of(xid, "_NET_WM_NAME"))
         if not title:
             title = _decode(xlib.property_of(xid, "WM_NAME"))
-        windows.append(X11Window(xid=xid, pid=pid, title=title))
+        windows.append(
+            X11Window(
+                xid=xid,
+                pid=pid,
+                title=title,
+                wm_class=_wm_class(xlib.property_of(xid, "WM_CLASS")),
+                normal=_is_normal(xlib.property_of(xid, "_NET_WM_WINDOW_TYPE"), normal_atom),
+            )
+        )
     return windows
 
 

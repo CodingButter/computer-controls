@@ -473,6 +473,28 @@
               "additionalProperties": false
             }
           },
+          "invisibleApplications": {
+            "type": "array",
+            "description": "Applications the display server can see and the accessibility layer cannot: they have windows open but no application on the accessibility bus, so nothing about them can be read or acted on. Reported so that an application which is running and unreadable is distinguishable from one that is not running. These rows carry no element ids and no window titles, because there is nothing to inspect and the title is the sensitive half of a window.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "What the display server or the kernel calls this application, since it has no accessible name to report."
+                },
+                "pid": { "type": "integer" },
+                "windowCount": { "type": "integer" },
+                "reason": {
+                  "type": "string",
+                  "description": "Why this application has no accessibility tree, and what would give it one."
+                },
+                "backend": { "type": "string" }
+              },
+              "required": ["name", "pid", "windowCount", "reason", "backend"],
+              "additionalProperties": false
+            }
+          },
           "backend": { "type": "string" },
           "revision": { "type": "integer" }
         },
