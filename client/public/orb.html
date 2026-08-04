@@ -108,6 +108,9 @@
         position: fixed;
         top: 16px;
         right: 16px;
+        /* The drawer is fixed and later in the DOM: without this it paints
+           over the toggle when open, leaving no way to close the log. */
+        z-index: 1;
         padding: 8px 14px;
         border-radius: 8px;
         border: 1px solid #2b2e44;
