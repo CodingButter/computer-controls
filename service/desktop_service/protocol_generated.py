@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: 956458ccd3cd40f0
+# Protocol version: 1.0   schema sha256: 8891bb8b28a73331
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "956458ccd3cd40f0"
+SCHEMA_DIGEST: Final = "8891bb8b28a73331"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -379,6 +379,14 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
     "grantScope": {
         "additionalProperties": False,
         "properties": {
+            "anchors": {
+                "description": "Places in the tree this grant hangs on, instead of hanging on whole applications. A grant that names anchors has said where it applies, so anywhere else is outside it — the same rule naming applications individually has always had. Omit to grant across applications as before.",
+                "items": {
+                    "$ref": "#/$defs/scopeAnchor",
+                },
+                "maxItems": 50,
+                "type": "array",
+            },
             "applications": {
                 "description": "Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing.",
                 "items": {
@@ -1343,6 +1351,13 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
     "grantScope": {
         "additionalProperties": False,
         "properties": {
+            "anchors": {
+                "description": "Where this grant now hangs. Returned so a client can tell an anchor that was accepted from one that was quietly dropped.",
+                "items": {
+                    "$ref": "#/$defs/scopeAnchor",
+                },
+                "type": "array",
+            },
             "applications": {
                 "items": {
                     "type": "string",
@@ -2207,6 +2222,42 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
                 "type": "integer",
             },
         },
+        "type": "object",
+    },
+    "scopeAnchor": {
+        "additionalProperties": False,
+        "description": "A place in the accessibility tree that a permission hangs on, and what may be done there. An application is the outermost place there is, and most tasks mean something far narrower: 'fill in this form' expressed as 'edit anything in the browser' draws the boundary around the wrong thing. Anchors are resolved against the live tree on every call, never remembered as an answer, and the nearest one covering the target decides — so a subtree granted observe with one field inside it granted edit composes without either rule knowing about the other.",
+        "properties": {
+            "coversDescendants": {
+                "description": "Whether this speaks for everything under it or only for the one node it names. Defaults to false: a grant on a single field that silently reached everything beneath it would be the widening anchors exist to prevent.",
+                "type": "boolean",
+            },
+            "operationClasses": {
+                "description": "What may be done at this place. Faces the ceiling like every other class named in a grant: an anchor is a narrowing device, never a side door.",
+                "items": {
+                    "enum": [
+                        "observe",
+                        "edit",
+                        "activate",
+                        "submit",
+                        "destructive",
+                    ],
+                    "type": "string",
+                },
+                "maxItems": 5,
+                "minItems": 1,
+                "type": "array",
+            },
+            "target": {
+                "description": "The place this hangs on: an element id, a window id, or an application name. Ids are matched exactly, because an id is minted rather than typed and a substring of one is a coincidence. Application names are matched as substrings, the same way they are everywhere else.",
+                "maxLength": 200,
+                "type": "string",
+            },
+        },
+        "required": [
+            "target",
+            "operationClasses",
+        ],
         "type": "object",
     },
     "semanticElement": {

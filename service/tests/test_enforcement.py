@@ -317,6 +317,194 @@ def test_a_batch_of_permitted_steps_still_runs(monkeypatch):
     assert ran == ["focus"]
 
 
+def anchored(built, monkeypatch, *, tree: dict[str, tuple[str, ...]], lives=None):
+    """A client whose grant hangs on a form, with a tree for the guard to walk.
+
+    The walk itself belongs to the toolkit and is stubbed here for the same
+    reason the application lookup is: what these tests are for is whether the
+    guard asks, not whether AT-SPI answers.
+    """
+    srv, consent, log = built
+    consent.grant(
+        "actor",
+        classes=[],
+        anchors=[
+            security.Anchor("el-form", frozenset({"observe"}), covers_descendants=True),
+            security.Anchor("el-message", frozenset({"observe", "edit"})),
+        ],
+        reason="fill in the message",
+    )
+    monkeypatch.setattr(
+        server, "_ancestry_of", lambda params: tree.get(params.get("elementId"), ())
+    )
+    if lives is not None:
+        monkeypatch.setattr(server, "_anchor_lives", lives)
+    return srv, consent, log
+
+
+_TREE = {
+    "el-message": ("el-message", "el-form", "win-mail", "chrome"),
+    "el-subject": ("el-subject", "el-form", "win-mail", "chrome"),
+    "el-elsewhere": ("el-elsewhere", "win-other", "chrome"),
+}
+
+
+def test_the_guard_asks_where_the_target_is_before_allowing_a_write(built, monkeypatch):
+    # The whole amendment in one call: the ancestry is resolved and the nearest
+    # anchor over it decides. Without the guard threading it through, this call
+    # is refused by a grant that plainly covers the field.
+    anchored(built, monkeypatch, tree=_TREE)
+    typed: list[str] = []
+    guarded = server._guarded("typeText", lambda params: typed.append(params["elementId"]))
+    guarded({"clientId": "actor", "elementId": "el-message", "text": "hi"})
+    assert typed == ["el-message"]
+
+
+def test_a_sibling_under_the_wider_anchor_is_still_read_only(built, monkeypatch):
+    srv, _, log = anchored(built, monkeypatch, tree=_TREE)
+    with pytest.raises(DesktopError) as raised:
+        call(srv, "typeText", elementId="el-subject", text="hi", clientId="actor")
+    assert raised.value.code == ErrorCode.PERMISSION_DENIED
+    denied = next(e for e in log.tail(10) if e.get("decision") == "denied")
+    assert denied["method"] == "typeText"
+
+
+def test_a_target_no_anchor_covers_is_refused(built, monkeypatch):
+    srv, _, _ = anchored(built, monkeypatch, tree=_TREE, lives=lambda target: True)
+    with pytest.raises(DesktopError) as raised:
+        call(srv, "typeText", elementId="el-elsewhere", text="hi", clientId="actor")
+    assert raised.value.code == ErrorCode.PERMISSION_DENIED
+
+
+def test_a_grant_anchored_to_something_gone_fails_as_a_stale_reference(built, monkeypatch):
+    """The trap, asked of the server rather than of the consent module.
+
+    The dialog closed. Answering this as a permission problem would send the
+    client to `grantScope`, which would issue the same grant onto the same
+    absent element, and the loop would close with nothing anywhere saying why.
+    """
+    srv, _, log = anchored(
+        built, monkeypatch, tree=_TREE, lives=lambda target: target != "el-form"
+    )
+    with pytest.raises(DesktopError) as raised:
+        call(srv, "typeText", elementId="el-elsewhere", text="hi", clientId="actor")
+    assert raised.value.code == ErrorCode.ELEMENT_REFERENCE_STALE
+    assert "el-form" in raised.value.message
+    denied = next(e for e in log.tail(10) if e.get("decision") == "denied")
+    assert denied["errorCode"] == "ELEMENT_REFERENCE_STALE"
+
+
+def test_a_target_the_tree_could_not_place_is_refused_rather_than_waved_through(
+    built, monkeypatch
+):
+    """The gap between "no ancestry" and "no place".
+
+    A walk that comes back empty — a window that closed mid-call, a toolkit that
+    did not answer in time — is not a call about the desktop. Reading it as one
+    would hand it the general hand, which for an anchored grant is the classes
+    it holds outside its anchors, and the fastest way to leave an anchored grant
+    is to name something the tree cannot find.
+    """
+    srv, _, _ = anchored(built, monkeypatch, tree={}, lives=lambda target: True)
+    with pytest.raises(DesktopError) as raised:
+        call(srv, "typeText", elementId="el-message", text="hi", clientId="actor")
+    assert raised.value.code == ErrorCode.PERMISSION_DENIED
+
+
+def test_an_unanchored_grant_never_walks_the_tree(built, monkeypatch):
+    """Criterion five, asked where it can actually be broken.
+
+    Anchors are a minority of grants and the walk is a round trip on the single
+    thread every client shares. Resolving it for a grant that hung nowhere would
+    be a tax every existing caller pays for a feature it is not using.
+    """
+    srv, consent, _ = built
+
+    def never(params):
+        raise AssertionError("the tree was walked for a grant with no anchors")
+
+    monkeypatch.setattr(server, "_ancestry_of", never)
+    consent.grant("plain", classes=["edit"])
+    typed: list[str] = []
+    guarded = server._guarded("typeText", lambda params: typed.append(params["elementId"]))
+    guarded({"clientId": "plain", "elementId": "el-message", "text": "hi"})
+    assert typed == ["el-message"]
+
+
+def test_a_batch_step_is_checked_against_its_own_place_in_the_tree(built, monkeypatch):
+    # The same exploit the application check closed, one level down: a batch's
+    # own parameters name no element, so an anchored grant checked against them
+    # would find no ancestry and every step would ride on the batch's answer.
+    srv, consent, _ = anchored(built, monkeypatch, tree=_TREE, lives=lambda target: True)
+    # A batch is a 'submit' call with no place of its own, so the grant has to
+    # hold submit somewhere for it to start at all — and edit only where the
+    # task actually types.
+    consent.grant(
+        "actor",
+        classes=[],
+        anchors=[
+            security.Anchor("el-form", frozenset({"submit"}), covers_descendants=True),
+            security.Anchor("el-message", frozenset({"edit", "submit"})),
+        ],
+    )
+    ran: list[str] = []
+    monkeypatch.setitem(
+        server._BATCH_METHODS, "typeText",
+        lambda params: (ran.append("typed"), {"actionId": "act-1", "ok": True})[1],
+    )
+    guarded = server._guarded("performActions", server._method_perform_actions)
+    with pytest.raises(DesktopError):
+        guarded({
+            "clientId": "actor",
+            "confirm": True,
+            "actions": [
+                {"method": "typeText", "params": {"elementId": "el-message", "text": "hi"}},
+                {"method": "typeText", "params": {"elementId": "el-subject", "text": "no"}},
+            ],
+        })
+    assert ran == [], "the batch must be refused before any step of it happens"
+    # And the refusal is about the second step, not about the batch having no
+    # target of its own: a step the grant does cover still runs.
+    guarded({
+        "clientId": "actor",
+        "confirm": True,
+        "actions": [{"method": "typeText", "params": {"elementId": "el-message", "text": "hi"}}],
+    })
+    assert ran == ["typed"]
+
+
+def test_a_batch_step_that_names_no_place_is_refused_by_an_anchored_grant(
+    built, monkeypatch
+):
+    """The step whose target is missing must not inherit the batch's answer.
+
+    Every method that may appear in a batch acts on a window or an element, so
+    a step naming neither is malformed — and the handler would say so. But it
+    is enforced before it is validated, and an anchored grant answering it from
+    the hand it holds somewhere else is the widening this whole amendment is
+    against.
+    """
+    srv, consent, _ = anchored(built, monkeypatch, tree=_TREE, lives=lambda target: True)
+    consent.grant(
+        "actor",
+        classes=["submit"],
+        anchors=[security.Anchor("el-message", frozenset({"edit", "submit"}))],
+    )
+    ran: list[str] = []
+    monkeypatch.setitem(
+        server._BATCH_METHODS, "focusWindow",
+        lambda params: (ran.append("focused"), {"actionId": "act-1", "ok": True})[1],
+    )
+    guarded = server._guarded("performActions", server._method_perform_actions)
+    with pytest.raises(DesktopError):
+        guarded({
+            "clientId": "actor",
+            "confirm": True,
+            "actions": [{"method": "focusWindow", "params": {}}],
+        })
+    assert ran == []
+
+
 @pytest.fixture
 def walled(monkeypatch):
     """A desktop with one application the user walled off."""
