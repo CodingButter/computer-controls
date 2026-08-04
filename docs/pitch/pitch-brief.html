@@ -130,6 +130,9 @@
 </table>
 <p style="font-size:.84rem;color:var(--muted)">The honest concession: a keyboard dongle works on a locked screen and on any OS, today. That is real. It is also exactly the trade &mdash; universality bought with blindness &mdash; that stops being acceptable the moment the agent acts <em>as you</em> in front of a customer.</p>
 
+<h2>The platform question, answered before it's asked</h2>
+<p>The proof of concept runs on Linux. The platform-specific code is <strong>2,442 lines of 13,800</strong> &mdash; quarantined in a backends directory with zero accessibility imports leaking outside it (verified, not asserted). Everything that makes this product the product &mdash; the consent ceiling, attestations, the send gate, the audit log, redaction, the protocol, the entire TypeScript runtime layer &mdash; is platform-neutral. Windows is a backend port onto UI Automation, the richest accessibility API of the three and the one Narrator rides. macOS is a port onto the API that powers VoiceOver, where the OS's own per-app accessibility permission becomes free consent UX. The architectural bet underneath: <strong>accessibility trees are the one interface every OS is legally obligated to keep working.</strong> Screen readers must function; pixels carry no such guarantee.</p>
+
 <h2>The platform flywheel</h2>
 <ul>
   <li><strong>Every Mastra Code plugin works here by default.</strong> The community's plugins &mdash; existing and future &mdash; become product capabilities without us building them. The product becomes multiple products.</li>
