@@ -35,6 +35,7 @@ import logging
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
+from typing import Final
 
 from . import attestation, protocol_generated
 from .errors import DesktopError, ErrorCode, PermissionDenied, SessionExpired
@@ -100,12 +101,26 @@ def breadth_of(grant: "Grant", ceiling: "Ceiling") -> dict:
     return {
         "applications": len(ceiling.applications),
         "anchors": anchors,
-        "unbounded": not ceiling.applications,
+        # In per-application mode an empty list is the narrowest scope there
+        # is — nothing — not the widest. Only open mode's empty list means
+        # "however many applications happen to be running".
+        "unbounded": not ceiling.applications and ceiling.permissions_mode == OPEN_MODE,
     }
 
 
 class ScopeError(PermissionDenied):
     """Raised when a caller asks for more than the configuration allows."""
+
+
+#: The two readings of an empty application list. Open is the historical one:
+#: nothing named means nothing withheld. Per-application is the checkbox
+#: reading: nothing named means nothing permitted, and a newly installed
+#: application arrives unpermitted rather than pre-approved. The mode is part
+#: of the user's file for the same reason the list is — a default a client
+#: could flip is not a default.
+OPEN_MODE: Final = "open"
+PER_APPLICATION_MODE: Final = "per-application"
+PERMISSIONS_MODES: Final = (OPEN_MODE, PER_APPLICATION_MODE)
 
 
 @dataclass(frozen=True)
@@ -118,10 +133,13 @@ class Ceiling:
     """
 
     classes: frozenset[str] = DEFAULT_CLASSES
-    #: Empty means every application except those blocked. Non-empty means
-    #: these and no others, which is the shape a careful user wants.
+    #: In open mode, empty means every application except those blocked and
+    #: non-empty means these and no others. In per-application mode the list
+    #: is the whole answer: empty permits nothing.
     applications: frozenset[str] = frozenset()
     blocked_applications: frozenset[str] = frozenset()
+    #: Which reading the empty list gets. See PERMISSIONS_MODES.
+    permissions_mode: str = OPEN_MODE
     idle_expiry_seconds: float = DEFAULT_IDLE_EXPIRY_SECONDS
     confirm_classes: frozenset[str] = CONFIRM_BY_DEFAULT
     #: Named in every refusal, so a denial is a thing somebody can act on. A
@@ -171,10 +189,19 @@ class Ceiling:
         unknown = allowed - set(OPERATION_CLASSES)
         if unknown:
             raise ValueError(f"unknown operation class in configuration: {sorted(unknown)}")
+        mode = str(config.get("permissionsMode", OPEN_MODE)).strip().casefold() or OPEN_MODE
+        if mode not in PERMISSIONS_MODES:
+            # Loud, like an unknown operation class. A misspelled mode read as
+            # "open" would permit everything the user was trying to fence.
+            raise ValueError(
+                f"unknown permissionsMode in configuration: {mode!r} "
+                f"(expected one of {list(PERMISSIONS_MODES)})"
+            )
         return cls(
             classes=allowed,
             applications=frozenset(_normalise(config.get("applications", ()))),
             blocked_applications=frozenset(_normalise(config.get("blockedApplications", ()))),
+            permissions_mode=mode,
             idle_expiry_seconds=float(config.get("idleExpirySeconds", DEFAULT_IDLE_EXPIRY_SECONDS)),
             confirm_classes=frozenset(_normalise(config.get("confirmClasses", CONFIRM_BY_DEFAULT))),
             config_path=path,
@@ -191,7 +218,11 @@ class Ceiling:
         if any(blocked in name for blocked in self.blocked_applications):
             return False
         if not self.applications:
-            return True
+            # The two readings of an empty list. In per-application mode the
+            # user chose checkboxes and checked none of them for this app —
+            # including the app installed five minutes ago, which is the case
+            # the mode exists for.
+            return self.permissions_mode == OPEN_MODE
         return any(allowed in name for allowed in self.applications)
 
     def permits_weakly_identified_application(self, *candidates: str) -> bool:
@@ -222,7 +253,9 @@ class Ceiling:
             if any(blocked in name or name in blocked for name in names):
                 return False
         if not self.applications:
-            return True
+            # Same two readings as `permits_application`, and weakly
+            # identified rows get no extra benefit of the doubt.
+            return self.permissions_mode == OPEN_MODE
         return any(allowed in name for name in names for allowed in self.applications)
 
 
@@ -485,6 +518,17 @@ class Consent:
     @property
     def ceiling(self) -> Ceiling:
         return self._ceiling
+
+    def reload_ceiling(self, ceiling: Ceiling) -> None:
+        """Install a ceiling re-read from the user's file.
+
+        The file is still the only author — this exists so a saved edit takes
+        effect without a restart, not so a caller can hand one in: nothing
+        reachable over the socket calls this. Grants already issued are left
+        alone; every visibility and permission check reads the ceiling live,
+        so a shrunken ceiling bites immediately even under an older grant.
+        """
+        self._ceiling = ceiling
 
     @property
     def stopped(self) -> bool:

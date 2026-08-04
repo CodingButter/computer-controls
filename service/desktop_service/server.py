@@ -477,6 +477,64 @@ _consent = security.Consent()
 _audit = audit.AuditLog()
 
 
+class _CeilingWatch:
+    """Reload the ceiling when the user's file changes, and only then.
+
+    The file stays the sole authority — nothing over the socket triggers this,
+    a *save* does. Checking is one stat per request, which is the cheapest
+    honest signal there is: a permissions page whose checkbox only took effect
+    after a daemon restart would teach people to stop using the checkbox.
+
+    A file that goes malformed keeps the ceiling it had. Falling back to
+    defaults would fail permissive on a typo, and reloading nothing while
+    saying nothing is how a user's carefully written fence gets ignored for a
+    month — so the refusal is printed, once per change. A file that is deleted
+    also keeps the old ceiling: absence at boot is a safe default, but absence
+    after boot is more likely half a save than a decision.
+    """
+
+    def __init__(self) -> None:
+        self._path = ""
+        self._stamp: tuple[int, int] | None = None
+        self._lock = threading.Lock()
+
+    def prime(self, path: str) -> None:
+        self._path = path
+        self._stamp = self._stat()
+
+    def _stat(self) -> tuple[int, int] | None:
+        try:
+            info = os.stat(self._path)
+        except OSError:
+            return None
+        return (info.st_mtime_ns, info.st_size)
+
+    def refresh(self) -> None:
+        if not self._path:
+            return
+        with self._lock:
+            current = self._stat()
+            if current is None or current == self._stamp:
+                return
+            self._stamp = current
+            try:
+                settings = config.load(self._path)
+                ceiling = security.Ceiling.from_config(
+                    settings.get("scopes"), self._path, exists=True
+                )
+            except (ValueError, OSError) as error:
+                print(
+                    f"desktop_service: config reload refused, keeping the old ceiling: {error}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return
+            _consent.reload_ceiling(ceiling)
+
+
+_ceiling_watch = _CeilingWatch()
+
+
 def configure(
     settings: dict[str, Any] | None,
     config_path: str = "",
@@ -502,6 +560,7 @@ def configure(
         enabled=bool(settings.get("audit", True)),
     )
     redaction.install(settings.get("sensitiveApplications", ()))
+    _ceiling_watch.prime(str(config_path or ""))
 
 
 _action_log = actions.ActionLog()
@@ -2516,7 +2575,15 @@ def build_server(socket_path: str) -> JsonRpcServer:
             # same, and the schema it would be correcting against is public
             # anyway. The guard therefore reads parameters that have not been
             # checked yet, and treats anything of the wrong shape as absent.
-            self.target.register(method, _guarded(method, _validated(method, handler)))
+            guarded = _guarded(method, _validated(method, handler))
+
+            def freshly(params: dict[str, Any], _inner=guarded):
+                # Before the guard, so the decision is made against the file
+                # as saved, not the file as booted.
+                _ceiling_watch.refresh()
+                return _inner(params)
+
+            self.target.register(method, freshly)
 
     server = _ValidatingServer(base)
     server.register("hello", _session.hello)
