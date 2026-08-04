@@ -31,11 +31,14 @@ and the human, where it belongs.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field, replace
 
 from . import protocol_generated
 from .errors import DesktopError, ErrorCode, PermissionDenied, SessionExpired
+
+log = logging.getLogger(__name__)
 
 #: Taken from the generated protocol rather than typed here. Written by hand
 #: this list grew a `focus` class the schema has never had, which would have
@@ -226,11 +229,25 @@ class Decision:
     #: naming it confirms it exists. The disguise carries a generic message so
     #: neither the error code nor its text leaks the target.
     disguised_as: str = ""
+    #: The answer the *client author* gets: the application, and which rule
+    #: refused. It goes to the service's own log, which is the one channel the
+    #: agent has no method for — `auditTail` is a tool, and a diagnostic written
+    #: there would be the leak this disguise exists to close. Without this, a
+    #: developer whose config is wrong sees an agent reporting that their
+    #: browser does not exist, and nothing anywhere says otherwise.
+    diagnostic: str = ""
 
     def raise_for_denial(self, ceiling: Ceiling, granted: frozenset[str]) -> None:
         if self.allowed:
             return
         if self.disguised_as:
+            if self.diagnostic:
+                log.warning(
+                    "refused %s for client %r and told it nothing exists: %s",
+                    self.method,
+                    self.client_id,
+                    self.diagnostic,
+                )
             raise DesktopError(self.disguised_as, self.reason, {})
         raise PermissionDenied(
             self.reason,
@@ -394,8 +411,8 @@ class Consent:
         manager's window is the thing being prevented, not clicking in it.
         """
         allow = lambda reason: Decision(True, method, operation_class, client_id, reason, application)
-        deny = lambda reason, disguised_as="": Decision(
-            False, method, operation_class, client_id, reason, application, disguised_as
+        deny = lambda reason, disguised_as="", diagnostic="": Decision(
+            False, method, operation_class, client_id, reason, application, disguised_as, diagnostic
         )
 
         if self._stopped and operation_class != "observe":
@@ -407,6 +424,9 @@ class Consent:
             return deny(
                 "No application matching that target was found.",
                 disguised_as=ErrorCode.APPLICATION_NOT_FOUND,
+                diagnostic=(
+                    f"this desktop's configuration does not expose {application!r} to any client"
+                ),
             )
 
         grant = self._grants.get(client_id)
@@ -426,9 +446,14 @@ class Consent:
         # always about the one being touched.
         held = grant.hand_in(application) if grant else DEFAULT_CLASSES
         if held is None:
+            covers = sorted(grant.per_application) or sorted(grant.applications)
             return deny(
                 "No application matching that target was found.",
                 disguised_as=ErrorCode.APPLICATION_NOT_FOUND,
+                diagnostic=(
+                    f"this client's grant covers {', '.join(covers) or 'nothing'}, "
+                    f"not {application!r}"
+                ),
             )
 
         if operation_class not in held:

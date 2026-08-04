@@ -1387,6 +1387,10 @@ def _method_capture_window(params: dict[str, Any]) -> dict[str, Any]:
 
     refusal = policy.capture_refusal(application_name)
     if refusal:
+        # The agent is told the window is not there. The developer who wrote the
+        # blocklist is told which rule fired, on the one channel no tool reads.
+        log.warning("refused captureWindow %r and told the caller nothing exists: %s",
+                    window_id, refusal)
         raise DesktopError(
             ErrorCode.APPLICATION_NOT_FOUND,
             "No application matching that target was found.",

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { MastraCodePluginContext } from "@mastra/code-sdk/plugin";
 
-import plugin from "./index.ts";
+import plugin, { supervisor } from "./index.ts";
 
 /**
  * The tools' schemas are the first line of defence against the failure this
@@ -149,5 +149,20 @@ describe("construction-time scope minting", () => {
     expect(names).toContain("desktop_capabilities");
     expect(names).not.toContain("desktop_type_text");
     expect(names).not.toContain("desktop_invoke_element");
+  });
+
+  it("hands the minted scope to the client, so the door is open for the tools that exist", () => {
+    // The tools are minted here; the grant that makes them work is made by the
+    // client on connect. If these two ever disagree, an agent gets write tools
+    // that always refuse — and a refusal now reads as "no such application",
+    // so the failure would look like a missing desktop rather than a missing
+    // grant.
+    (plugin.tools as Function)(ctx({ scope: "observe,edit,submit" }));
+    expect([...supervisor.scope].sort()).toEqual(["edit", "submit"]);
+
+    // Observe is what a fresh connection already holds: asking for it would be
+    // a grant that changes nothing and an audit entry that means nothing.
+    (plugin.tools as Function)(ctx({ scope: "observe" }));
+    expect(supervisor.scope).toEqual([]);
   });
 });

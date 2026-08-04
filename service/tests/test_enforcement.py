@@ -10,6 +10,7 @@ the method that quietly does not use it.
 from __future__ import annotations
 
 import json
+import logging
 
 import pytest
 
@@ -186,6 +187,31 @@ def test_a_narrower_grant_cannot_reach_another_application(built, monkeypatch):
     assert "Discord" not in str(raised.value)
     denied = next(e for e in log.tail(10) if e.get("decision") == "denied")
     assert not denied.get("application"), "the audit log must not name a disguised target"
+
+
+def test_a_disguised_refusal_still_tells_the_client_author_what_happened(built, monkeypatch, caplog):
+    """The agent is told nothing. The developer is told everything.
+
+    Both halves of the ruling are load-bearing. Disguising the refusal without
+    writing the truth anywhere leaves a client author watching an agent report
+    that their browser does not exist, with no way to learn that their own
+    config is what said so. The service log is the right place because it is
+    the one channel with no protocol method behind it: `auditTail` is a tool,
+    and a diagnostic there would be the leak the disguise exists to close.
+    """
+    srv, consent, log_ = built
+    monkeypatch.setattr(server, "_application_of", lambda params: "Discord")
+    monkeypatch.setattr(server, "_needs_application", lambda klass: True)
+    consent.grant("actor", classes=["edit"], applications=["text editor"])
+
+    with caplog.at_level(logging.WARNING), pytest.raises(DesktopError):
+        call(srv, "typeText", elementId="el-1", text="hi", clientId="actor")
+
+    diagnostic = "\n".join(record.getMessage() for record in caplog.records)
+    assert "Discord" in diagnostic, "the client author was told nothing at all"
+    assert "text editor" in diagnostic, "the diagnostic does not say what the grant did cover"
+    # And the leak stays closed on the channels the agent can read.
+    assert all("Discord" not in str(entry) for entry in log_.tail(10))
 
 
 def test_an_unidentifiable_target_is_refused_while_a_list_is_in_force(built, monkeypatch):

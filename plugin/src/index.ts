@@ -15,7 +15,12 @@ import { DesktopSupervisor } from "./supervisor.ts";
  * file.
  */
 
-const supervisor = new DesktopSupervisor();
+/**
+ * Exported so a test can read the scope the tool factory handed it. Minting a
+ * write tool without opening the matching door is the failure that looks like a
+ * broken desktop rather than a refused one.
+ */
+export const supervisor = new DesktopSupervisor();
 
 /**
  * A capture result, as the schema declares it — the base64 image plus the facts
@@ -608,6 +613,11 @@ export default defineMastraCodePlugin({
   },
   tools: (context) => {
     const scope = parseScopeClasses(context.config?.scope);
+    // Minting a write tool and never opening the door for it would hand the
+    // model a tool that can only ever refuse. The client asks for the classes
+    // it minted, at connect time, with no tool involved — which is the whole
+    // shape of A13: the door is opened from outside, before the agent exists.
+    supervisor.setScope([...scope], "construction-time scope of the desktop-control plugin");
     return Object.fromEntries(
       Object.entries(ALL_TOOLS).filter(([name]) =>
         scope.has(TOOL_OPERATION_CLASS[name] ?? ""),
