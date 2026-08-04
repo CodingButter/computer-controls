@@ -130,7 +130,7 @@ export function pacedTimeoutMs(params: Record<string, unknown>): number | undefi
 /** Settling, a stalled toolkit call, and the round trip — not typing time. */
 const PACED_HEADROOM_MS = 30_000;
 
-const PACED_METHODS = new Set(["typeText", "editText"]);
+const PACED_METHODS = new Set(["typeText", "editText", "typeKeystrokes"]);
 
 async function request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
   try {
@@ -353,6 +353,27 @@ const ALL_TOOLS = {
       }),
     },
 
+    desktop_type_keystrokes: {
+      tool: createTool({
+        id: "desktop_type_keystrokes",
+        description:
+          "Type at the keyboard instead of into an element, for a field that can be read but " +
+          "not written. Reach for this only after desktop_type_text has refused a field that " +
+          "plainly is one — a chat composer, a browser input that only listens for key events " +
+          "— never as a first choice, because everything the other tools guarantee is given up " +
+          "here. It takes focus away from whatever has it, and reports in 'progress' which " +
+          "window it raised. The keys go wherever focus ends up, so text can land somewhere " +
+          "else entirely if focus moves. Nothing typed can be taken back, and a call that " +
+          "stops halfway leaves half a message really sitting there. What survives is the " +
+          "proof: success means the field read back exactly what you asked for, and a mismatch " +
+          "returns the text that actually landed. Newlines are refused — in these applications " +
+          "Return sends the message, which is a separate act.",
+        inputSchema: schemas.typeKeystrokesParams,
+        outputSchema: schemas.typeKeystrokesResult,
+        execute: async (input) => await request("typeKeystrokes", { ...input }),
+      }),
+    },
+
     desktop_edit_text: {
       tool: createTool({
         id: "desktop_edit_text",
@@ -563,6 +584,7 @@ const TOOL_OPERATION_CLASS: Record<string, string> = {
   desktop_claim_element: OPERATION_CLASS.claimElement,
   desktop_release_element: OPERATION_CLASS.releaseElement,
   desktop_type_text: OPERATION_CLASS.typeText,
+  desktop_type_keystrokes: OPERATION_CLASS.typeKeystrokes,
   desktop_edit_text: OPERATION_CLASS.editText,
   desktop_perform_actions: OPERATION_CLASS.performActions,
   desktop_attest_element: OPERATION_CLASS.attestElement,

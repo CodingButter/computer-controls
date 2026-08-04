@@ -2,7 +2,7 @@
 
 Generated from `protocol/schema.json` — do not edit.
 Run: `node scripts/generate-tool-api-doc.mjs`
-Protocol version: 1.0   schema sha256: e55ff83a4364192f
+Protocol version: 1.0   schema sha256: 375c11d95e161bbc
 
 The contract between any client and the desktop service. Frozen at 1.0. Additive changes only: new methods and new optional fields. Removing a method, renaming or removing a field, narrowing a type, changing an error code, or adding a required request field is a breaking change and requires a major version.
 
@@ -18,7 +18,7 @@ What a method does to the world. Declared here at freeze time so enforcement can
 | `submit` | Triggers an application's own action. Consequences belong to the application. |
 | `destructive` | May discard or overwrite user data, or is not reversible. |
 
-## Methods (32)
+## Methods (33)
 
 ### `attestElement`
 
@@ -748,6 +748,28 @@ Declare intent to be told about changes to an element without holding a call ope
 |---|---|---|---|
 | `revision` | integer | yes |  |
 | `subscribed` | boolean | yes |  |
+
+---
+
+### `typeKeystrokes`
+
+**Operation class:** `edit`
+
+Type into an element through synthetic keyboard events when the editable-text interface that typeText and setElementValue use is unavailable. The element is on the accessibility bus and its text can be read back, but it offers no way to write through it — a Discord composer, a browser input that only listens to key events. This is a deliberate escalation, not a fallback: the caller tried the accessible write and it refused, and the cost of typing at a window is that focus must be where the caller believes it is. Requires focus and reports which window it raised. Success is the field reading back what was typed, verified the same way as typeText.
+
+**Params**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clientId` | string | no |  |
+| `confirm` | boolean | no |  |
+| `elementId` | string | yes |  |
+| `replace` | boolean | no | Clear the field first by selecting all and deleting, since there is no editable-text interface to empty directly. Defaults to false, which appends. |
+| `settleMs` | integer | no |  |
+| `text` | string | yes | What to type. Bounded for the same reason as typeText: the call is held open while it types, and a caller cannot wait forever. Characters outside printable Latin-1 are refused rather than typed as the wrong glyph. |
+| `wordsPerMinute` | integer | no | Typing speed. Defaults to a competent typist. Unlike typeText this is not only presentation: keys arrive at an application one at a time through the X server, and an application that is busy drops the ones it was not ready for. |
+
+**Result:** [`actionResult`](#actionresult)
 
 ---
 

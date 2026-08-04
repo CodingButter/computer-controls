@@ -965,6 +965,169 @@ def _method_type_text(params: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _method_type_keystrokes(params: dict[str, Any]) -> dict[str, Any]:
+    """Type at a window with synthetic key events, for fields with no way in.
+
+    Every other write in this service hands text to the toolkit and addresses the
+    element it is writing to. This one cannot. It exists for a shape of element
+    that is genuinely on the accessibility bus — it has a role, a name, states
+    that say editable, and text that reads back — while offering no interface to
+    write through. A Discord composer is the case that forced it: readable and
+    unwritable at the same time, so `typeText` correctly refuses it and the field
+    stays unreachable.
+
+    This is an escalation, never a fallback. `typeText` does not reach for it
+    when the toolkit says no, because the difference between the two is not a
+    detail of mechanism — it is who the text is addressed to. `typeText` writes
+    to an element. This writes to whatever holds the keyboard, which is only the
+    intended element for as long as that stays true. A caller that has been
+    refused by the honest path asks for this one by name, knowing the cost.
+
+    What that cost is, precisely:
+
+    Focus must be taken, so the call steals it. Which window it raised is
+    reported, because a caller whose text went somewhere else deserves to be
+    able to work out where.
+
+    Nothing typed can be recalled. A key that has left for the X server is gone,
+    so stopping mid-message stops the remainder and cannot undo the beginning.
+    That makes a half-typed field a real state of the world rather than an error
+    to raise, and it is reported as one.
+
+    The proof is unchanged and is the reason this is defensible at all. The field
+    is read back and compared inside the backend, exactly as `typeText` is. A
+    dumb write channel with an honest proof channel is a usable thing; without
+    the proof it would only be hope.
+    """
+    element_id = _str_param(params, "elementId", required=True)
+    text = _str_param(params, "text", required=True)
+    replace = bool(params.get("replace", False))
+    wpm = int(params.get("wordsPerMinute") or cadence.DEFAULT_WPM)
+
+    # Before anything is typed, not while typing. A character this cannot name is
+    # refused as a whole-call error rather than discovered at character three
+    # hundred, which would leave two hundred and ninety-nine of them on screen
+    # and nothing to say about the rest.
+    unavailable = sorted({character for character in text if atspi.keysym_for(character) is None})
+    if unavailable:
+        raise InvalidParams(
+            "These characters cannot be typed as keystrokes on this keyboard",
+            {
+                "characters": unavailable,
+                "reason": (
+                    "Only printable Latin-1 has a keysym that equals its character. "
+                    "Newline is excluded deliberately: in the applications this method "
+                    "exists for, Return sends the message rather than typing anything."
+                ),
+            },
+        )
+
+    # Paced per character rather than per word, which is not a stylistic choice:
+    # a keystroke is one character by construction, and the waiting between them
+    # is what an application gets to notice them in. `typeText` can hand over a
+    # whole word because the toolkit takes it atomically; here the X server takes
+    # them one at a time and an application busy laying out the last one drops
+    # the next. The finer grain is a bonus elsewhere too — presence is checked
+    # between every character instead of between every word.
+    interval_ms = cadence.interval_ms(wpm)
+    progress: dict[str, Any] = {
+        "charactersPlanned": len(text),
+        "charactersTyped": 0,
+        "estimatedMs": cadence.estimate_ms(text, wpm=wpm),
+        "backend": "keystrokes",
+    }
+
+    def on_loop(work):
+        return loop.call_on_loop(work, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
+
+    def run() -> bool:
+        held_window = _display_window_of(element_id)
+
+        def begin() -> bool:
+            return atspi.grab_focus(_resolve_element(element_id))
+
+        if not on_loop(begin):
+            # Without focus this method has no target at all. Typing anyway would
+            # put the text in whatever window happens to be in front, which is
+            # the exact failure the rest of this service is built to avoid.
+            progress["stoppedBecause"] = (
+                "the element would not take keyboard focus, and typing without it "
+                "would send the text wherever focus happens to be"
+            )
+            return False
+        # Said whether or not it worked out, because it is the one fact a caller
+        # needs to trace text that went astray.
+        progress["focusedWindow"] = held_window
+
+        if replace and not on_loop(atspi.clear_field_by_keystrokes):
+            progress["stoppedBecause"] = "the field would not clear"
+            return False
+
+        for index, character in enumerate(text):
+            if index:
+                # Off the toolkit thread, same as `typeText`: the wait belongs to
+                # nobody, and holding the one thread every client shares for the
+                # length of a sentence would stall the desktop to type a message.
+                time.sleep(interval_ms / 1000.0)
+            if _yielded(progress, element_id, held_window, _client_id(params)):
+                break
+            try:
+                landed = on_loop(
+                    lambda character=character: atspi.type_keysym(atspi.keysym_for(character))
+                )
+            except DesktopError as stalled:
+                progress["stoppedBecause"] = f"the application stopped answering: {stalled.message}"
+                break
+            if not landed:
+                progress["stoppedBecause"] = "the keyboard event was refused"
+                break
+            progress["charactersTyped"] += 1
+
+        # Same assertion as `typeText`, made the same way and in the same place:
+        # against the raw text, inside the backend, so a redacted field can still
+        # be confirmed and only the verdict leaves.
+        try:
+            verdict = on_loop(
+                lambda: atspi.text_matches(_resolve_element(element_id), text, exact=replace)
+            )
+        except DesktopError as unreachable:
+            progress["verified"] = "unknown"
+            progress["stoppedBecause"] = progress.get("stoppedBecause") or unreachable.message
+            return False
+        progress["verified"] = verdict
+        if verdict == "unverifiable":
+            progress["stoppedBecause"] = progress.get("stoppedBecause") or (
+                "the field masks its own contents, so what was typed cannot be read back — "
+                "every character was accepted"
+            )
+            return not progress.get("charactersTyped", 0) < progress["charactersPlanned"]
+        if verdict == "mismatch":
+            # What actually landed, through the same egress the field's value
+            # would leave by. A caller looking at a half-typed message needs to
+            # see it to decide what to do, and half-typed is a real state of the
+            # world rather than a failure to explain away.
+            try:
+                progress["actualText"] = on_loop(
+                    lambda: atspi.read_back(_resolve_element(element_id), element_id)
+                )
+            except DesktopError:
+                pass
+        return verdict == "verified"
+
+    result = actions.perform(
+        "typeKeystrokes",
+        element_id,
+        [actions.Attempt("keystrokes", run)],
+        _snapshot,
+        _action_log,
+        client_id=_client_id(params),
+        scope=_element_scope(element_id),
+        **_settle_bounds(params),
+    )
+    result["progress"] = progress
+    return result
+
+
 #: How long a highlight is left up before the text under it goes. Long enough for
 #: an eye to land on it, short enough that nobody is waiting on the theatre.
 SELECTION_DWELL_SECONDS = 0.4
@@ -1083,6 +1246,7 @@ _BATCH_METHODS = {
     "invokeElement": _method_invoke_element,
     "setElementValue": _method_set_element_value,
     "typeText": _method_type_text,
+    "typeKeystrokes": _method_type_keystrokes,
     "editText": _method_edit_text,
 }
 
@@ -2299,6 +2463,7 @@ def build_server(socket_path: str) -> JsonRpcServer:
     server.register("unsubscribeElement", _method_unsubscribe_element)
     server.register("setElementValue", _method_set_element_value)
     server.register("typeText", _method_type_text)
+    server.register("typeKeystrokes", _method_type_keystrokes)
     server.register("editText", _method_edit_text)
     server.register("performActions", _method_perform_actions)
     server.register("waitFor", _method_wait_for)

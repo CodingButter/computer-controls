@@ -90,6 +90,36 @@ def verdict(row: dict) -> str:
     return "opaque"
 
 
+#: What a row written before this was measured says, which is not the same as any
+#: of the answers below. A blank would read as "none" and an invented value would
+#: be a measurement nobody took.
+UNMEASURED = "not measured"
+
+
+def write_tier(row: dict) -> str:
+    """Which write channel this application's text fields would actually accept.
+
+    Derived from the two counts rather than asserted, because the interesting
+    case is the one where they disagree: fields that are editable to look at and
+    unwritable in practice are exactly the fields the keystroke tier exists for,
+    and before this column the matrix reported them as writable.
+
+    "none found" is about the probe rather than the application. It says no
+    editable field was reached within the walk's bounds, which on a depth-limited
+    row means the composer is further down than twelve levels rather than absent.
+    """
+
+    editable = row["editableFields"]
+    writable = row["writableFields"]
+    if not editable:
+        return "none found"
+    if writable == editable:
+        return "accessibility"
+    if not writable:
+        return "keystrokes"
+    return "both"
+
+
 #: The table's columns, in order. Named here rather than spelled inline because
 #: three functions now have to agree about them: the one that writes a freshly
 #: measured row, the one that reads rows back out of a document written by an
@@ -105,6 +135,7 @@ COLUMNS = [
     "Frame actions",
     "Actionable elements",
     "Editable",
+    "Write tier",
     "Verdict",
     "Measured",
 ]
@@ -112,7 +143,7 @@ COLUMNS = [
 #: Markdown alignments, one per column above: counts read right-aligned, words left.
 ALIGNMENTS = [
     "---", "---", "---:", "---:", "---:", "---:",
-    "---", "---:", "---:", "---:", "---", "---",
+    "---", "---:", "---:", "---:", "---", "---", "---",
 ]
 
 
@@ -138,6 +169,7 @@ def row_cells(row: dict, measured: str) -> list[str]:
         str(row["frameActionCount"]),
         str(row["actionableElements"]),
         str(row["editableFields"]),
+        write_tier(row),
         verdict(row),
         measured,
     ]
@@ -182,6 +214,13 @@ def parse_existing(text: str) -> dict[str, list[str]]:
     else:
         return {}
 
+    unknown = [name for name in header if name not in COLUMNS]
+    if unknown:
+        # A column this generator has never heard of is somebody else's
+        # measurement, and dropping it to fit the shape known here would be the
+        # same silent loss one column at a time instead of one row at a time.
+        raise ValueError(f"the existing matrix has columns this run cannot keep: {unknown}")
+
     # Rows written before the column existed carry the whole document's stamp:
     # it is the date they were measured on, recorded once instead of per row.
     fallback = parse_environment(text).get("Measured", "").split(" ")[0]
@@ -191,13 +230,25 @@ def parse_existing(text: str) -> dict[str, list[str]]:
         if not line.startswith("|"):
             break
         cells = _cells_of(line)
-        if len(cells) == len(header) == len(COLUMNS) - 1:
-            if not fallback:
-                raise ValueError(f"undated row with no environment stamp to inherit: {line}")
-            cells = cells + [fallback]
-        if len(cells) != len(COLUMNS):
+        if len(cells) != len(header):
             raise ValueError(f"cannot read row of the existing matrix: {line}")
-        rows[cells[0]] = cells
+        recorded = dict(zip(header, cells))
+        # Aligned by column name rather than by position, because a column added
+        # in the middle of the table shifts every cell after it and a positional
+        # read would file each one under its neighbour's meaning.
+        aligned = []
+        for column in COLUMNS:
+            if column in recorded:
+                aligned.append(recorded[column])
+            elif column == "Measured":
+                if not fallback:
+                    raise ValueError(f"undated row with no environment stamp to inherit: {line}")
+                aligned.append(fallback)
+            else:
+                # Everything else can only be measured against a running
+                # application, and this run did not look at this one.
+                aligned.append(UNMEASURED)
+        rows[aligned[0]] = aligned
     return rows
 
 
@@ -257,7 +308,14 @@ def render(rows: list[list[str]], env: dict[str, str]) -> str:
         "  within the walk bounds above. Read it together with the previous column and never",
         "  instead of it: a toolkit puts its actions on the frame or on its widgets, and a zero in",
         "  one column is a statement about where they live, not about whether they exist.",
-        "- **Editable** — elements an agent could type into.",
+        "- **Editable** — elements whose role says text goes in them.",
+        "- **Write tier** — which channel that text would have to arrive by. `accessibility` is",
+        "  the toolkit's own editable-text interface, which addresses the element and needs no",
+        "  focus. `keystrokes` means those fields advertise no such interface, so the only way in",
+        "  is typing at the focused window — readable, describable, and unwritable by the honest",
+        "  path. `both` means the application has some of each. `none found` is a statement about",
+        "  the walk, not the application: no editable field was reached within the bounds above,",
+        "  which on a depth-limited row means it sits deeper than the probe goes.",
         "- **Verdict** — which of those surfaces an agent would actually drive this application by.",
         "  `depth-limited` is not one of them: it says the walk stopped before the application did,",
         "  and that the counts on that row are the probe's reach rather than the application's size.",

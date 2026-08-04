@@ -4,11 +4,17 @@ Every claim in the compatibility matrix comes from this module running against a
 live application. Nothing in it is hand-typed, because a hand-typed matrix
 describes the toolkit the author remembers rather than the one installed.
 
-The probe answers six questions per application, and each one is a thing the
+The probe answers seven questions per application, and each one is a thing the
 rest of the service depends on: which AT-SPI interfaces it advertises, how deep
 its tree can actually be walked, whether `Collection` filtering works, how many
 actions its frames expose, how many of the elements *inside* those frames expose
-actions, and whether an editable text field exists to write to.
+actions, whether an editable text field exists to write to, and whether that
+field offers any way to write to it.
+
+The last two are separate questions because they turned out to have different
+answers. A chat composer reports an editable role, editable states and readable
+text while advertising no interface to write through, so an agent that trusted
+the first number found a field it could see, describe and not fill.
 
 Frames and elements are counted separately because they are different findings
 and were once confused for each other. GTK4 puts an application's whole command
@@ -86,6 +92,12 @@ class ApplicationProbe:
     #: Elements asked for their action names so far, bounding the sample's cost.
     sampled_action_elements: int = 0
     editable_fields: int = 0
+    #: Of those, the ones that actually advertise the interface a write goes
+    #: through. The difference between the two numbers is the whole reason the
+    #: keystroke tier exists: a field can be editable by role, by state, and to a
+    #: person, and still offer nothing to write into. Counting only the first
+    #: number reported those fields as writable and they were not.
+    writable_fields: int = 0
     #: Set when the walk stopped early because a call raised or returned nothing.
     notes: list[str] = field(default_factory=list)
 
@@ -109,6 +121,7 @@ class ApplicationProbe:
             "actionableElements": self.actionable_elements,
             "elementActions": self.element_actions,
             "editableFields": self.editable_fields,
+            "writableFields": self.writable_fields,
             "notes": self.notes,
         }
 
@@ -145,6 +158,8 @@ def _walk(root: Any, result: ApplicationProbe) -> None:
         role = backend.role_of(obj)
         if role in EDITABLE_ROLES:
             result.editable_fields += 1
+            if backend.is_editable(obj):
+                result.writable_fields += 1
 
         # The frame is measured separately, by its caller, and counting it here
         # too would report a GTK4 menu twice under two different names.

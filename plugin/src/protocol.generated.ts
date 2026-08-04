@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: e55ff83a4364192f
+// Protocol version: 1.0   schema sha256: 375c11d95e161bbc
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "e55ff83a4364192f" as const;
+export const SCHEMA_DIGEST = "375c11d95e161bbc" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -588,7 +588,7 @@ export interface ListWindowsResult {
 export interface PerformActionsParams {
   actions: {
     /** Which call this step is. Widened when typing arrived: focus a window and then type into it is the sequence somebody writing a message actually wants, and splitting it across two calls leaves a gap in which the desktop can change underneath the second one. */
-    method: "focusWindow" | "invokeElement" | "setElementValue" | "typeText" | "editText";
+    method: "focusWindow" | "invokeElement" | "setElementValue" | "typeText" | "typeKeystrokes" | "editText";
     params: Record<string, unknown>;
   }[];
   clientId?: string;
@@ -708,6 +708,21 @@ export interface SubscribeElementResult {
   subscribed: boolean;
 }
 
+/** Type into an element through synthetic keyboard events when the editable-text interface that typeText and setElementValue use is unavailable. The element is on the accessibility bus and its text can be read back, but it offers no way to write through it — a Discord composer, a browser input that only listens to key events. This is a deliberate escalation, not a fallback: the caller tried the accessible write and it refused, and the cost of typing at a window is that focus must be where the caller believes it is. Requires focus and reports which window it raised. Success is the field reading back what was typed, verified the same way as typeText. (operation class: edit) */
+export interface TypeKeystrokesParams {
+  clientId?: string;
+  confirm?: boolean;
+  elementId: string;
+  /** Clear the field first by selecting all and deleting, since there is no editable-text interface to empty directly. Defaults to false, which appends. */
+  replace?: boolean;
+  settleMs?: number;
+  /** What to type. Bounded for the same reason as typeText: the call is held open while it types, and a caller cannot wait forever. Characters outside printable Latin-1 are refused rather than typed as the wrong glyph. */
+  text: string;
+  /** Typing speed. Defaults to a competent typist. Unlike typeText this is not only presentation: keys arrive at an application one at a time through the X server, and an application that is busy drops the ones it was not ready for. */
+  wordsPerMinute?: number;
+}
+export type TypeKeystrokesResult = ActionResult;
+
 /** Put text into an editable element the way a person would: a word at a time, at a typist's speed, through the same editable-text interface dictation software uses. Prefer setElementValue for a form field nobody is watching; prefer this for anything a human will read as it arrives, and for applications that listen for edits rather than for their field being replaced. (operation class: edit) */
 export interface TypeTextParams {
   clientId?: string;
@@ -761,7 +776,7 @@ export interface WaitForResult {
   waitedMs: number;
 }
 
-export type MethodName = "attestElement" | "auditTail" | "captureWindow" | "claimElement" | "commitElement" | "editText" | "emergencyStop" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "grantScope" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "releaseElement" | "setAttention" | "setElementValue" | "setObservationMode" | "subscribeElement" | "typeText" | "unsubscribeElement" | "waitFor";
+export type MethodName = "attestElement" | "auditTail" | "captureWindow" | "claimElement" | "commitElement" | "editText" | "emergencyStop" | "focusWindow" | "getDeltaSince" | "getDesktopCapabilities" | "getDesktopState" | "getElement" | "getRevision" | "grantScope" | "hello" | "inspectElement" | "inspectWindow" | "invokeElement" | "launchApplication" | "listApplications" | "listInstallableApplications" | "listWindows" | "performActions" | "queryElements" | "releaseElement" | "setAttention" | "setElementValue" | "setObservationMode" | "subscribeElement" | "typeKeystrokes" | "typeText" | "unsubscribeElement" | "waitFor";
 
 export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   attestElement: "observe",
@@ -793,6 +808,7 @@ export const OPERATION_CLASS: Record<MethodName, OperationClass> = {
   setElementValue: "edit",
   setObservationMode: "observe",
   subscribeElement: "observe",
+  typeKeystrokes: "edit",
   typeText: "edit",
   unsubscribeElement: "observe",
   waitFor: "observe",
@@ -828,6 +844,7 @@ export interface MethodMap {
   setElementValue: { params: SetElementValueParams; result: SetElementValueResult };
   setObservationMode: { params: SetObservationModeParams; result: SetObservationModeResult };
   subscribeElement: { params: SubscribeElementParams; result: SubscribeElementResult };
+  typeKeystrokes: { params: TypeKeystrokesParams; result: TypeKeystrokesResult };
   typeText: { params: TypeTextParams; result: TypeTextResult };
   unsubscribeElement: { params: UnsubscribeElementParams; result: UnsubscribeElementResult };
   waitFor: { params: WaitForParams; result: WaitForResult };
