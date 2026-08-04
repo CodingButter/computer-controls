@@ -1,0 +1,15 @@
+# The hub's answer to this question is "build nothing", because every build
+# script that arrives underneath it belongs to a feature it does not touch.
+# This package is the exception that file anticipated.
+#
+# Electron's install script is not compiling an optional native accelerator —
+# it downloads the Electron binary itself, which is the thing this package
+# exists to run. Skipping it leaves a widget that cannot open a window.
+#
+# Note that the tests do not need it. They read the shell as source rather than
+# launching it, on purpose, so that a machine with no display still checks that
+# the widget holds no microphone. Only `pnpm start` needs the binary.
+allowBuilds:
+  electron: true
+minimumReleaseAgeExclude:
+  - ws@8.21.2

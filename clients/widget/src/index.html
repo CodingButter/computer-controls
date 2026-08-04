@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      The page may load nothing from anywhere. Everything it needs is beside it
+      on disk, so the policy that says exactly that costs nothing and closes the
+      door a skin author might otherwise be tempted to open.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self'; script-src 'self'; connect-src ws://127.0.0.1:*"
+    />
+    <title>widget</title>
+    <link rel="stylesheet" href="skin.css" />
+  </head>
+  <body>
+    <!--
+      The whole face: a circle, and a line of text under it. A skin restyles
+      these; it cannot add a third thing that talks to the hub, because there is
+      nothing on this page that talks to the hub except the module below.
+    -->
+    <div id="widget" class="presence-hidden activity-listening">
+      <div id="orb"></div>
+      <p id="caption"></p>
+    </div>
+    <script type="module" src="renderer.js"></script>
+  </body>
+</html>

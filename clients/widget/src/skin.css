@@ -1,0 +1,135 @@
+/*
+ * A skin is a display asset, and this is the default one.
+ *
+ * Everything here is appearance. The classes it dresses are produced by the
+ * state machine, and they are the whole interface a skin gets: presence,
+ * activity, muted. A skin can make the orb a paperclip — the issue permits it
+ * without endorsing it — but it reads the same event stream through the same
+ * classes, and there is no rule it can write that widens what the widget may
+ * ask the hub for.
+ */
+
+:root {
+  --orb-size: 80px;
+  --fade: 420ms;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  /* The window is transparent; only what is drawn below is visible. */
+  background: transparent;
+  overflow: hidden;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Text in a widget is for reading, not for selecting and dragging out. */
+  user-select: none;
+  cursor: default;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  padding-bottom: 16px;
+  box-sizing: border-box;
+  /* Presence is a fade rather than a pop: the widget materialises. */
+  transition: opacity var(--fade) ease;
+}
+
+#widget.presence-hidden {
+  opacity: 0;
+}
+
+#widget.presence-visible {
+  opacity: 1;
+}
+
+#orb {
+  width: var(--orb-size);
+  height: var(--orb-size);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #cfe4ff, #4a7dff 55%, #1e3a8a);
+  box-shadow: 0 0 24px rgba(74, 125, 255, 0.55);
+}
+
+/*
+ * State is shown by motion, which is the point of the orb. Listening breathes,
+ * thinking turns over, speaking pulses in time with a voice.
+ */
+.activity-listening #orb {
+  animation: breathe 3.2s ease-in-out infinite;
+}
+
+.activity-thinking #orb {
+  animation: turn 1.4s linear infinite;
+}
+
+.activity-speaking #orb {
+  animation: pulse 0.7s ease-in-out infinite;
+}
+
+.muted #orb {
+  filter: grayscale(0.85);
+  box-shadow: none;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+
+@keyframes turn {
+  from {
+    transform: rotate(0deg) scale(1.02);
+  }
+  to {
+    transform: rotate(360deg) scale(1.02);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.13);
+  }
+}
+
+/* A person who prefers not to have things moving on their desk gets stillness. */
+@media (prefers-reduced-motion: reduce) {
+  #orb {
+    animation: none;
+  }
+  #widget {
+    transition: none;
+  }
+}
+
+#caption {
+  margin: 14px 0 0;
+  max-width: 320px;
+  max-height: 96px;
+  overflow-y: auto;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #f4f7ff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  /* A long caption scrolls. It is never shortened: where to put the words is a
+     layout question, and throwing away the end of a sentence is not an answer. */
+  overflow-wrap: anywhere;
+}
+
+#caption:empty {
+  display: none;
+}

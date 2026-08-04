@@ -5,6 +5,7 @@ import { Mastra } from "@mastra/core/mastra";
 import { buildApp } from "./app.ts";
 import { createProviderAuth } from "./auth/index.ts";
 import { resolveClientConfig } from "./config.ts";
+import { ScriptedEventSource, attachEventSocket } from "./events/index.ts";
 import { prepareHub } from "./hub.ts";
 import {
   createSessionVoice,
@@ -68,3 +69,15 @@ export const server = serve(
     announce(url);
   },
 );
+
+/**
+ * The hub's state, offered to whatever is drawing it.
+ *
+ * Scripted for now, and honestly so: the ear chain that will drive this for
+ * real — the wake gate, the local ear, the realtime provider — is the orb's
+ * prerequisite work and does not exist yet. What does exist is the seam, so a
+ * face can be built and proved against it today and keep working unchanged the
+ * day the ears land behind it.
+ */
+export const eventSource = new ScriptedEventSource();
+export const eventSocket = attachEventSocket(server, eventSource);
