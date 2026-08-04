@@ -295,10 +295,12 @@ The tiers, as this build reports them:
   never ask for the screen and never receive somebody else's window in the frame"
   (`capabilities.py:112-178`). This is a security property expressed as a
   capability boundary.
-- **raw-input** — `False`. The build checks `/dev/uinput` existence and
-  writability and the presence of `xdotool`/`ydotool`/`wmctrl` on `PATH`, and
-  reports all of them, then states: "raw input is out of scope for this build by
-  design" (`capabilities.py:112-178`).
+- **raw-input** — `False`, and permanently so: "raw input as a general driver is
+  out of scope for this build by design." The refusal covers a driver that types
+  at whatever holds focus, not synthetic keys as such — `typeKeystrokes` does
+  synthesize keys, addressed to a named element and through the same security
+  model as every other write, and the report says so under the accessibility
+  tier's `keystrokes` detail (`capabilities.py:91-141`).
 
 The probe never trusts a setting. The GNOME `toolkit-accessibility` gsetting reads
 `false` on machines where the bridge works perfectly, so it is never consulted

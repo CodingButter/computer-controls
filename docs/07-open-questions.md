@@ -225,19 +225,43 @@ decisions with different trust profiles). The `captureWindow` method already
 hands the image to the model, which can read it; a bundled OCR engine would
 duplicate that capability for the one case where the model is not in the loop.
 
-### raw-input — synthetic pointer and keyboard input
+### raw-input — synthetic input as a general driver
 
-**Status** — unavailable, out of scope by design (`capabilities.py:172-177`).
+**Status** — unavailable, out of scope by design (`capabilities.py:224-229`).
 
-**Reason** — `/dev/uinput` existence and writability checks, plus
-`xdotool`/`ydotool`/`wmctrl` on PATH, plus "raw input is out of scope for this
-build by design" (`capabilities.py:86-96`).
+**Reason** — a constant, not a probe (`capabilities.py:91-99`): raw input as a
+general driver is out of scope for this build by design, and synthetic keystrokes
+addressed to a named element are a different thing that is implemented — see
+`typeKeystrokes` and the accessibility tier's `keystrokes` detail.
 
 **Why it is out of scope** — this is not a deferral; it is the project's
 governing constraint. `ROADMAP.md` states the rule: "a semantic desktop, never
-a remote shell." Synthetic input bypasses the consent ceiling, the holds
+a remote shell." A general input driver bypasses the consent ceiling, the holds
 registry, and the redaction layer — it types into whatever has focus, including
 a window the user walled off. The accessibility tier's `typeText` and
 `setElementValue` go through the same security model as every other method, and
-that is the point. Raw input is the thing this project exists to replace, not to
-provide.
+that is the point. Raw input, in that sense, is the thing this project exists to
+replace, not to provide.
+
+**What this refusal is not** — it is not a claim that this build cannot
+synthesize a key. The keystroke tier does exactly that, and everything in the
+paragraph above is the reason it was built the way it was. `typeKeystrokes` is an
+escalation addressed to a named element: it passes the consent ceiling, takes a
+hold, yields to a person at the keyboard, paces itself per character, and reads
+the field back to prove what landed. It refuses a newline, because Return is the
+send button rather than a character. It exists so that a field which is readable
+and unwritable at once — a Discord composer is the case that forced it — has a
+governed way in, which is precisely what stops anybody needing the driver this
+section refuses. A caller reading the capability report finds it under the
+accessibility tier's `keystrokes` detail, with its availability decided by the
+dependencies it actually has: the accessibility bus, and an X11 session
+(`capabilities.py:113-141`).
+
+**Corrected 2026-08-04** — this section previously gave device-node and
+command-line-tool probes as the reason, and said flatly that all synthetic input
+bypasses the consent ceiling, the holds registry and the redaction layer. The
+first was never evidence for a design refusal and named tools this build has
+never used; the second stopped being true of everything the build does the day
+the keystroke tier shipped. Between them they left the capability report and this
+document denying the existence of a tier that was already in the protocol
+(issue #79).

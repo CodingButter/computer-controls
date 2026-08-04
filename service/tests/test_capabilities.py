@@ -193,6 +193,80 @@ def test_gsetting_is_not_consulted(monkeypatch):
     assert "toolkit-accessibility" in entry["detail"]["note"]
 
 
+def test_the_capability_report_names_the_keystroke_tier(monkeypatch):
+    """A client that reads only the report must be able to find the keystroke tier.
+
+    The report used to be silent about it: `typeKeystrokes` shipped, went through
+    the consent ceiling and the holds registry like every other write, and no tier,
+    no detail and no reason string in this document mentioned it. Silence is the
+    one thing this report is not allowed to be, because the whole contract is that
+    a caller can tell "this desktop cannot" from "this build does not".
+
+    Availability answers to the tier's real dependencies — the accessibility bus
+    and an X11 session — and says which one is missing when one is.
+    """
+    monkeypatch.setenv("DISPLAY", ":1")
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+    detail = tier(build(working_probe), "accessibility")["detail"]
+    assert detail["keystrokes"] is True
+    assert detail["keystrokesReason"] is None
+    assert "typeKeystrokes" in detail["keystrokesNote"]
+
+
+def test_a_session_that_cannot_synthesize_says_which_dependency_is_missing(monkeypatch):
+    """Unavailable is an answer with a cause, and the cause has to be the real one.
+
+    Both halves are checked, because the failure this replaces named dependencies
+    — `/dev/uinput`, `xdotool` — that nothing in this build has ever used, on a
+    desktop where typing worked fine.
+    """
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.setenv("DISPLAY", "")
+
+    on_wayland = tier(build(working_probe), "accessibility")["detail"]
+    assert on_wayland["keystrokes"] is False
+    assert "X11" in on_wayland["keystrokesReason"]
+    assert "uinput" not in on_wayland["keystrokesReason"]
+    # Named even where it cannot run: a caller on Wayland still learns the tier
+    # exists, which is what tells them the report is describing this session
+    # rather than this build.
+    assert "typeKeystrokes" in on_wayland["keystrokesNote"]
+
+    monkeypatch.setenv("DISPLAY", ":1")
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    no_bus = tier(build(broken_probe), "accessibility")["detail"]
+    assert no_bus["keystrokes"] is False
+    # The bus probe's own words, so the tier and the tier it rides on cannot
+    # disagree about why.
+    assert "refused the connection" in no_bus["keystrokesReason"]
+
+
+def test_raw_input_refusal_does_not_deny_the_keystroke_tier():
+    """Refusing the driver must not read as refusing the tier.
+
+    These are two different objects that both involve synthetic keys. One types at
+    whatever holds focus and is refused permanently; the other is addressed to a
+    named element and shipped. The report has to carry both, and the refusal has
+    to point at the thing that exists instead of implying nothing does.
+    """
+    report = build(working_probe)
+    raw_input = tier(report, "raw-input")
+    keystrokes = tier(report, "accessibility")["detail"]
+
+    assert raw_input["available"] is False
+    assert "typeKeystrokes" in raw_input["reason"]
+    # The old reason listed tools it never used. Availability here does not turn
+    # on what is installed, and saying so kept a reader looking for the wrong
+    # evidence.
+    assert "uinput" not in raw_input["reason"]
+    assert "xdotool" not in raw_input["reason"]
+
+    for value in (keystrokes["keystrokesReason"], keystrokes["keystrokesNote"]):
+        assert "out of scope" not in (value or "")
+
+
 def test_recommended_backends_only_lists_available_tiers():
     report = build(working_probe)
     available = {t["id"] for t in report["tiers"] if t["available"]}
