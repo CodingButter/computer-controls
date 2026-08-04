@@ -63,8 +63,20 @@ connection per agent**, never one for the whole server. Identity, grants, elemen
 disconnect cleanup all key off the connection, so agents sharing one become one client in four
 places at once.
 
+**Milestone 1 shipped** — the server layer (`server/`) and the first client, an installable PWA
+(`clients/web/`). The server is a FastAPI process that opens one daemon connection per agent
+session, relays live desktop state over WebSocket, and proxies the voice path (audio → STT → agent
+turn → TTS → audio reply). The PWA connects with a URL and a credential, sees the live desktop,
+and speaks to it. The daemon socket stays `0600` — the phone never reaches it.
+
+What milestone 1 does *not* include (follow-ons):
+- No LLM agent — the stub proves the voice path; a real agent plugs into the `Agent` protocol.
+- No streaming / barge-in — voice is request/response.
+- No off-LAN reach — the phone must be on the same network as the server.
+- No credential revocation — one shared secret, traded for a session bearer token.
+
 - [#31](https://github.com/CodingButter/computer-controls/issues/31) — the reshape: a core, an agent layer, and many clients
-- [#35](https://github.com/CodingButter/computer-controls/issues/35) — the first client, and it is not this plugin
+- [#35](https://github.com/CodingButter/computer-controls/issues/35) — the first client, and it is not this plugin *(milestone 1 shipped)*
 - [#36](https://github.com/CodingButter/computer-controls/issues/36) — a stranger connects: installer, hosted client, account
 
 ## Known limits

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#1a1a2e" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <title>Computer Controls</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <!-- Connect screen: enter server URL + shared secret -->
+    <section id="connect-screen">
+      <div class="card">
+        <h1>Computer Controls</h1>
+        <p class="subtitle">Talk to your desktop from your phone.</p>
+        <form id="connect-form">
+          <label for="server-url">Server URL</label>
+          <input
+            type="url"
+            id="server-url"
+            placeholder="https://computer.lan:8000"
+            autocomplete="url"
+            required
+          />
+          <label for="secret">Shared secret</label>
+          <input
+            type="password"
+            id="secret"
+            placeholder="Enter the secret"
+            autocomplete="current-password"
+            required
+          />
+          <p id="connect-error" class="error hidden"></p>
+          <button type="submit">Connect</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Main screen: desktop state + voice controls -->
+    <section id="main-screen" class="hidden">
+      <header>
+        <h1>Desktop</h1>
+        <p id="status-line" class="status-line">Connecting…</p>
+      </header>
+
+      <div id="desktop-state" class="state-container">
+        <p class="state-empty">Waiting for desktop state…</p>
+      </div>
+
+      <div class="voice-controls">
+        <button id="talk-btn">Tap to talk</button>
+        <audio id="reply-audio"></audio>
+      </div>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

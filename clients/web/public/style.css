@@ -1,0 +1,206 @@
+:root {
+  --bg: #1a1a2e;
+  --surface: #16213e;
+  --accent: #0f3460;
+  --text: #e0e0e0;
+  --text-dim: #888;
+  --error: #e94560;
+  --ok: #4ecca3;
+  --radius: 12px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Connect screen */
+#connect-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  width: 100%;
+  padding: 1rem;
+}
+
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 2rem;
+  width: 100%;
+  max-width: 380px;
+}
+
+.card h1 {
+  font-size: 1.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.subtitle {
+  color: var(--text-dim);
+  margin-bottom: 1.5rem;
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+label {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+input {
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 0.75rem;
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+input:focus {
+  outline: none;
+  border-color: var(--ok);
+}
+
+button {
+  background: var(--accent);
+  color: var(--text);
+  border: none;
+  border-radius: 8px;
+  padding: 0.85rem;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+button:hover:not(:disabled) {
+  background: #1a5276;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.recording {
+  background: var(--error);
+}
+
+.error {
+  color: var(--error);
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Main screen */
+#main-screen {
+  flex: 1;
+  width: 100%;
+  max-width: 600px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  margin-bottom: 1rem;
+}
+
+header h1 {
+  font-size: 1.25rem;
+}
+
+.status-line {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.status-line.err {
+  color: var(--error);
+}
+
+.state-container {
+  flex: 1;
+  overflow-y: auto;
+  margin-bottom: 1rem;
+}
+
+.state-empty {
+  color: var(--text-dim);
+  font-style: italic;
+  padding: 1rem 0;
+}
+
+.window-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.window-item {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-left: 3px solid transparent;
+}
+
+.window-item.active {
+  border-left-color: var(--ok);
+}
+
+.window-item .app {
+  font-weight: 600;
+}
+
+.window-item .title {
+  color: var(--text-dim);
+  flex: 1;
+}
+
+.window-item .badge {
+  font-size: 0.7rem;
+  background: var(--ok);
+  color: var(--bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.voice-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-bottom: 1rem;
+}
+
+#talk-btn {
+  padding: 1.25rem;
+  font-size: 1.1rem;
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@codingbutter/computer-controls-web",
+  "version": "0.1.0",
+  "description": "PWA client for Computer Controls — talk to your desktop from your phone",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "jsdom": "^30.0.1",
+    "typescript": "^7.0.2",
+    "vite": "^7.1.0",
+    "vitest": "^4.1.10"
+  }
+}

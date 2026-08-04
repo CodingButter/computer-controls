@@ -1,0 +1,7 @@
+# Server-layer dependencies (the daemon stays stdlib-only).
+# This is the repo's first third-party runtime dependency — isolated to server/.
+fastapi>=0.115
+uvicorn[standard]>=0.34
+websockets>=13.0
+httpx>=0.27
+python-multipart>=0.0.20
