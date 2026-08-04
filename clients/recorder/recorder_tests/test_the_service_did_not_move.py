@@ -62,8 +62,9 @@ def test_the_recorder_is_reachable_without_the_service_installed():
 def test_the_recorder_carries_no_dependency_of_its_own():
     """Standard library and git. A store you cannot open is not a record."""
     allowed = {
-        "__future__", "ast", "dataclasses", "datetime", "json", "os", "pathlib",
-        "re", "shutil", "subprocess", "typing", "unicodedata",
+        "__future__", "ast", "collections", "contextlib", "dataclasses", "datetime",
+        "hashlib", "json", "os", "pathlib", "re", "secrets", "shutil", "subprocess",
+        "typing", "unicodedata",
     }
     for path in RECORDER.rglob("*.py"):
         tree = ast.parse(path.read_text())

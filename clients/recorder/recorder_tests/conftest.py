@@ -17,7 +17,7 @@ import pytest
 
 from desktop_service import state
 
-from episode_recorder import Agent, Recorder
+from episode_recorder import Agent, Filer, Recorder
 
 SCHEMA = json.loads(
     (Path(__file__).resolve().parents[3] / "protocol" / "schema.json").read_text()
@@ -125,3 +125,65 @@ def reviewer() -> Agent:
 @pytest.fixture
 def recorder(tmp_path) -> Recorder:
     return Recorder(tmp_path / "episodes")
+
+
+class FakeBoard:
+    """A board that keeps what it was handed, so a decision can be read back.
+
+    Standing in for GitHub rather than for the filer's own bookkeeping: it
+    answers the three questions a board answers and remembers nothing the filer
+    would need to be told twice. The numbers ascend the way a real board's do,
+    because the filer breaks a tie by asking which issue is older and issue
+    numbers are the only clock in this design.
+    """
+
+    def __init__(self) -> None:
+        self.issues: dict[int, dict[str, Any]] = {}
+        self.unaccounted: set[int] = set()
+        self._next = 1
+
+    def open_issues(self) -> set[int]:
+        opened = {n for n, issue in self.issues.items() if issue["state"] == "open"}
+        return opened | self.unaccounted
+
+    def file(self, *, title: str, body: str, labels: Any) -> int:
+        number = self._next
+        self._next += 1
+        self.issues[number] = {
+            "title": title,
+            "body": body,
+            "labels": tuple(labels),
+            "state": "open",
+            "closed_with": "",
+        }
+        return number
+
+    def withdraw(self, number: int, reason: str) -> None:
+        self.issues[number]["state"] = "closed"
+        self.issues[number]["closed_with"] = reason
+
+    def only(self) -> dict[str, Any]:
+        assert len(self.issues) == 1, f"expected one issue, got {len(self.issues)}"
+        return next(iter(self.issues.values()))
+
+
+@pytest.fixture
+def board() -> FakeBoard:
+    return FakeBoard()
+
+
+@pytest.fixture
+def filer(recorder, board, reviewer):
+    """A filer on this store, switched on unless a test says otherwise."""
+
+    def make(*, cap: int = 5, enabled: bool | None = True, environ=None) -> Filer:
+        return Filer(
+            recorder.store.path,
+            board,
+            reviewer.author,
+            cap=cap,
+            enabled=enabled,
+            environ=environ,
+        )
+
+    return make
