@@ -5,6 +5,7 @@ applications, windows, dialogs, buttons, text fields — instead of screenshots,
 coordinate guessing.
 
 - `plugin/` — the TypeScript Mastra Code plugin (`codingbutter.desktop-control`)
+- `client/` — the local hub you run on your own machine, and how you sign it in to your model accounts
 - `service/` — the Python desktop service, speaking AT-SPI2 over a Unix-socket JSON-RPC protocol
 - `protocol/` — `schema.json`, the single source of truth for that protocol. The TypeScript and
   Python bindings are both generated from it, and neither is edited by hand
@@ -155,3 +156,10 @@ that resolves only because of something a developer arranged by hand fails that 
 There is also a third lane, `pnpm -C plugin test:gate`, holding tests that pin behaviour the
 plugin depends on but does not own. Per [CONTRIBUTING.md](CONTRIBUTING.md), a failure there is a
 signal to investigate, not a reason to block a PR.
+
+The client has the same two lanes on its own package: `pnpm -C client test` and
+`pnpm -C client typecheck`, after `pnpm -C client install`. Its suite needs no network and no
+desktop — the provider login flows are mocked, because our half of an OAuth exchange is the half
+worth testing, while the credential store is the SDK's real `AuthStorage` writing a real
+`auth.json` into a temporary directory, so "the credential persisted" means the file rather than
+a spy that agreed it was called.
