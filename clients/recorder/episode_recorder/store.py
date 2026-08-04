@@ -23,6 +23,7 @@ machines is not a recording.
 from __future__ import annotations
 
 import os
+import secrets
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +32,11 @@ from pathlib import Path
 #: identity, not a mailbox, and writing it as one that could receive mail would
 #: be an invitation to try.
 IDENTITY_DOMAIN = "computer-controls.invalid"
+
+#: Names the store in the commit it opens with. Read back rather than
+#: recomputed, so a reader and a writer cannot come to different conclusions
+#: about what this store is.
+ID_TRAILER = "Store-Id"
 
 #: What the author line says when a client sent no label. The identity is still
 #: exact — it is in the address — so this reads as a missing claim rather than
@@ -129,7 +135,7 @@ class Store:
             "--quiet",
             "--allow-empty",
             "--message",
-            "the store opens",
+            f"the store opens\n\n{ID_TRAILER}: {secrets.token_hex(16)}",
             author=author,
         )
 
@@ -182,6 +188,16 @@ class Store:
     def checkout(self, name: str) -> None:
         self.git("checkout", "--quiet", name)
 
+    def current_branch(self) -> str:
+        """Which branch the working tree is standing on.
+
+        Asked rather than remembered, because anything that leaves this branch
+        to write somewhere else — a reviewer's proposal, a filer's ledger — has
+        to put it back, and a caller that thought it knew where it started is a
+        caller that commits an episode's next step onto somebody else's branch.
+        """
+        return self.git("rev-parse", "--abbrev-ref", "HEAD")
+
     def branches(self) -> list[str]:
         listed = self.git("for-each-ref", "--format=%(refname:short)", "refs/heads")
         return [line for line in listed.splitlines() if line]
@@ -190,6 +206,29 @@ class Store:
         listed = self.git(
             "for-each-ref", "--format=%(refname:short)", "--merged=main", "refs/heads"
         )
+        return [line for line in listed.splitlines() if line]
+
+    def identity(self) -> str:
+        """What this store calls itself, and tells nobody.
+
+        Written once, at the moment the store opens, from the system's random
+        source. It exists to salt anything derived from a name that leaves the
+        machine — and it has to be real randomness rather than something
+        already lying around, because the alternatives are all guessable: the
+        root commit hash is a function of the second the store was created, the
+        path is a home directory, the branch is a sentence in English. A salt
+        somebody can enumerate is a salt that has not been applied.
+        """
+        root = self.git("rev-list", "--max-parents=0", "main").splitlines()[0]
+        body = self.git("log", "-1", "--format=%B", root)
+        for line in body.splitlines():
+            name, _, value = line.partition(":")
+            if name.strip() == ID_TRAILER and value.strip():
+                return value.strip()
+        raise StoreError(f"{self.path} was opened without a {ID_TRAILER}")
+
+    def tags(self) -> list[str]:
+        listed = self.git("for-each-ref", "--format=%(refname:short)", "refs/tags")
         return [line for line in listed.splitlines() if line]
 
     def _base_ref(self, name: str) -> str:

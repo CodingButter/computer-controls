@@ -1,0 +1,141 @@
+/**
+ * The orb lane, assembled and mounted.
+ *
+ * The lane is deliberately inert until three things are true: there is a Google
+ * credential, an audio capture source exists, and a realtime provider has been
+ * supplied. Any of them missing is a refusal with a reason, not a crash and not
+ * a half-built orb — the page reads the reason and says it, and the typed chat
+ * carries on working either way.
+ *
+ * `provider` and `capture` are injected rather than constructed here because
+ * neither has a shipping implementation yet: `@mastra/voice-google-gemini-live-api`
+ * is not on npm, and OS-level audio capture arrives with the widget work in
+ * #107. Both are interfaces with tests against them, so the day either lands it
+ * implements the seam and nothing above this file moves.
+ */
+
+import { Hono } from "hono";
+
+import type { AgentTurn } from "../chat.ts";
+import { createHubBrain } from "./brain.ts";
+import { isRefusal, resolveOrbCredential } from "./credentials.ts";
+import type { Classifier, LocalEar, VoiceActivityDetector } from "./ear.ts";
+import { realtimeConfig, type RealtimeProvider } from "./live.ts";
+import { Mouth } from "./mouth.ts";
+import { Orb, type OrbEvent, type Speaker } from "./orb.ts";
+import { buildOrbApp, ORB_BASE_PATH } from "./routes.ts";
+import { UtteranceBank, type ClipStore } from "./utterance-bank.ts";
+
+export { ORB_BASE_PATH, GESTURES, parseGesture, buildOrbApp } from "./routes.ts";
+export { GOOGLE_PROVIDER_ID, resolveOrbCredential, orbAvailability } from "./credentials.ts";
+export { WakeGate, DEFAULT_QUIET_PERIOD_MS } from "./gate.ts";
+export { Orb } from "./orb.ts";
+export { Mouth } from "./mouth.ts";
+export { UtteranceBank, CLIP_TEXT, clipClassFor } from "./utterance-bank.ts";
+export { createWakeWordClassifier, isActionable, WAKE_WORDS } from "./ear.ts";
+export { HUB_FUNCTION_NAME, REALTIME_TOOLS, LIVE_MODEL, realtimeConfig } from "./live.ts";
+export { createHubBrain } from "./brain.ts";
+
+export type { OrbEvent, OrbState, Speaker, HubBrain } from "./orb.ts";
+export type { AudioFrame, LocalEar, VoiceActivityDetector, Classifier, IntentClass, Hearing } from "./ear.ts";
+export type { RealtimeProvider, RealtimeSession, FunctionCall } from "./live.ts";
+export type { Clip, ClipStore, ClipSynthesizer } from "./utterance-bank.ts";
+
+/** The parts of the ear chain a machine has to supply for the orb to run. */
+export type EarChain = {
+  vad: VoiceActivityDetector;
+  ear: LocalEar;
+  classifier: Classifier;
+};
+
+export type OrbMountOptions = {
+  credentials: Parameters<typeof resolveOrbCredential>[0];
+  turn: AgentTurn;
+  clips: ClipStore;
+  speaker: Speaker;
+  /** Absent on a machine with no realtime provider wired yet. */
+  provider?: RealtimeProvider;
+  /** Absent until OS-level capture lands with the widget work. */
+  earChain?: EarChain;
+  threadId?: () => string | undefined;
+};
+
+export type OrbMount = {
+  app: Hono;
+  /** Why the orb is off, when it is. Surfaced by health the way voice's is. */
+  reason?: string;
+  orb?: Orb;
+};
+
+const NO_PROVIDER =
+  "The orb has no realtime voice provider on this machine yet. Typing still works.";
+const NO_EAR =
+  "The orb has no local ear on this machine yet, and it will not listen without one. Typing still works.";
+
+/**
+ * Build the orb lane, or explain why there isn't one.
+ *
+ * The refusals are ordered cheapest-question-first: a missing credential is the
+ * thing a person can actually fix, so it is the one they are told about.
+ */
+export async function mountOrb(options: OrbMountOptions): Promise<OrbMount> {
+  const credential = await resolveOrbCredential(options.credentials);
+  if (isRefusal(credential)) {
+    return { app: buildOrbApp({ reason: credential.reason }), reason: credential.reason };
+  }
+  if (!options.provider) {
+    return { app: buildOrbApp({ reason: NO_PROVIDER }), reason: NO_PROVIDER };
+  }
+  if (!options.earChain) {
+    return { app: buildOrbApp({ reason: NO_EAR }), reason: NO_EAR };
+  }
+
+  const listeners = new Set<(event: OrbEvent) => void>();
+
+  // The orb needs a session to be constructed, and the session needs callbacks
+  // that land on the orb — a genuine cycle. It is broken with an explicit box
+  // rather than by reading a `const` that is not initialised yet: an event
+  // arriving during `connect` would hit the temporal dead zone and throw, and
+  // "the provider probably will not do that" is not a guarantee worth taking.
+  // Before the orb exists, an early event is dropped, which is the correct
+  // reading of a frame that arrived before anything could be listening.
+  let attached: Orb | undefined;
+  const session = await options.provider.connect(
+    realtimeConfig({
+      apiKey: credential.key,
+      events: {
+        onAudio: (chunk) => attached?.realtimeEvents.onAudio(chunk),
+        onTranscript: (text, speaker) => attached?.realtimeEvents.onTranscript(text, speaker),
+        onFunctionCall: (call) => attached?.realtimeEvents.onFunctionCall(call),
+        onBargeIn: () => attached?.realtimeEvents.onBargeIn(),
+      },
+    }),
+  );
+
+  const orb = new Orb({
+    gate: options.earChain,
+    session,
+    bank: new UtteranceBank(options.clips),
+    mouth: new Mouth(),
+    speaker: options.speaker,
+    brain: createHubBrain({
+      turn: options.turn,
+      ...(options.threadId ? { threadId: options.threadId } : {}),
+    }),
+    onEvent: (event) => {
+      for (const listener of listeners) listener(event);
+    },
+  });
+  attached = orb;
+
+  return {
+    app: buildOrbApp({
+      orb,
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    }),
+    orb,
+  };
+}

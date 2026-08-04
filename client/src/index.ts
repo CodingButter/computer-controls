@@ -6,6 +6,8 @@ import { buildApp } from "./app.ts";
 import { createProviderAuth } from "./auth/index.ts";
 import { resolveClientConfig } from "./config.ts";
 import { prepareHub } from "./hub.ts";
+import { diskClipStore, unwiredSpeaker } from "./orb/host.ts";
+import { mountOrb } from "./orb/index.ts";
 import {
   createSessionVoice,
   isRefusal,
@@ -53,12 +55,29 @@ const voice = {
   ...(isRefusal(voiceCredential) ? { reason: voiceCredential.reason } : {}),
 };
 
+/**
+ * The orb, mounted from the same store and the same agent.
+ *
+ * It comes up refused on a machine that has no realtime provider or no OS audio
+ * capture wired — both are seams awaiting the work in #107 — and the reason
+ * travels to the page through /api/health and /api/orb/status, exactly as the
+ * voice lane's does. The page then explains itself instead of offering a control
+ * that cannot work, and the typed chat is unaffected either way.
+ */
+const orb = await mountOrb({
+  credentials: storage,
+  turn: hub.chat,
+  clips: diskClipStore(config.root),
+  speaker: unwiredSpeaker,
+});
+
 const app = buildApp({
   chat: hub.chat,
   uiRoot: config.uiRoot,
   status: hub.status,
   auth: providerAuth.app,
   voice,
+  orb,
 });
 
 let announce: (url: string) => void;

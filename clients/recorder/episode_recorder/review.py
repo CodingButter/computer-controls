@@ -25,7 +25,9 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from .store import Author, Store
+from .episode import ID_TRAILER
+from .finding import Finding, Occurrence
+from .store import UNLABELLED, Author, Store, StoreError
 
 NOTES_REF = "refs/notes/reviews"
 
@@ -85,6 +87,85 @@ class Review:
     def diff(self, commit: str) -> str:
         """What that one step changed, which is what the reviewer is judging."""
         return self.store.git("show", "--format=", commit)
+
+    def declaration(self, branch: str) -> str:
+        """The commit an episode opened with: the brief, not a step."""
+        listed = self.store.git(
+            "log", "--reverse", "--format=%H", self.store.range(branch)
+        ).splitlines()
+        if not listed:
+            raise StoreError(f"{branch} has no commits of its own to be opened by")
+        return listed[0]
+
+    def episode_id(self, branch: str) -> str:
+        """What this episode is called when it is spoken about elsewhere.
+
+        Read off the opening commit rather than recomputed, so a reader and a
+        writer cannot disagree about it. This is what a finding uses to say
+        "these were two different episodes" without saying what either of them
+        was called.
+        """
+        body = self.store.git("log", "-1", "--format=%B", self.declaration(branch))
+        for line in body.splitlines():
+            name, _, value = line.partition(":")
+            if name.strip() == ID_TRAILER and value.strip():
+                return value.strip()
+        raise StoreError(f"{branch} was opened without an {ID_TRAILER}")
+
+    def find(
+        self,
+        branch: str,
+        step: Step,
+        kind: str,
+        *,
+        role: str = "",
+        tool: str = "",
+        area: str = "area:client",
+        needs_desktop: bool = False,
+    ) -> Finding:
+        """A conclusion about one step, in the only shape that can be filed.
+
+        What the step did — the method, the element it named, how it failed — is
+        read out of the record rather than accepted from the reviewer. The
+        record went through the allowlist when it was written, so a finding
+        built from it inherits that guarantee instead of restating it, and a
+        reviewer cannot describe the step as something other than what happened.
+
+        Who it is filed against is read from the commit, for the same reason: an
+        episode's author is the identity the service issued at the handshake,
+        and a reviewer naming the agent by hand could name the wrong one.
+        """
+        record = step.record
+        return Finding(
+            kind=kind,
+            agent=self.author_of(step.commit),
+            occurrences=(
+                Occurrence(
+                    episode=self.episode_id(branch),
+                    step=step.number,
+                    commit=step.commit,
+                ),
+            ),
+            method=record.get("method", ""),
+            target=record.get("target", ""),
+            error=(record.get("error") or {}).get("code", ""),
+            role=role,
+            tool=tool,
+            area=area,
+            needs_desktop=needs_desktop,
+        )
+
+    def author_of(self, commit: str) -> Author:
+        """The identity a commit was made under, back as the Author it came from."""
+        line = self.store.git("log", "-1", "--format=%an%x00%ae", commit)
+        label, _, email = line.partition("\0")
+        # A client that sent no label is committed under a stand-in sentence
+        # rather than a name. Reading it back as a label would be treating the
+        # absence of a claim as a claim.
+        return Author(
+            client_id=email.split("@", 1)[0],
+            label="" if label == UNLABELLED else label,
+        )
 
     def agent_files(self, branch: str) -> dict[str, str]:
         listed = self.store.git("ls-tree", "-r", "--name-only", branch).splitlines()
