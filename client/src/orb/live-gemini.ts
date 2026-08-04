@@ -43,6 +43,27 @@ export const ORB_SYSTEM_INSTRUCTION =
 /** How long connect waits for the server's setupComplete before refusing. */
 export const SETUP_TIMEOUT_MS = 15_000;
 
+/**
+ * Google hangs up on idle realtime sessions after a few minutes. A session
+ * object that treats that hangup as permanent turns a routine server-side
+ * timeout into a deaf orb: the gate opens, audio pours in, and every frame
+ * is silently dropped on a socket that will never speak again. So a drop
+ * that this side did not ask for is redialed, forever, on this schedule —
+ * the last delay repeats. What a redial cannot restore is the conversation
+ * so far: the new socket starts a fresh session.
+ */
+export const RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 15_000];
+
+/** Injectable so tests redial instantly instead of waiting out the backoff. */
+export type RetryWait = (attempt: number) => Promise<void>;
+
+const defaultRetryWait: RetryWait = (attempt) =>
+  new Promise((resolve) => {
+    const delay = RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)];
+    const timer = setTimeout(resolve, delay);
+    if (typeof timer === "object" && "unref" in timer) timer.unref();
+  });
+
 /** The subset of WebSocket this module uses, injectable for tests. */
 export type SocketLike = {
   /**
@@ -94,15 +115,17 @@ function decodeFrame(data: unknown): ServerMessage | undefined {
  */
 export function geminiLiveProvider(
   socketFactory: SocketFactory = (url) => new WebSocket(url) as unknown as SocketLike,
+  retryWait: RetryWait = defaultRetryWait,
 ): RealtimeProvider {
   return {
     async connect(config: RealtimeConfig): Promise<RealtimeSession> {
       const url = `${LIVE_ENDPOINT}?key=${encodeURIComponent(config.apiKey)}`;
-      const socket = socketFactory(url);
-      if ("binaryType" in socket) socket.binaryType = "arraybuffer";
 
       let muted = true;
-      let closed = false;
+      /** True only when this side hung up. A server drop is not this. */
+      let closedByUs = false;
+      /** The socket that has completed setup, or undefined during a gap. */
+      let current: SocketLike | undefined;
 
       const setup = {
         setup: {
@@ -126,81 +149,114 @@ export function geminiLiveProvider(
         },
       };
 
-      const ready = new Promise<void>((resolve, reject) => {
-        let settled = false;
-        // A handshake that never answers must become a refusal, not a hub
-        // that hangs at boot with its port unbound — which is precisely what
-        // happened when an undecodable frame carried the setupComplete.
-        const deadline = setTimeout(() => {
-          if (settled) return;
-          settled = true;
-          socket.close();
-          reject(new Error(`The realtime server did not complete setup within ${SETUP_TIMEOUT_MS}ms.`));
-        }, SETUP_TIMEOUT_MS);
-        if (typeof deadline === "object" && "unref" in deadline) deadline.unref();
-        socket.addEventListener("open", () => {
-          socket.send(JSON.stringify(setup));
-        });
-        socket.addEventListener("message", ((event: { data: unknown }) => {
-          const message = decodeFrame(event.data);
-          if (!message) return;
-
-          if (message.setupComplete && !settled) {
+      const dial = (): Promise<void> =>
+        new Promise<void>((resolve, reject) => {
+          const socket = socketFactory(url);
+          if ("binaryType" in socket) socket.binaryType = "arraybuffer";
+          let settled = false;
+          // A handshake that never answers must become a refusal, not a hub
+          // that hangs at boot with its port unbound — which is precisely what
+          // happened when an undecodable frame carried the setupComplete.
+          const deadline = setTimeout(() => {
+            if (settled) return;
             settled = true;
-            resolve();
-            return;
-          }
+            socket.close();
+            reject(new Error(`The realtime server did not complete setup within ${SETUP_TIMEOUT_MS}ms.`));
+          }, SETUP_TIMEOUT_MS);
+          if (typeof deadline === "object" && "unref" in deadline) deadline.unref();
+          socket.addEventListener("open", () => {
+            socket.send(JSON.stringify(setup));
+          });
+          socket.addEventListener("message", ((event: { data: unknown }) => {
+            const message = decodeFrame(event.data);
+            if (!message) return;
 
-          const content = message.serverContent;
-          if (content) {
-            if (content.interrupted) config.events.onBargeIn();
-            for (const part of content.modelTurn?.parts ?? []) {
-              const inline = part.inlineData;
-              if (inline?.data && (inline.mimeType ?? "").startsWith("audio/pcm")) {
-                config.events.onAudio(Uint8Array.from(Buffer.from(inline.data, "base64")));
+            if (message.setupComplete && !settled) {
+              settled = true;
+              // Becoming `current` happens here, inside the handshake, so a
+              // close event can never race the assignment and mistake a live
+              // socket for a stale one.
+              current = socket;
+              resolve();
+              return;
+            }
+
+            const content = message.serverContent;
+            if (content) {
+              if (content.interrupted) config.events.onBargeIn();
+              for (const part of content.modelTurn?.parts ?? []) {
+                const inline = part.inlineData;
+                if (inline?.data && (inline.mimeType ?? "").startsWith("audio/pcm")) {
+                  config.events.onAudio(Uint8Array.from(Buffer.from(inline.data, "base64")));
+                }
+              }
+              if (content.inputTranscription?.text) {
+                config.events.onTranscript(content.inputTranscription.text, "user");
+              }
+              if (content.outputTranscription?.text) {
+                config.events.onTranscript(content.outputTranscription.text, "assistant");
               }
             }
-            if (content.inputTranscription?.text) {
-              config.events.onTranscript(content.inputTranscription.text, "user");
-            }
-            if (content.outputTranscription?.text) {
-              config.events.onTranscript(content.outputTranscription.text, "assistant");
-            }
-          }
 
-          for (const call of message.toolCall?.functionCalls ?? []) {
-            if (!call.name) continue;
-            config.events.onFunctionCall({
-              id: call.id ?? "",
-              name: call.name,
-              args: call.args ?? {},
-            } satisfies FunctionCall);
-          }
-        }) as (event: never) => void);
-        socket.addEventListener("close", () => {
-          closed = true;
-          if (!settled) {
-            settled = true;
-            reject(new Error("The realtime socket closed before setup completed."));
-          }
+            for (const call of message.toolCall?.functionCalls ?? []) {
+              if (!call.name) continue;
+              config.events.onFunctionCall({
+                id: call.id ?? "",
+                name: call.name,
+                args: call.args ?? {},
+              } satisfies FunctionCall);
+            }
+          }) as (event: never) => void);
+          socket.addEventListener("close", () => {
+            if (!settled) {
+              settled = true;
+              reject(new Error("The realtime socket closed before setup completed."));
+              return;
+            }
+            // A stale socket dying — one already replaced by a redial — is
+            // not news. Only the current socket's death matters.
+            if (current !== socket) return;
+            current = undefined;
+            if (!closedByUs) {
+              console.warn("[orb] realtime socket dropped by the server; redialing");
+              void redial();
+            }
+          });
+          socket.addEventListener("error", () => {
+            if (!settled) {
+              settled = true;
+              reject(new Error("The realtime socket failed before setup completed."));
+            }
+          });
         });
-        socket.addEventListener("error", () => {
-          if (!settled) {
-            settled = true;
-            reject(new Error("The realtime socket failed before setup completed."));
-          }
-        });
-      });
 
-      await ready;
+      const redial = async (): Promise<void> => {
+        for (let attempt = 0; !closedByUs; attempt++) {
+          await retryWait(attempt);
+          if (closedByUs) return;
+          try {
+            await dial();
+            console.warn("[orb] realtime socket reconnected");
+            return;
+          } catch {
+            // The next lap waits longer and tries again. Giving up would
+            // reintroduce the deaf orb this loop exists to prevent.
+          }
+        }
+      };
+
+      // The first dial keeps its refusal semantics: a hub that cannot reach
+      // the realtime endpoint at boot says so instead of pretending.
+      await dial();
 
       return {
         sendAudio(chunk: Uint8Array): void {
           // The mute check lives here, at the last line before the wire.
           // Callers are expected to respect the gate; the session does not
-          // rely on them having done so.
-          if (muted || closed) return;
-          socket.send(
+          // rely on them having done so. During a redial gap the frame is
+          // dropped — audio has no meaning to a session that missed it.
+          if (muted || closedByUs || !current) return;
+          current.send(
             JSON.stringify({
               realtimeInput: {
                 audio: {
@@ -213,7 +269,8 @@ export function geminiLiveProvider(
         },
 
         async sendText(text: string): Promise<void> {
-          socket.send(
+          if (!current) return;
+          current.send(
             JSON.stringify({
               clientContent: {
                 turns: [{ role: "user", parts: [{ text }] }],
@@ -224,7 +281,10 @@ export function geminiLiveProvider(
         },
 
         async sendFunctionResult(id: string, result: string): Promise<void> {
-          socket.send(
+          // A result for a call the previous socket made is meaningless to
+          // the new one; dropped rather than confusing a fresh session.
+          if (!current) return;
+          current.send(
             JSON.stringify({
               toolResponse: {
                 functionResponses: [{ id, response: { output: result } }],
@@ -244,8 +304,9 @@ export function geminiLiveProvider(
         },
 
         async close(): Promise<void> {
-          closed = true;
-          socket.close();
+          closedByUs = true;
+          current?.close();
+          current = undefined;
         },
       };
     },

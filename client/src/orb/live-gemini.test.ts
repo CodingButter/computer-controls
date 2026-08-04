@@ -219,3 +219,68 @@ describe("what the session sends", () => {
     expect(frame.toolResponse.functionResponses[0].response.output).toBe("done: two new emails");
   });
 });
+
+// The server hangs up on idle sessions. A drop this side did not ask for
+// must be redialed — the alternative is an orb whose gate is open while
+// every frame dies on a socket that will never answer again.
+describe("when the server hangs up", () => {
+  function reconnectingProvider(retryWait: () => Promise<void> = () => Promise.resolve()) {
+    const sockets: FakeSocket[] = [];
+    const provider = geminiLiveProvider((url) => {
+      const socket = new FakeSocket(url);
+      sockets.push(socket);
+      queueMicrotask(() => {
+        socket.emit("open", {});
+        socket.serverSays({ setupComplete: {} });
+      });
+      return socket;
+    }, retryWait);
+    return { provider, sockets };
+  }
+
+  async function settle() {
+    // The redial handshake runs on the microtask queue; a macrotask hop
+    // lets it finish.
+    await new Promise((r) => setTimeout(r, 10));
+  }
+
+  it("redials, and audio flows over the new socket without re-unmuting", async () => {
+    const { provider, sockets } = reconnectingProvider();
+    const session = await provider.connect(realtimeConfig({ apiKey: "k", events: events() }));
+    session.unmute();
+
+    sockets[0].emit("close", {});
+    await settle();
+
+    expect(sockets).toHaveLength(2);
+    session.sendAudio(new Uint8Array([7]));
+    const frame = JSON.parse(sockets[1].sent.at(-1)!);
+    expect(frame.realtimeInput.audio.mimeType).toBe("audio/pcm;rate=16000");
+  });
+
+  it("drops audio during the gap instead of throwing", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const { provider, sockets } = reconnectingProvider(() => held);
+    const session = await provider.connect(realtimeConfig({ apiKey: "k", events: events() }));
+    session.unmute();
+
+    sockets[0].emit("close", {});
+    expect(() => session.sendAudio(new Uint8Array([1]))).not.toThrow();
+    expect(sockets).toHaveLength(1);
+
+    release();
+    await settle();
+    expect(sockets).toHaveLength(2);
+  });
+
+  it("a close from this side stays closed — no redial", async () => {
+    const { provider, sockets } = reconnectingProvider();
+    const session = await provider.connect(realtimeConfig({ apiKey: "k", events: events() }));
+    await session.close();
+    await settle();
+    expect(sockets).toHaveLength(1);
+    session.sendAudio(new Uint8Array([1]));
+    // No throw, no new socket: hung up means hung up.
+  });
+});
