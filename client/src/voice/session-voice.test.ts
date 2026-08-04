@@ -80,7 +80,7 @@ describe("the voice a session agent gets", () => {
     });
   });
 
-  it("turns agent text into audio bytes, the way the speak route does", async () => {
+  it("test_speak_round_trip_produces_audio_from_agent_text: turns agent text into audio bytes, the way the speak route does", async () => {
     const agent = agentWithVoice(sessionVoice(OPENAI_CREDENTIAL));
 
     const voice = await agent.getVoice();
@@ -126,7 +126,7 @@ describe("the voice a session agent gets", () => {
     expect((sent[0]!.body.file as File).name).toBe("audio.webm");
   });
 
-  it("does not let the voice provider choose the model that thinks", async () => {
+  it("test_the_reasoning_model_is_not_the_voice_model: does not let the voice provider choose the model that thinks", async () => {
     const speaking = agentWithVoice(sessionVoice(OPENAI_CREDENTIAL));
     const silent = agentWithVoice(undefined);
 

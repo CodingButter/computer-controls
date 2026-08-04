@@ -52,7 +52,7 @@ beforeEach(() => {
 });
 
 describe("one press of the talk button", () => {
-  it("carries a recording to the transcript and the transcript into the chat", async () => {
+  it("test_listen_transcript_enters_the_chat_as_a_user_turn: carries a recording to the transcript and the transcript into the chat", async () => {
     const p = ports({
       "/voice/listen": transcribed("read me my most recent email"),
       "/voice/speak": synthesized,
