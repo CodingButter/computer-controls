@@ -584,6 +584,7 @@ const TOOL_OPERATION_CLASS: Record<string, string> = {
   desktop_claim_element: OPERATION_CLASS.claimElement,
   desktop_release_element: OPERATION_CLASS.releaseElement,
   desktop_type_text: OPERATION_CLASS.typeText,
+  desktop_type_keystrokes: OPERATION_CLASS.typeKeystrokes,
   desktop_edit_text: OPERATION_CLASS.editText,
   desktop_perform_actions: OPERATION_CLASS.performActions,
   desktop_attest_element: OPERATION_CLASS.attestElement,
