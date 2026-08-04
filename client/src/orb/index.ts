@@ -58,6 +58,16 @@ export type OrbMountOptions = {
   /** Absent until OS-level capture lands with the widget work. */
   earChain?: EarChain;
   threadId?: () => string | undefined;
+  /** Overrides the gate's quiet period. The PoC holds it open for a sitting. */
+  quietPeriodMs?: number;
+  /**
+   * Told how many faces are watching, every time the number changes.
+   *
+   * This is the proof-of-concept's consent seam: a face arriving is the
+   * deliberate act that opens the microphone, and the last face leaving is
+   * what closes it. The caller wires the microphone; this lane only counts.
+   */
+  onFaceCount?: (count: number) => void;
 };
 
 export type OrbMount = {
@@ -100,20 +110,33 @@ export async function mountOrb(options: OrbMountOptions): Promise<OrbMount> {
   // Before the orb exists, an early event is dropped, which is the correct
   // reading of a frame that arrived before anything could be listening.
   let attached: Orb | undefined;
-  const session = await options.provider.connect(
-    realtimeConfig({
-      apiKey: credential.key,
-      events: {
-        onAudio: (chunk) => attached?.realtimeEvents.onAudio(chunk),
-        onTranscript: (text, speaker) => attached?.realtimeEvents.onTranscript(text, speaker),
-        onFunctionCall: (call) => attached?.realtimeEvents.onFunctionCall(call),
-        onBargeIn: () => attached?.realtimeEvents.onBargeIn(),
-      },
-    }),
-  );
+  let session;
+  try {
+    session = await options.provider.connect(
+      realtimeConfig({
+        apiKey: credential.key,
+        events: {
+          onAudio: (chunk) => attached?.realtimeEvents.onAudio(chunk),
+          onTranscript: (text, speaker) => attached?.realtimeEvents.onTranscript(text, speaker),
+          onFunctionCall: (call) => attached?.realtimeEvents.onFunctionCall(call),
+          onBargeIn: () => attached?.realtimeEvents.onBargeIn(),
+        },
+      }),
+    );
+  } catch (error) {
+    // A provider that will not connect is an orb that is off with a reason,
+    // not a hub that failed to boot: the typed chat owes nothing to Google.
+    const reason = `The realtime voice provider refused to connect: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+    return { app: buildOrbApp({ reason }), reason };
+  }
 
   const orb = new Orb({
-    gate: options.earChain,
+    gate: {
+      ...options.earChain,
+      ...(options.quietPeriodMs !== undefined ? { quietPeriodMs: options.quietPeriodMs } : {}),
+    },
     session,
     bank: new UtteranceBank(options.clips),
     mouth: new Mouth(),
@@ -133,7 +156,10 @@ export async function mountOrb(options: OrbMountOptions): Promise<OrbMount> {
       orb,
       subscribe: (listener) => {
         listeners.add(listener);
-        return () => listeners.delete(listener);
+        options.onFaceCount?.(listeners.size);
+        return () => {
+          if (listeners.delete(listener)) options.onFaceCount?.(listeners.size);
+        };
       },
     }),
     orb,

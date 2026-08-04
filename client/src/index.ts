@@ -6,8 +6,11 @@ import { buildApp } from "./app.ts";
 import { createProviderAuth } from "./auth/index.ts";
 import { resolveClientConfig } from "./config.ts";
 import { prepareHub } from "./hub.ts";
+import { commandSpeaker, startMicrophone, type Microphone } from "./orb/audio-host.ts";
+import { pocEarChain } from "./orb/ear-poc.ts";
 import { diskClipStore, unwiredSpeaker } from "./orb/host.ts";
 import { mountOrb } from "./orb/index.ts";
+import { geminiLiveProvider } from "./orb/live-gemini.ts";
 import {
   createSessionVoice,
   isRefusal,
@@ -64,12 +67,50 @@ const voice = {
  * voice lane's does. The page then explains itself instead of offering a control
  * that cannot work, and the typed chat is unaffected either way.
  */
+/**
+ * The live lane is opt-in scaffolding: COMCON_ORB_LIVE wires the real Gemini
+ * socket, the machine's microphone and speaker, and the visit-is-consent gate.
+ * Off — the default, and what every test boots — the orb mounts exactly as
+ * before: refused with a reason, no socket opened, no process spawned. The
+ * flag comes off when #107's widget work makes the capture path permanent.
+ */
+const orbLive = process.env.COMCON_ORB_LIVE === "1";
+let orbFaceCount: ((count: number) => void) | undefined;
+
 const orb = await mountOrb({
   credentials: storage,
   turn: hub.chat,
   clips: diskClipStore(config.root),
-  speaker: unwiredSpeaker,
+  ...(orbLive
+    ? {
+        speaker: commandSpeaker(),
+        provider: geminiLiveProvider(),
+        earChain: pocEarChain(),
+        // Visiting the page is the consent; the gate holds for the sitting.
+        quietPeriodMs: 24 * 60 * 60 * 1000,
+        onFaceCount: (count: number) => orbFaceCount?.(count),
+      }
+    : { speaker: unwiredSpeaker }),
 });
+
+if (orbLive && orb.orb) {
+  const livingOrb = orb.orb;
+  let microphone: Microphone | undefined;
+  orbFaceCount = (count) => {
+    if (count > 0 && !microphone) {
+      // A face arrived: the deliberate act. The mic opens and the gate with it.
+      microphone = startMicrophone({ onFrame: (frame) => void livingOrb.push(frame) });
+      if (livingOrb.gateState !== "open") livingOrb.toggle();
+      return;
+    }
+    if (count === 0 && microphone) {
+      // The last face left: the machine goes quiet, process and gate both.
+      livingOrb.closeGate();
+      microphone.stop();
+      microphone = undefined;
+    }
+  };
+}
 
 const app = buildApp({
   chat: hub.chat,

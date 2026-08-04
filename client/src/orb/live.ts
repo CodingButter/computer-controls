@@ -102,7 +102,7 @@ export interface RealtimeProvider {
 }
 
 /** The Live model the orb runs. Pinned here for the same reason the speaker is. */
-export const LIVE_MODEL = "gemini-2.0-flash-live-001";
+export const LIVE_MODEL = "gemini-3.1-flash-live-preview";
 
 /**
  * The tool set handed to any realtime session this product opens.

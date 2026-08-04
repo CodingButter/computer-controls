@@ -36,8 +36,17 @@ export const ORB_SYSTEM_INSTRUCTION =
   "in their own words, then relay its answer. Never claim to have done " +
   "something yourself.";
 
+/** How long connect waits for the server's setupComplete before refusing. */
+export const SETUP_TIMEOUT_MS = 15_000;
+
 /** The subset of WebSocket this module uses, injectable for tests. */
 export type SocketLike = {
+  /**
+   * Asked for as arraybuffer because the server frames its JSON as binary and
+   * the runtime's default is Blob — a shape `decodeFrame` would have to go
+   * async to read, which would reorder messages behind their own decoding.
+   */
+  binaryType?: string;
   send(data: string): void;
   close(): void;
   addEventListener(type: "open" | "message" | "close" | "error", listener: (event: never) => void): void;
@@ -86,6 +95,7 @@ export function geminiLiveProvider(
     async connect(config: RealtimeConfig): Promise<RealtimeSession> {
       const url = `${LIVE_ENDPOINT}?key=${encodeURIComponent(config.apiKey)}`;
       const socket = socketFactory(url);
+      if ("binaryType" in socket) socket.binaryType = "arraybuffer";
 
       let muted = true;
       let closed = false;
@@ -114,6 +124,16 @@ export function geminiLiveProvider(
 
       const ready = new Promise<void>((resolve, reject) => {
         let settled = false;
+        // A handshake that never answers must become a refusal, not a hub
+        // that hangs at boot with its port unbound — which is precisely what
+        // happened when an undecodable frame carried the setupComplete.
+        const deadline = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          socket.close();
+          reject(new Error(`The realtime server did not complete setup within ${SETUP_TIMEOUT_MS}ms.`));
+        }, SETUP_TIMEOUT_MS);
+        if (typeof deadline === "object" && "unref" in deadline) deadline.unref();
         socket.addEventListener("open", () => {
           socket.send(JSON.stringify(setup));
         });
