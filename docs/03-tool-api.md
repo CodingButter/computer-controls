@@ -2,7 +2,7 @@
 
 Generated from `protocol/schema.json` — do not edit.
 Run: `node scripts/generate-tool-api-doc.mjs`
-Protocol version: 1.0   schema sha256: d935fa8ad6624c91
+Protocol version: 1.0   schema sha256: 8891bb8b28a73331
 
 The contract between any client and the desktop service. Frozen at 1.0. Additive changes only: new methods and new optional fields. Removing a method, renaming or removing a field, narrowing a type, changing an error code, or adding a required request field is a breaking change and requires a major version.
 
@@ -349,6 +349,7 @@ Ask for the operation classes this client may use, within the ceiling the user's
 | `applications` | string[] | no | Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing. |
 | `clientId` | string | no |  |
 | `confirm` | boolean | no |  |
+| `criteria` | string[] | no | The questions a commit made under this grant must be answered against. Declared here, at the door, because the party being graded does not write the rubric — a worker cannot reach this field, and the service's own mechanical criteria are asked on top of whatever is named here. A name this service cannot decide is still carried and reported as unchecked, so that asking for review is never worse than asking for nothing. |
 | `operationClasses` | `observe` \| `edit` \| `activate` \| `submit` \| `destructive`[] | yes | What this client intends to do. Ask for what the task needs and no more: a grant is also a description of the blast radius in the audit log. |
 | `reason` | string | no | What this is for, in the caller's own words. Recorded in the audit log, where the useful question months later is why, not what. |
 | `seconds` | integer | no | How long the grant survives without use. Idle time, not a lifetime — a grant being used every second does not expire mid-sentence. |
@@ -360,6 +361,7 @@ Ask for the operation classes this client may use, within the ceiling the user's
 | `anchors` | [`scopeAnchor`](#scopeanchor)[] | no | Where this grant now hangs. Returned so a client can tell an anchor that was accepted from one that was quietly dropped. |
 | `applications` | string[] | no |  |
 | `ceiling` | string[] | yes | The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice. |
+| `criteria` | string[] | no | Every criterion a commit under this grant will be judged against, the mechanical ones included whether or not they were asked for. Returned so a client can tell what review it has actually bought without inferring it from a refusal. |
 | `expiresInSeconds` | integer | no |  |
 | `operationClasses` | string[] | yes | What this client now holds. Always includes observe: a client that may edit must be able to check whether its edit worked. |
 
@@ -911,7 +913,7 @@ The data member of a JSON-RPC error. The domain code lives here; the top-level c
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `code` | `APPLICATION_NOT_FOUND` \| `WINDOW_NOT_FOUND` \| `ELEMENT_NOT_FOUND` \| `ELEMENT_REFERENCE_STALE` \| `BACKEND_UNAVAILABLE` \| `ACTION_NOT_SUPPORTED` \| `PERMISSION_DENIED` \| `SESSION_EXPIRED` \| `ELEMENT_HELD` \| `TIMEOUT` \| `METHOD_NOT_FOUND` \| `INVALID_PARAMS` \| `INTERNAL_ERROR` \| `SUBSCRIPTION_LIMIT_REACHED` | yes |  |
+| `code` | `APPLICATION_NOT_FOUND` \| `WINDOW_NOT_FOUND` \| `ELEMENT_NOT_FOUND` \| `ELEMENT_REFERENCE_STALE` \| `BACKEND_UNAVAILABLE` \| `ACTION_NOT_SUPPORTED` \| `PERMISSION_DENIED` \| `SESSION_EXPIRED` \| `ELEMENT_HELD` \| `TIMEOUT` \| `METHOD_NOT_FOUND` \| `INVALID_PARAMS` \| `INTERNAL_ERROR` \| `SUBSCRIPTION_LIMIT_REACHED` \| `ATTESTATION_FAILED` \| `ATTESTATION_STALE` | yes |  |
 | `detail` | object | no |  |
 | `message` | string | no | Present when this error travels inside a result rather than as a JSON-RPC error. A failed step inside a batch has no top-level error member to carry its explanation, and a report that says a step failed without saying why is not worth returning. |
 
@@ -1054,6 +1056,8 @@ The complete domain error vocabulary. Carried in the JSON-RPC error object under
 | `ELEMENT_HELD` | Another client is writing this element and owns it until that write finishes. Carries the holder's identity, what it is doing and how long it has been at it. Not a permission answer and not a queue: the request is refused, not deferred. |
 | `CLAIM_EXPIRED` | The claim covering this write ran out before the write finished. A lease is sized from the work it was taken for, so this says the work outran its own estimate rather than that time merely passed. The element is free and nothing was rolled back: a half-written field is a real state of the world, and hiding it would be the more expensive lie. |
 | `SUBSCRIPTION_LIMIT_REACHED` | This connection already holds the maximum number of element subscriptions. Carries the ceiling, because a refusal that names the bound lets a caller choose what to release rather than guessing. |
+| `ATTESTATION_FAILED` | The service could not assemble a proof for a submit-class action, so the action was never dispatched. Not a permission answer: the caller may do this, but the service could not confirm what it would be doing it to, and a commit the service cannot describe is a commit nobody can review. Carries the criterion that could not be satisfied. |
+| `ATTESTATION_STALE` | The target moved between the proof and the commit, so the approval was obtained for one state of the desktop and would have been applied to another. Carries the criterion and the revision at which the difference appeared, because a caller told only 'stale' has to guess what to prove again. |
 | `TIMEOUT` | The desktop did not answer within the allotted time. |
 | `METHOD_NOT_FOUND` | No such method in this protocol version. |
 | `INVALID_PARAMS` | The request did not satisfy this schema. |

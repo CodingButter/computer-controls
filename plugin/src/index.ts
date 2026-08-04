@@ -593,6 +593,21 @@ function parseScopeClasses(raw: string | boolean | undefined): Set<string> {
   return parts.length > 0 ? new Set(parts) : new Set(["observe"]);
 }
 
+/**
+ * Parse the comma-separated criteria this client declares on its grant.
+ *
+ * Empty is the honest default: the service's mechanical criteria are asked of
+ * every commit regardless, so declaring nothing buys no fewer questions — it
+ * only means nothing has been routed to a reviewer.
+ */
+function parseCriteria(raw: string | boolean | undefined): string[] {
+  const text = typeof raw === "string" ? raw : "";
+  return text
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
 export default defineMastraCodePlugin({
   id: "desktop-control",
   name: "Semantic Desktop Control",
@@ -610,14 +625,29 @@ export default defineMastraCodePlugin({
         "Tools outside this scope are absent, not disabled.",
       default: "observe",
     },
+    criteria: {
+      type: "string",
+      label: "Approval criteria",
+      description:
+        "Comma-separated questions every commit this agent makes must be answered against " +
+        "(right-recipient, intent-matches). The service always asks its own mechanical criteria " +
+        "on top of these, and reports any question it cannot decide as unchecked rather than " +
+        "verified. Configured here because the agent does not write the rubric it is judged by.",
+      default: "",
+    },
   },
   tools: (context) => {
     const scope = parseScopeClasses(context.config?.scope);
+    const criteria = parseCriteria(context.config?.criteria);
     // Minting a write tool and never opening the door for it would hand the
     // model a tool that can only ever refuse. The client asks for the classes
     // it minted, at connect time, with no tool involved — which is the whole
     // shape of A13: the door is opened from outside, before the agent exists.
-    supervisor.setScope([...scope], "construction-time scope of the desktop-control plugin");
+    supervisor.setScope(
+      [...scope],
+      "construction-time scope of the desktop-control plugin",
+      criteria,
+    );
     return Object.fromEntries(
       Object.entries(ALL_TOOLS).filter(([name]) =>
         scope.has(TOOL_OPERATION_CLASS[name] ?? ""),

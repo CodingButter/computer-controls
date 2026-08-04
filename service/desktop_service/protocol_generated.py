@@ -2,14 +2,14 @@
 
 # Generated from protocol/schema.json — do not edit.
 # Run: node scripts/generate-protocol.mjs
-# Protocol version: 1.0   schema sha256: d935fa8ad6624c91
+# Protocol version: 1.0   schema sha256: 8891bb8b28a73331
 
 from __future__ import annotations
 
 from typing import Any, Final
 
 PROTOCOL_VERSION: Final = "1.0"
-SCHEMA_DIGEST: Final = "d935fa8ad6624c91"
+SCHEMA_DIGEST: Final = "8891bb8b28a73331"
 
 #: What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape.
 OPERATION_CLASSES: Final[tuple[str, ...]] = ("observe", "edit", "activate", "submit", "destructive")
@@ -33,7 +33,7 @@ ATTRIBUTIONS: Final[tuple[str, ...]] = ("self", "external", "unattributed")
 WAIT_CONDITIONS: Final[tuple[str, ...]] = ("window-opened", "window-closed", "element-appeared", "element-state-changed", "revision-advanced")
 
 #: The complete domain error vocabulary. Carried in the JSON-RPC error object under data.code.
-ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "CLAIM_EXPIRED", "SUBSCRIPTION_LIMIT_REACHED", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR")
+ERROR_CODES: Final[tuple[str, ...]] = ("APPLICATION_NOT_FOUND", "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "ELEMENT_REFERENCE_STALE", "BACKEND_UNAVAILABLE", "ACTION_NOT_SUPPORTED", "PERMISSION_DENIED", "SESSION_EXPIRED", "ELEMENT_HELD", "CLAIM_EXPIRED", "SUBSCRIPTION_LIMIT_REACHED", "ATTESTATION_FAILED", "ATTESTATION_STALE", "TIMEOUT", "METHOD_NOT_FOUND", "INVALID_PARAMS", "INTERNAL_ERROR")
 
 #: Every method mapped to the operation class it belongs to.
 OPERATION_CLASS: Final[dict[str, str]] = {
@@ -401,6 +401,15 @@ PARAMS_SCHEMA: Final[dict[str, dict[str, Any]]] = {
             },
             "confirm": {
                 "type": "boolean",
+            },
+            "criteria": {
+                "description": "The questions a commit made under this grant must be answered against. Declared here, at the door, because the party being graded does not write the rubric — a worker cannot reach this field, and the service's own mechanical criteria are asked on top of whatever is named here. A name this service cannot decide is still carried and reported as unchecked, so that asking for review is never worse than asking for nothing.",
+                "items": {
+                    "maxLength": 80,
+                    "type": "string",
+                },
+                "maxItems": 20,
+                "type": "array",
             },
             "operationClasses": {
                 "description": "What this client intends to do. Ask for what the task needs and no more: a grant is also a description of the blast radius in the audit log.",
@@ -1362,6 +1371,13 @@ RESULT_SCHEMA: Final[dict[str, dict[str, Any]]] = {
                 },
                 "type": "array",
             },
+            "criteria": {
+                "description": "Every criterion a commit under this grant will be judged against, the mechanical ones included whether or not they were asked for. Returned so a client can tell what review it has actually bought without inferring it from a refusal.",
+                "items": {
+                    "type": "string",
+                },
+                "type": "array",
+            },
             "expiresInSeconds": {
                 "type": "integer",
             },
@@ -2111,6 +2127,8 @@ DEFS: Final[dict[str, dict[str, Any]]] = {
                     "INVALID_PARAMS",
                     "INTERNAL_ERROR",
                     "SUBSCRIPTION_LIMIT_REACHED",
+                    "ATTESTATION_FAILED",
+                    "ATTESTATION_STALE",
                 ],
                 "type": "string",
             },

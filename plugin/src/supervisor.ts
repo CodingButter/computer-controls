@@ -46,6 +46,7 @@ export class DesktopSupervisor {
   #schemaDigest: string | undefined;
   #scope: readonly string[] = [];
   #scopeReason = "";
+  #criteria: readonly string[] = [];
   readonly #sessionName: string;
 
   constructor(sessionName = `mc-${process.pid}`) {
@@ -63,15 +64,26 @@ export class DesktopSupervisor {
    * identity and a new connection is a new identity holding nothing.
    *
    * Observe needs no grant: it is what a fresh connection already has.
+   *
+   * A14: the criteria a commit is judged against ride the same call, for the
+   * same reason the classes do. They are configuration the client reads before
+   * the agent exists, so the party being graded never writes its own rubric —
+   * and there is no tool through which it could.
    */
-  setScope(classes: readonly string[], reason: string): void {
+  setScope(classes: readonly string[], reason: string, criteria: readonly string[] = []): void {
     this.#scope = classes.filter((klass) => klass !== "observe");
     this.#scopeReason = reason;
+    this.#criteria = criteria.filter((name) => name.length > 0);
   }
 
   /** The classes this client will ask for on connect. Empty means observe-only. */
   get scope(): readonly string[] {
     return this.#scope;
+  }
+
+  /** The criteria this client declares its commits should be judged against. */
+  get criteria(): readonly string[] {
+    return this.#criteria;
   }
 
   /**
@@ -89,6 +101,7 @@ export class DesktopSupervisor {
         clientId: this.#sessionName,
         operationClasses: [...this.#scope],
         reason: this.#scopeReason,
+        ...(this.#criteria.length > 0 ? { criteria: [...this.#criteria] } : {}),
       });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
