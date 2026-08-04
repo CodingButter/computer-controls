@@ -11,15 +11,16 @@
  */
 
 /** A provider as a person picks it. */
-export type ProviderId = "anthropic" | "openai";
+export type ProviderId = "anthropic" | "openai" | "google";
 
 /**
  * How a provider's OAuth login is driven.
  *
  * `paste-code`: we hand out a URL, the human comes back with a code.
  * `device-code`: we hand out a URL and a short code, then poll until approved.
+ * `api-key`: there is no OAuth flow to drive; the person pastes a key.
  */
-export type LoginKind = "paste-code" | "device-code";
+export type LoginKind = "paste-code" | "device-code" | "api-key";
 
 export interface ProviderDescriptor {
   readonly id: ProviderId;
@@ -47,9 +48,26 @@ export const PROVIDERS: Readonly<Record<ProviderId, ProviderDescriptor>> = {
     loginKind: "device-code",
     apiKeyEnvVar: "OPENAI_API_KEY",
   },
+  // Google is the orb's credential, and it arrives by paste only. The SDK ships
+  // no Google login flow to drive, and inventing one here would mean owning an
+  // OAuth client this project does not have — whereas the API-key path already
+  // works end to end through the same store. `loginKind: "api-key"` says that
+  // plainly rather than leaving a start button that cannot start anything.
+  google: {
+    id: "google",
+    name: "Google",
+    authProviderId: "google",
+    loginKind: "api-key",
+    apiKeyEnvVar: "GOOGLE_GENERATIVE_AI_API_KEY",
+  },
 };
 
-export const PROVIDER_IDS: readonly ProviderId[] = ["anthropic", "openai"];
+export const PROVIDER_IDS: readonly ProviderId[] = ["anthropic", "openai", "google"];
+
+/** Providers whose sign-in button drives an OAuth flow rather than a paste field. */
+export function hasLoginFlow(provider: ProviderId): boolean {
+  return PROVIDERS[provider].loginKind !== "api-key";
+}
 
 /**
  * The key a provider's credential is filed under.

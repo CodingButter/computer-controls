@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>computer controls</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font: 15px/1.5 ui-sans-serif, system-ui, sans-serif;
+        background: #08090d;
+        color: #e8e8ef;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      /* The page is one presence on dark ground. Everything else is secondary
+         by construction: the log is a drawer that is closed until asked for. */
+      #stage {
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 32px;
+      }
+
+      #orb {
+        width: 180px;
+        height: 180px;
+        border-radius: 50%;
+        border: 0;
+        padding: 0;
+        cursor: pointer;
+        background: radial-gradient(circle at 35% 30%, #3d4a8f, #1b1f3a 70%);
+        box-shadow: 0 0 60px rgba(77, 91, 216, 0.25);
+        transition: box-shadow 400ms ease, transform 400ms ease;
+      }
+      #orb:focus-visible { outline: 2px solid #6f7de8; outline-offset: 8px; }
+
+      /* State is motion, not a label. Each state has its own movement, so the
+         thing can be read across a room without any text being legible. */
+      #orb[data-state="idle"] { animation: breathe 6s ease-in-out infinite; }
+      #orb[data-state="listening"] {
+        background: radial-gradient(circle at 35% 30%, #2f8f6a, #11302a 70%);
+        box-shadow: 0 0 80px rgba(47, 143, 106, 0.45);
+        animation: pulse 1.6s ease-in-out infinite;
+      }
+      #orb[data-state="thinking"] {
+        background: radial-gradient(circle at 35% 30%, #8f7a2f, #302a11 70%);
+        box-shadow: 0 0 70px rgba(143, 122, 47, 0.4);
+        animation: churn 2.4s linear infinite;
+      }
+      #orb[data-state="speaking"] {
+        background: radial-gradient(circle at 35% 30%, #5b6de8, #1b1f3a 70%);
+        box-shadow: 0 0 90px rgba(91, 109, 232, 0.5);
+        animation: speak 900ms ease-in-out infinite;
+      }
+      #orb[data-off="true"] { opacity: 0.35; cursor: not-allowed; animation: none; }
+
+      @keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+      @keyframes pulse { 0%, 100% { transform: scale(1.02); } 50% { transform: scale(1.1); } }
+      @keyframes churn { from { transform: rotate(0deg) scale(1.02); } to { transform: rotate(360deg) scale(1.02); } }
+      @keyframes speak { 0%, 100% { transform: scale(1.05); } 50% { transform: scale(1.14); } }
+      @media (prefers-reduced-motion: reduce) {
+        #orb { animation: none !important; }
+      }
+
+      #caption {
+        min-height: 3em;
+        max-width: 46ch;
+        text-align: center;
+        color: #b9bbd4;
+        font-size: 17px;
+      }
+      #reason { max-width: 44ch; text-align: center; color: #ff9b9b; font-size: 14px; }
+
+      /* The chat log, demoted to a drawer. */
+      #drawer {
+        position: fixed;
+        inset: 0 0 0 auto;
+        width: min(420px, 92vw);
+        background: #101119;
+        border-left: 1px solid #232535;
+        transform: translateX(100%);
+        transition: transform 260ms ease;
+        display: flex;
+        flex-direction: column;
+      }
+      #drawer[data-open="true"] { transform: translateX(0); }
+      #log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+      .turn { max-width: 100%; white-space: pre-wrap; font-size: 14px; }
+      .turn.you { align-self: flex-end; background: #23263a; padding: 8px 12px; border-radius: 10px; }
+      .turn.agent { align-self: flex-start; color: #cfd1e6; }
+
+      #drawer-toggle {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        padding: 8px 14px;
+        border-radius: 8px;
+        border: 1px solid #2b2e44;
+        background: #171926;
+        color: #b9bbd4;
+        cursor: pointer;
+      }
+      form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #232535; }
+      input {
+        flex: 1;
+        padding: 10px 12px;
+        border-radius: 8px;
+        border: 1px solid #333650;
+        background: #1a1c28;
+        color: inherit;
+      }
+      button[type="submit"] { padding: 10px 16px; border-radius: 8px; border: 0; background: #4d5bd8; color: white; }
+    </style>
+  </head>
+  <body>
+    <main id="stage">
+      <button id="orb" data-state="idle" aria-label="Toggle listening"></button>
+      <p id="caption" aria-live="polite"></p>
+      <p id="reason" hidden></p>
+    </main>
+
+    <button id="drawer-toggle" type="button" aria-expanded="false">Log</button>
+    <aside id="drawer" data-open="false" aria-label="Conversation">
+      <div id="log"></div>
+      <form id="composer">
+        <input id="message" autocomplete="off" placeholder="Type instead…" />
+        <button type="submit">Send</button>
+      </form>
+    </aside>
+
+    <script type="module" src="/orb.js"></script>
+  </body>
+</html>

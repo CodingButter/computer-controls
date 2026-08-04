@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { AuthStorage } from "@mastra/code-sdk/auth/storage";
 import type { OAuthCredentials } from "@mastra/code-sdk/auth/types";
 
-import { createProviderAuth, providerAuthApiRoutes, type ProviderAuth } from "./index.ts";
+import { createProviderAuth, providerAuthApiRoutes, PROVIDER_IDS, type ProviderAuth } from "./index.ts";
 import type { DeviceLoginPending } from "./login-sessions.ts";
 import type { DevicePollResult, ProviderLoginFlows } from "./flows.ts";
 
@@ -495,11 +495,15 @@ describe("disconnecting", () => {
 });
 
 describe("what the settings page is told", () => {
-  it("lists both providers, how each signs in, and whether it is connected", async () => {
+  it("lists every provider, how each signs in, and whether it is connected", async () => {
     const before = await browser.get("/api/oauth/flows");
     expect(before.body.providers).toEqual([
       { provider: "anthropic", name: "Anthropic", connected: false, loginKind: "paste-code" },
       { provider: "openai", name: "OpenAI", connected: false, loginKind: "device-code" },
+      // Google is the orb's credential and arrives by paste: there is no SDK
+      // flow to drive, and the settings page renders a key field rather than a
+      // sign-in button because of this value.
+      { provider: "google", name: "Google", connected: false, loginKind: "api-key" },
     ]);
 
     const started = await browser.post("/api/oauth/start", { provider: "anthropic" });
@@ -561,7 +565,7 @@ describe("mounting into a Mastra server", () => {
     const body = (await response.json()) as { providers: unknown[] };
 
     expect(response.status).toBe(200);
-    expect(body.providers).toHaveLength(2);
+    expect(body.providers).toHaveLength(PROVIDER_IDS.length);
   });
 
   it("offers the whole surface as route descriptors", () => {
