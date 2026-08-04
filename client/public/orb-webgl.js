@@ -34,11 +34,15 @@ export function levelToDisplacement(level) {
  * something the hub never said.
  */
 export function stateToParams(state) {
+  // `energy` is the one number the whole scene breathes with: it scales how
+  // fast the wisps churn, how fast the smoke swirls, and how fast the sphere
+  // turns. Idle is barely moving; listening stirs; thinking runs hot;
+  // speaking sits between, because its life comes from the level pulse.
   const params = {
-    idle: { noiseSpeed: 0.3, noiseScale: 1.2, pulseFreq: 0.0 },
-    listening: { noiseSpeed: 0.8, noiseScale: 1.8, pulseFreq: 1.5 },
-    thinking: { noiseSpeed: 2.0, noiseScale: 2.5, pulseFreq: 0.0 },
-    speaking: { noiseSpeed: 0.5, noiseScale: 1.0, pulseFreq: 3.0 },
+    idle: { noiseSpeed: 0.25, noiseScale: 1.2, pulseFreq: 0.0, energy: 0.3 },
+    listening: { noiseSpeed: 0.9, noiseScale: 1.8, pulseFreq: 1.5, energy: 1.0 },
+    thinking: { noiseSpeed: 1.7, noiseScale: 2.4, pulseFreq: 0.0, energy: 1.6 },
+    speaking: { noiseSpeed: 0.6, noiseScale: 1.1, pulseFreq: 3.0, energy: 1.2 },
   };
   return params[state] ?? params.idle;
 }
@@ -156,10 +160,14 @@ float snoise(vec3 v) {
 }
 `;
 
+// uFlowTime is time-already-multiplied-by-energy, accumulated on the CPU each
+// frame. Speed changes ease through the accumulator instead of multiplying an
+// absolute clock, so a state change bends the motion rather than snapping it —
+// uTime * newSpeed would teleport every noise field to a different phase.
 const VERTEX_SHADER = /* glsl */ `
 uniform float uTime;
+uniform float uFlowTime;
 uniform float uLevel;
-uniform float uNoiseSpeed;
 uniform float uNoiseScale;
 uniform float uPulseFreq;
 
@@ -170,7 +178,7 @@ varying vec3 vPos;
 ${SIMPLEX_NOISE}
 
 void main() {
-  float n = snoise(position * uNoiseScale + vec3(uTime * uNoiseSpeed));
+  float n = snoise(position * uNoiseScale + vec3(uFlowTime));
   float pulse = sin(uTime * uPulseFreq) * 0.5 + 0.5;
   float displacement = n * uLevel + pulse * uLevel * 0.3;
 
@@ -194,8 +202,7 @@ const FRAGMENT_SHADER = /* glsl */ `
 uniform vec3 uColor;
 uniform float uFresnelPower;
 uniform float uLevel;
-uniform float uTime;
-uniform float uNoiseSpeed;
+uniform float uFlowTime;
 
 varying vec3 vNormal;
 varying vec3 vViewPos;
@@ -208,7 +215,7 @@ void main() {
   float facing = abs(dot(vNormal, viewDir));
   float fresnel = pow(1.0 - facing, uFresnelPower);
 
-  float t = uTime * (0.25 + uNoiseSpeed * 0.2);
+  float t = uFlowTime * 0.3;
   float n1 = snoise(vPos * 2.2 + vec3(t, -t * 0.7, t * 0.4));
   float n2 = snoise(vPos * 3.1 + vec3(-t * 0.6, t, t * 0.8) + 11.0);
   float n3 = snoise(vPos * 1.6 + vec3(t * 0.5, t * 0.3, -t) + 47.0);
@@ -256,7 +263,7 @@ void main() {
 `;
 
 const SMOKE_FRAGMENT_SHADER = /* glsl */ `
-uniform float uTime;
+uniform float uFlowTime;
 uniform vec3 uColor;
 
 varying vec3 vNormal;
@@ -271,13 +278,14 @@ void main() {
 
   // Swirl: the sampling space itself twists around the vertical axis, with
   // the twist angle varying by height, so the haze visibly churns rather
-  // than merely drifting.
-  float ang = uTime * 0.22 + vPos.y * 1.8;
+  // than merely drifting. Flow time carries the state's energy, so the churn
+  // slows to a drift in idle and races while the orb is thinking.
+  float ang = uFlowTime * 0.4 + vPos.y * 1.8;
   mat2 rot = mat2(cos(ang), -sin(ang), sin(ang), cos(ang));
   vec3 p = vPos;
   p.xz = rot * p.xz;
 
-  float t = uTime * 0.18;
+  float t = uFlowTime * 0.32;
   float s1 = snoise(p * 1.3 + vec3(t, t * 0.6, -t * 0.8));
   float s2 = snoise(p * 2.6 - vec3(t * 0.7, -t, t * 0.5) + 23.0);
   float smoke = smoothstep(-0.25, 0.75, s1 * 0.7 + s2 * 0.5);
@@ -324,8 +332,8 @@ export async function mountWebGlOrb({ canvas, reducedMotion = false }) {
   const params = stateToParams("idle");
   const uniforms = {
     uTime: { value: 0 },
+    uFlowTime: { value: 0 },
     uLevel: { value: levelToDisplacement(0) },
-    uNoiseSpeed: { value: params.noiseSpeed * motionScale },
     uNoiseScale: { value: params.noiseScale },
     uPulseFreq: { value: params.pulseFreq * motionScale },
     uColor: { value: new THREE.Vector3(...moodToColor("neutral")) },
@@ -348,7 +356,7 @@ export async function mountWebGlOrb({ canvas, reducedMotion = false }) {
   // follows the conversation the way the sphere does.
   const smokeGeometry = new THREE.IcosahedronGeometry(1.55, 4);
   const smokeMaterial = new THREE.ShaderMaterial({
-    uniforms: { uTime: uniforms.uTime, uColor: uniforms.uColor },
+    uniforms: { uFlowTime: uniforms.uFlowTime, uColor: uniforms.uColor },
     vertexShader: SMOKE_VERTEX_SHADER,
     fragmentShader: SMOKE_FRAGMENT_SHADER,
     transparent: true,
@@ -364,18 +372,25 @@ export async function mountWebGlOrb({ canvas, reducedMotion = false }) {
 
   let moodTarget = [...moodToColor("neutral")];
   let lastTime = 0;
+  // Eased-toward targets: energy follows the state, displayLevel follows the
+  // voice. Both smooth on the CPU so a state flip or a loud syllable bends
+  // the motion instead of snapping it.
+  let energyTarget = params.energy;
+  let energy = params.energy;
+  let rawLevel = 0;
+  let displayLevel = 0;
 
   /** @param {string} state */
   function setState(state) {
     const p = stateToParams(state);
-    uniforms.uNoiseSpeed.value = p.noiseSpeed * motionScale;
+    energyTarget = p.energy;
     uniforms.uNoiseScale.value = p.noiseScale;
     uniforms.uPulseFreq.value = p.pulseFreq * motionScale;
   }
 
   /** @param {number} level */
   function setLevel(level) {
-    uniforms.uLevel.value = levelToDisplacement(level) * motionScale;
+    rawLevel = Math.max(0, Math.min(1, level));
   }
 
   /** @param {string} mood */
@@ -389,16 +404,32 @@ export async function mountWebGlOrb({ canvas, reducedMotion = false }) {
     lastTime = now;
     uniforms.uTime.value += dt;
 
+    // Energy eases toward the state's target, and the voice adds on top —
+    // a loud syllable stirs everything, not just the surface.
+    energy += (energyTarget - energy) * Math.min(1, dt * 4);
+    // Fast attack, slow release: the swell jumps with a syllable and relaxes
+    // after it, which is what breathing looks like and averaging does not.
+    const chase = rawLevel > displayLevel ? 18 : 5;
+    displayLevel += (rawLevel - displayLevel) * Math.min(1, dt * chase);
+
+    uniforms.uFlowTime.value += dt * (0.25 + energy * 0.85 + displayLevel * 0.9) * motionScale;
+    uniforms.uLevel.value = levelToDisplacement(displayLevel) * motionScale;
+
+    // The whole body swells with the voice, smoke a beat behind the sphere.
+    mesh.scale.setScalar(1 + displayLevel * 0.1 * motionScale);
+    smoke.scale.setScalar(1 + displayLevel * 0.06 * motionScale);
+
     // Tween mood color toward target — smooth transitions, never a hard cut.
     const c = uniforms.uColor.value;
     c.x += (moodTarget[0] - c.x) * 0.05;
     c.y += (moodTarget[1] - c.y) * 0.05;
     c.z += (moodTarget[2] - c.z) * 0.05;
 
-    mesh.rotation.y += dt * 0.1 * motionScale;
+    // Rotation rides the same energy: a lazy idle turn, a quick thinking one.
+    mesh.rotation.y += dt * (0.05 + energy * 0.13) * motionScale;
     // The smoke turns against the sphere, so the two layers visibly slide.
-    smoke.rotation.y -= dt * 0.12 * motionScale;
-    smoke.rotation.z += dt * 0.04 * motionScale;
+    smoke.rotation.y -= dt * (0.06 + energy * 0.15) * motionScale;
+    smoke.rotation.z += dt * (0.02 + energy * 0.05) * motionScale;
 
     renderer.render(scene, camera);
   }
