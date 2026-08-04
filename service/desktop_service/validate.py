@@ -103,18 +103,6 @@ def _resolve(node: dict[str, Any]) -> dict[str, Any]:
     return DEFS[ref[len("#/$defs/") :]]
 
 
-#: How much of a rejected value to quote back in the message. Enough to
-#: recognise a typo, not enough to matter: a rejection is the one place
-#: caller-supplied text reaches the audit log, and that log's whole promise is
-#: that it records what was done and never what was said.
-_QUOTE_LIMIT = 40
-
-
-def _quote(value: Any) -> str:
-    text = repr(value)
-    return text if len(text) <= _QUOTE_LIMIT else f"{text[:_QUOTE_LIMIT]}… ({len(text)} characters)"
-
-
 def _check(value: Any, node: dict[str, Any], path: str, problems: list[str]) -> None:
     node = _resolve(node)
 
@@ -140,12 +128,12 @@ def _check(value: Any, node: dict[str, Any], path: str, problems: list[str]) -> 
         return
 
     if "enum" in node and value not in node["enum"]:
-        problems.append(f"{path} must be one of {node['enum']}, got {_quote(value)}")
+        problems.append(f"{path} must be one of {node['enum']}, got {type(value).__name__}")
         return
 
     pattern = node.get("pattern")
     if pattern is not None and isinstance(value, str) and not re.search(pattern, value):
-        problems.append(f"{path} must match {pattern}, got {_quote(value)}")
+        problems.append(f"{path} must match {pattern}, got {type(value).__name__}")
         return
 
     longest = node.get("maxLength")

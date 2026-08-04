@@ -111,7 +111,7 @@ def egress_value(
     )
 
 
-@dataclass
+@dataclass(frozen=True)
 class SemanticElement:
     """One element, as the agent sees it.
 
@@ -155,22 +155,22 @@ class SemanticElement:
         these that skipped the policy — which is the property segment 3's
         redaction guarantee actually needs.
         """
-        self.name = egress_value(
+        object.__setattr__(self, "name", egress_value(
             self.name,
             field=NAME,
             role=self.role,
             states=self.states,
             element_id=self.id,
-        )
-        self.value = egress_value(
+        ))
+        object.__setattr__(self, "value", egress_value(
             self.value,
             field=VALUE,
             role=self.role,
             states=self.states,
             element_id=self.id,
-        )
+        ))
         if self.extra:
-            self.extra = self._egress_extra(self.extra)
+            object.__setattr__(self, "extra", self._egress_extra(self.extra))
 
     def _egress_extra(self, value: Any) -> Any:
         """Backend surplus is text too, so it leaves by the same door.
