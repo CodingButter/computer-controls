@@ -126,9 +126,11 @@ work and is not implemented here.
 ## Tests
 
 ```
-.venv/bin/python -m pytest -q              # everything this machine can run
+.venv/bin/python -m pytest -q              # everything this machine can run unattended
 .venv/bin/python -m pytest -q --no-live    # only the tests that need no desktop
 .venv/bin/python -m pytest -q --live-only  # only the tests that drive a real one
+
+DESKTOP_HUMAN_PRESENT=1 .venv/bin/python -m pytest -q   # plus the ones needing a person
 ```
 
 The suite is two suites. Most of it is arithmetic — a protocol, a registry, a
@@ -141,6 +143,14 @@ so, rather than failing in a way that reads like a regression. The display is
 probed by connecting to it, never by reading `DISPLAY`, because a service
 started from an SSH shell inherits no `DISPLAY` and drives a desktop perfectly
 well once it has found one.
+
+A test that needs a *person* — not just a session, but somebody typing into it —
+carries the `human` marker and is a third lane. It is deselected by default even
+here, where a display answers, because the live lane runs unattended and a screen
+is no evidence that anyone is in front of it; the skip line says it needs a person
+at the keyboard. `DESKTOP_HUMAN_PRESENT` opts in, read once at collection and read
+as set or not set, so any value means present. Put it inline on the command that
+runs the tests and never in a shell rc, where it would be on silently forever.
 
 The live tests assert invariants — an application has an id, a window title is
 stable across two listings — and never a fixed count. The count was 21 during

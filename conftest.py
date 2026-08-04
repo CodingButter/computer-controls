@@ -17,6 +17,13 @@ Nothing here is skipped for convenience. `--live-only` exists for the opposite
 reason: on a real desktop the interesting failures are the thirty-eight, and
 being able to run only those is what makes a live proof cheap enough to repeat.
 
+A desktop is not a person, and the two are deliberately not inferred from one
+another: the live lane runs unattended at four in the morning on a machine with
+a display and nobody in front of it. So a test that needs a hand on the keyboard
+is a third lane of its own — the ``human`` marker — deselected everywhere by
+default, including here, and opted into only by setting
+``DESKTOP_HUMAN_PRESENT`` on the invocation itself.
+
 The gate sits at the repository root rather than inside ``service/`` because the
 service is no longer the only thing with tests. An option registered in a
 subdirectory is not registered at all until pytest has already parsed the
@@ -27,7 +34,9 @@ answers for every suite beneath it.
 
 from __future__ import annotations
 
+import os
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -45,11 +54,22 @@ for package_root in (ROOT / "service", ROOT / "clients" / "recorder"):
 #: on a reader noticing the file name.
 LIVE_SUFFIX = "_live"
 
+#: The one way to say a person is sitting here. An environment variable rather
+#: than a flag because the pytest command line is not always the thing being
+#: typed — an IDE runner, a wrapper script and a harness all own their own
+#: arguments, and all of them inherit an environment.
+HUMAN_PRESENT_ENV = "DESKTOP_HUMAN_PRESENT"
+
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         "live: drives a real desktop session. Deselected when no display is reachable.",
+    )
+    config.addinivalue_line(
+        "markers",
+        "human: needs a person at the keyboard. Deselected unless "
+        f"{HUMAN_PRESENT_ENV} is set, display or no display.",
     )
 
 
@@ -76,15 +96,67 @@ def pytest_collection_modifyitems(
         if item.module.__name__.endswith(LIVE_SUFFIX):
             item.add_marker(pytest.mark.live)
 
-    reason = _why_live_is_unavailable(config)
+    live_reason = _why_live_is_unavailable(config)
+    human_reason = _why_a_human_is_absent(os.environ)
     live_only = config.getoption("--live-only")
 
     for item in items:
         is_live = item.get_closest_marker("live") is not None
-        if is_live and reason:
+        is_human = item.get_closest_marker("human") is not None
+
+        reason = _first_reason_that_applies(
+            is_live=is_live,
+            is_human=is_human,
+            live_reason=live_reason,
+            human_reason=human_reason,
+        )
+        if reason:
             item.add_marker(pytest.mark.skip(reason=reason))
         elif live_only and not is_live:
             item.add_marker(pytest.mark.skip(reason="deselected by --live-only"))
+
+
+def _first_reason_that_applies(
+    *, is_live: bool, is_human: bool, live_reason: str, human_reason: str
+) -> str:
+    """One skip line for a test that may be missing both a desktop and a person.
+
+    The order is fixed rather than incidental: the desktop is asked about first,
+    because it is the prerequisite. Telling somebody in a container to come sit
+    at the keyboard is advice they cannot act on, while `no desktop session is
+    reachable from here` is the thing they would have to fix first anyway. On a
+    machine that has a display, the answer falls through to the person, which is
+    where it is actually useful.
+    """
+    if is_live and live_reason:
+        return live_reason
+    if is_human and human_reason:
+        return human_reason
+    return ""
+
+
+def _why_a_human_is_absent(environ: Mapping[str, str]) -> str:
+    """The reason nobody is at the keyboard, or an empty string.
+
+    Read from the environment exactly once per run, at collection time, and read
+    as *set or not set*. Any value counts as present — somebody who exports this
+    has said what they meant, and answering `DESKTOP_HUMAN_PRESENT=0` with a
+    truthiness table would only be a second thing to remember. An empty value is
+    unset, because that is what the shell leaves behind when a variable is
+    cleared rather than removed.
+
+    Note the asymmetry with the display, which is probed by connecting: presence
+    is not observable. Nothing this process can measure distinguishes a person
+    watching a screen from a screen nobody is watching, so the only honest source
+    is somebody saying so, on the invocation, that run.
+    """
+    if environ.get(HUMAN_PRESENT_ENV, ""):
+        return ""
+
+    return (
+        "needs a person at the keyboard: rerun with "
+        f"{HUMAN_PRESENT_ENV}=1 set on the command line"
+    )
 
 
 def _why_live_is_unavailable(config: pytest.Config) -> str:
