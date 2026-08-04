@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Product Proposal — A Desktop Agent Platform on Mastra Code</title>
+<title>Product Proposal: A Desktop Agent Platform on Mastra Code</title>
 <style>
   :root {
     --ink: #17181c;
@@ -66,82 +66,82 @@
 
 <header>
   <div class="kicker">Product proposal &nbsp;·&nbsp; internal</div>
-  <h1>A desktop agent platform for everyone who isn't a programmer &mdash; built on Mastra&nbsp;Code</h1>
-  <p class="oneliner">Factory proved that Mastra Code can carry a vertical product for developers. This is the second proof point &mdash; the same architecture, aimed at the far larger market of people who want an agent working their computer <em>as them</em>: small businesses, sales reps, operators, power users.</p>
+  <h1>A desktop agent platform for everyone who isn't a programmer, built on Mastra&nbsp;Code</h1>
+  <p class="oneliner">Factory proved that Mastra Code can carry a vertical product for developers. This is the second proof point: the same architecture, aimed at the far larger market of people who want an agent working their computer <em>as them</em>: small businesses, sales reps, operators, power users.</p>
   <div class="meta">Prepared by Jamie (CodingButter) &nbsp;·&nbsp; August 2026 &nbsp;·&nbsp; Working title: <strong>Computer Controls</strong></div>
 </header>
 
 <h2>The opportunity</h2>
-<p>Every agent product on the market today either lives in a browser tab, or drives a desktop by screenshots and coordinates &mdash; blind clicking, no consent model, no record of what was done. Meanwhile the people who would pay most for a working assistant &mdash; a sales rep clearing a CRM backlog, a small-business owner answering invoices, an operator living in three desktop apps &mdash; are underserved enough that a hardware dongle promising a "second user" just raised venture funding. The demand is proven. The approach on offer is still blind.</p>
-<p>We have spent the last month building the missing layer: a <strong>semantic desktop control service</strong> that lets an agent see and operate real applications through the accessibility tree &mdash; by meaning, not pixels &mdash; behind a consent model that makes "acting as you" provable and bounded.</p>
+<p>Every agent product on the market today either lives in a browser tab, or drives a desktop by screenshots and coordinates: blind clicking, no consent model, no record of what was done. Meanwhile the people who would pay most for a working assistant (a sales rep clearing a CRM backlog, a small-business owner answering invoices, an operator living in three desktop apps) are underserved enough that a hardware dongle promising a "second user" just raised venture funding. The demand is proven. The approach on offer is still blind.</p>
+<p>We have spent the last month building the missing layer: a <strong>semantic desktop control service</strong> that lets an agent see and operate real applications through the accessibility tree, by meaning rather than pixels, behind a consent model that makes "acting as you" provable and bounded.</p>
 
 <div class="pull">The pitch to a business owner is not what the agent can do. It is what the agent provably cannot.</div>
 
-<h2>The pattern is already proven &mdash; by us, on your stack</h2>
-<p>Factory is a Node service that drives headless Mastra Code sessions, with a web board on top. This product is the same skeleton with a different day job: sessions that operate the desktop instead of a repository. Nothing about the architecture is speculative &mdash; <strong>this product was built by Factory itself.</strong></p>
+<h2>The pattern is already proven, by us, on your stack</h2>
+<p>Factory is a Node service that drives headless Mastra Code sessions, with a web board on top. This product is the same skeleton with a different day job: sessions that operate the desktop instead of a repository. Nothing about the architecture is speculative. <strong>This product was built by Factory itself.</strong></p>
 <div class="stats">
   <div class="stat"><b>38</b><span>merged PRs, agent-built</span></div>
   <div class="stat"><b>633</b><span>service tests passing</span></div>
   <div class="stat"><b>33</b><span>protocol methods</span></div>
   <div class="stat"><b>27</b><span>live Factory sessions</span></div>
 </div>
-<p style="font-size:.84rem;color:var(--muted)">Every pull request was adversarially gated: mutation-tested, type-checked, and live-proven on a real desktop before merge. The proof artifacts are committed to the repository &mdash; including the failures.</p>
+<p style="font-size:.84rem;color:var(--muted)">Every pull request was adversarially gated: mutation-tested, type-checked, and live-proven on a real desktop before merge. The proof artifacts are committed to the repository, including the failures.</p>
 
 <h2>What ships</h2>
-<p>One <code>.deb</code>, the Plex model: install it, and your machine gains a resident assistant reachable from any browser &mdash; including your phone, paired by QR code over your own network. No cloud account required to function; the daemon deliberately owns no relay, no tunnel, no identity provider.</p>
+<p>One <code>.deb</code>, the Plex model: install it, and your machine gains a resident assistant reachable from any browser, including your phone, paired by QR code over your own network. No cloud account required to function; the daemon deliberately owns no relay, no tunnel, no identity provider.</p>
 <div class="stack">
-  <div class="layer hub"><b>Dashboard &amp; first client</b><span>Local web app (PWA) &mdash; setup, settings, model packs, the audit feed, QR pairing</span></div>
-  <div class="layer"><b>Headless Mastra Code runtime</b><span>Sessions, model packs, memory, plugins &mdash; the proven Factory pattern</span></div>
-  <div class="layer"><b>Desktop control daemon</b><span>Semantic desktop access behind the consent ceiling &mdash; already shipped &amp; tested</span></div>
+  <div class="layer hub"><b>Dashboard &amp; first client</b><span>Local web app (PWA): setup, settings, model packs, the audit feed, QR pairing</span></div>
+  <div class="layer"><b>Headless Mastra Code runtime</b><span>Sessions, model packs, memory, plugins: the proven Factory pattern</span></div>
+  <div class="layer"><b>Desktop control daemon</b><span>Semantic desktop access behind the consent ceiling; already shipped &amp; tested</span></div>
 </div>
-<p>The desktop layer also ships <strong>standalone as a Mastra Code plugin</strong> &mdash; so every existing Mastra Code user gains desktop control, and the full product is the packaged experience of the same components.</p>
+<p>The desktop layer also ships <strong>standalone as a Mastra Code plugin</strong>, so every existing Mastra Code user gains desktop control, and the full product is the packaged experience of the same components.</p>
 
 <h2>Three depths, one product</h2>
 <table>
   <tr><th>Mode</th><th>Who</th><th>What they see</th></tr>
   <tr><td>Easy</td><td>Business owners, reps</td><td>Pick an assistant persona; scopes, models and safety are preset. The centerpiece is the <strong>feed</strong>: everything the agent did in your name, and the approval trail for anything that left the machine.</td></tr>
   <tr><td>Standard</td><td>Power users</td><td>Own API keys, local models, per-application permissions.</td></tr>
-  <tr><td>Advanced</td><td>Builders</td><td>Custom instructions, new agents, element-level grants, review criteria &mdash; full control.</td></tr>
+  <tr><td>Advanced</td><td>Builders</td><td>Custom instructions, new agents, element-level grants, review criteria: full control.</td></tr>
 </table>
-<p style="font-size:.84rem;color:var(--muted)">The modes are lenses over one object model &mdash; the scopes, grants and model packs already implemented &mdash; never three separate products. A user who grows out of Easy keeps their configuration.</p>
+<p style="font-size:.84rem;color:var(--muted)">The modes are lenses over one object model (the scopes, grants and model packs already implemented), never three separate products. A user who grows out of Easy keeps their configuration.</p>
 
 <div class="pagebreak"></div>
 
 <h2>The security layer nobody else has productized</h2>
 <table>
   <tr><th>Guarantee</th><th>Mechanism (shipped &amp; tested)</th></tr>
-  <tr><td>Bounded by construction</td><td>Tools outside the granted scope do not exist to the model &mdash; no prompt can invoke a tool the agent was never handed.</td></tr>
+  <tr><td>Bounded by construction</td><td>Tools outside the granted scope do not exist to the model; no prompt can invoke a tool the agent was never handed.</td></tr>
   <tr><td>The person outranks the agent</td><td>Presence detection: a human touching the machine takes any field back mid-word, and the agent cannot re-take it.</td></tr>
   <tr><td>Nothing leaves unapproved</td><td>A send gate: composing is not sending. Committing anything out of the machine requires a service-side attestation the agent cannot forge, judged against criteria the agent cannot author.</td></tr>
-  <tr><td>Provable record</td><td>An audit log of every action &mdash; who, where, what class, which argument won &mdash; that never contains what was read or typed.</td></tr>
+  <tr><td>Provable record</td><td>An audit log of every action (who, where, what class, which argument won) that never contains what was read or typed.</td></tr>
   <tr><td>Secrets stay secret</td><td>Redaction at egress; password fields are unreadable by design, even to the proof system.</td></tr>
-  <tr><td>Credentials are used, never known</td><td>The write-side twin of redaction <em>(designed; the read side above is shipped)</em>: a local credential vault in the dashboard. The model references a secret by name; the daemon injects the value into the field locally. Credentials never enter model context, never appear in the audit log, and never leave the machine &mdash; the agent logs in as you without ever possessing your password.</td></tr>
+  <tr><td>Credentials are used, never known</td><td>The write-side twin of redaction <em>(designed; the read side above is shipped)</em>: a local credential vault in the dashboard. The model references a secret by name; the daemon injects the value into the field locally. Credentials never enter model context, never appear in the audit log, and never leave the machine. The agent logs in as you without ever possessing your password.</td></tr>
 </table>
 
-<h2>The market has already voted &mdash; the competition just can't see</h2>
-<p><strong>Violoop</strong> ("give your computer a second user") is a venture-funded hardware dongle &mdash; HDMI capture in, USB keyboard out, an 8B vision model in between &mdash; that drives any PC by reading pixels and emitting keystrokes, with a phone app to approve risky actions. A funded competitor selling the same promise is the strongest market validation we could ask for. It is also, architecturally, the thing our opportunity section indicts:</p>
+<h2>The market has already voted. The competition just can't see</h2>
+<p><strong>Violoop</strong> ("give your computer a second user") is a venture-funded hardware dongle (HDMI capture in, USB keyboard out, an 8B vision model in between) that drives any PC by reading pixels and emitting keystrokes, with a phone app to approve risky actions. A funded competitor selling the same promise is the strongest market validation we could ask for. It is also, architecturally, the thing our opportunity section indicts:</p>
 <table>
   <tr><th></th><th>Violoop (hardware, pixels)</th><th>This product (software, semantics)</th></tr>
-  <tr><td>How it sees</td><td>Screenshots through an HDMI cable; a vision model guesses what is on screen.</td><td>The accessibility tree: real elements with real roles, states and values &mdash; the same truth a screen reader gets.</td></tr>
-  <tr><td>How it acts</td><td>A fake USB keyboard typing at whatever has focus &mdash; blind by construction.</td><td>Addressed, verified actions on named elements; every write is read back and proven, or reported as a failure.</td></tr>
-  <tr><td>How it's bounded</td><td>Approval prompts on actions its model classifies as risky &mdash; the judge is the same model being judged.</td><td>Bounded by construction: out-of-scope tools don't exist to the model, sending sits behind a service-side attestation the agent cannot forge.</td></tr>
-  <tr><td>What it remembers</td><td>Watches everything on screen, always &mdash; the audit trail is your screen itself.</td><td>A semantic audit log of every action that structurally never contains what was read or typed.</td></tr>
-  <tr><td>What it costs to ship</td><td>A hardware BOM, a supply chain, one device per computer.</td><td>An apt install &mdash; and a fleet of them for a small business is a config file, not a purchase order.</td></tr>
-  <tr><td>Who gets the desk</td><td>It <em>is</em> the keyboard and mouse &mdash; while it works, you can't. "Lock the screen and walk away" isn't a feature; it's the requirement.</td><td>Semantic actions land in unfocused windows &mdash; the agent works in the background while you keep typing. Focus-stealing is a named last-resort tier that announces itself and yields mid-word the moment you touch the machine.</td></tr>
-  <tr><td>What brain it runs</td><td>One 8B model soldered to a dongle &mdash; frozen at the hardware revision, sub-par the day it ships.</td><td>Model packs: your favorite provider, your API keys, or a local model &mdash; and next month's better brain is a dropdown, not a new device.</td></tr>
-  <tr><td>What it grows into</td><td>A closed appliance.</td><td>Every Mastra Code plugin, plus a curated registry &mdash; a platform.</td></tr>
+  <tr><td>How it sees</td><td>Screenshots through an HDMI cable; a vision model guesses what is on screen.</td><td>The accessibility tree: real elements with real roles, states and values, the same truth a screen reader gets.</td></tr>
+  <tr><td>How it acts</td><td>A fake USB keyboard typing at whatever has focus, blind by construction.</td><td>Addressed, verified actions on named elements; every write is read back and proven, or reported as a failure.</td></tr>
+  <tr><td>How it's bounded</td><td>Approval prompts on actions its model classifies as risky; the judge is the same model being judged.</td><td>Bounded by construction: out-of-scope tools don't exist to the model, sending sits behind a service-side attestation the agent cannot forge.</td></tr>
+  <tr><td>What it remembers</td><td>Watches everything on screen, always; the audit trail is your screen itself.</td><td>A semantic audit log of every action that structurally never contains what was read or typed.</td></tr>
+  <tr><td>What it costs to ship</td><td>A hardware BOM, a supply chain, one device per computer.</td><td>An apt install; a fleet of them for a small business is a config file, not a purchase order.</td></tr>
+  <tr><td>Who gets the desk</td><td>It <em>is</em> the keyboard and mouse: while it works, you can't. "Lock the screen and walk away" isn't a feature; it's the requirement.</td><td>Semantic actions land in unfocused windows; the agent works in the background while you keep typing. Focus-stealing is a named last-resort tier that announces itself and yields mid-word the moment you touch the machine.</td></tr>
+  <tr><td>What brain it runs</td><td>One 8B model soldered to a dongle, frozen at the hardware revision, sub-par the day it ships.</td><td>Model packs: your favorite provider, your API keys, or a local model. Next month's better brain is a dropdown, not a new device.</td></tr>
+  <tr><td>What it grows into</td><td>A closed appliance.</td><td>Every Mastra Code plugin, plus a curated registry: a platform.</td></tr>
 </table>
-<div class="pull">Their second user needs your chair. Ours works alongside you &mdash; the overwhelming share of its actions land in unfocused windows while you keep the keyboard.</div>
-<p style="font-size:.84rem;color:var(--muted)">The honest concession: a keyboard dongle works on a locked screen and on any OS, today. That is real. It is also exactly the trade &mdash; universality bought with blindness &mdash; that stops being acceptable the moment the agent acts <em>as you</em> in front of a customer.</p>
+<div class="pull">Their second user needs your chair. Ours works alongside you: the overwhelming share of its actions land in unfocused windows while you keep the keyboard.</div>
+<p style="font-size:.84rem;color:var(--muted)">The honest concession: a keyboard dongle works on a locked screen and on any OS, today. That is real. It is also exactly the trade (universality bought with blindness) that stops being acceptable the moment the agent acts <em>as you</em> in front of a customer.</p>
 
 <h2>The platform question, answered before it's asked</h2>
-<p>The proof of concept runs on Linux. The platform-specific code is <strong>2,442 lines of 13,800</strong> &mdash; quarantined in a backends directory with zero accessibility imports leaking outside it (verified, not asserted). Everything that makes this product the product &mdash; the consent ceiling, attestations, the send gate, the audit log, redaction, the protocol, the entire TypeScript runtime layer &mdash; is platform-neutral. Windows is a backend port onto UI Automation, the richest accessibility API of the three and the one Narrator rides. macOS is a port onto the API that powers VoiceOver, where the OS's own per-app accessibility permission becomes free consent UX. The architectural bet underneath: <strong>accessibility trees are the one interface every OS is legally obligated to keep working.</strong> Screen readers must function; pixels carry no such guarantee.</p>
+<p>The proof of concept runs on Linux. The platform-specific code is <strong>2,442 lines of 13,800</strong>, quarantined in a backends directory with zero accessibility imports leaking outside it (verified, not asserted). Everything that makes this product the product (the consent ceiling, attestations, the send gate, the audit log, redaction, the protocol, the entire TypeScript runtime layer) is platform-neutral. Windows is a backend port onto UI Automation, the richest accessibility API of the three and the one Narrator rides. macOS is a port onto the API that powers VoiceOver, where the OS's own per-app accessibility permission becomes free consent UX. The architectural bet underneath: <strong>accessibility trees are the one interface every OS is legally obligated to keep working.</strong> Screen readers must function; pixels carry no such guarantee.</p>
 
 <h2>The platform flywheel</h2>
 <ul>
-  <li><strong>Every Mastra Code plugin works here by default.</strong> The community's plugins &mdash; existing and future &mdash; become product capabilities without us building them. The product becomes multiple products.</li>
-  <li><strong>A curated, approved-plugin registry</strong> sits on top for the commercial audience &mdash; the security posture demands review, and review becomes a quality bar, the way an app store is.</li>
-  <li><strong>Every product user is a platform user.</strong> A second vertical on Mastra Code turns it from a tool with one product into a platform with a portfolio &mdash; and this vertical reaches a market the developer tools never will.</li>
+  <li><strong>Every Mastra Code plugin works here by default.</strong> The community's plugins, existing and future, become product capabilities without us building them. The product becomes multiple products.</li>
+  <li><strong>A curated, approved-plugin registry</strong> sits on top for the commercial audience: the security posture demands review, and review becomes a quality bar, the way an app store is.</li>
+  <li><strong>Every product user is a platform user.</strong> A second vertical on Mastra Code turns it from a tool with one product into a platform with a portfolio, and this vertical reaches a market the developer tools never will.</li>
 </ul>
 
 <h2>What exists today vs. what remains</h2>
@@ -152,19 +152,19 @@
   </div>
   <div class="card">
     <h3>To build</h3>
-    <p>The client: dashboard, QR pairing, the credential vault, packaging (<code>.deb</code> + session service), the approved-plugin registry. The hard problems underneath &mdash; sessions, packs, memory, plugins &mdash; are already solved by Mastra Code.</p>
+    <p>The client: dashboard, QR pairing, the credential vault, packaging (<code>.deb</code> + session service), the approved-plugin registry. The hard problems underneath (sessions, packs, memory, plugins) are already solved by Mastra Code.</p>
   </div>
 </div>
 
 <h2>The ask</h2>
 <ul>
-  <li>Alignment on building this as a <strong>new product bucket</strong> on Mastra Code &mdash; the second vertical, with a dedicated owner.</li>
-  <li>Blessing rather than permission: the packages this rides (<code>@mastra/core</code>, <code>@mastra/code-sdk</code>, <code>mastracode</code>) are Apache-2.0, and Mastra's own licensing page explicitly welcomes commercial applications built on the stack. This could ship independently &mdash; it is being brought inside because it belongs inside.</li>
+  <li>Alignment on building this as a <strong>new product bucket</strong> on Mastra Code: the second vertical, with a dedicated owner.</li>
+  <li>Blessing rather than permission: the packages this rides (<code>@mastra/core</code>, <code>@mastra/code-sdk</code>, <code>mastracode</code>) are Apache-2.0, and Mastra's own licensing page explicitly welcomes commercial applications built on the stack. This could ship independently. It is being brought inside because it belongs inside.</li>
   <li>Nothing else. The pattern is proven, the foundation is shipped, and the team that built it is already here.</li>
 </ul>
 
 <footer>
-  <span>Computer Controls &mdash; product proposal</span>
+  <span>Computer Controls · product proposal</span>
   <span>Jamie · CodingButter &nbsp;·&nbsp; August 2026</span>
 </footer>
 
