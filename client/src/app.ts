@@ -20,6 +20,11 @@ export type AppDeps = {
    * module always supplies it.
    */
   auth?: Hono;
+  /**
+   * The voice routes plus, when voice is off, the reason a person should see.
+   * Optional for the same reason auth is; the entry module always supplies it.
+   */
+  voice?: { app: Hono; reason?: string };
 };
 
 /**
@@ -32,7 +37,19 @@ export type AppDeps = {
 export function buildApp(deps: AppDeps): Hono {
   const app = new Hono();
 
-  app.get("/api/health", (c) => c.json({ ok: true, ...deps.status() }));
+  app.get("/api/health", (c) =>
+    c.json({
+      ok: true,
+      ...deps.status(),
+      ...(deps.voice
+        ? {
+            voice: deps.voice.reason
+              ? { enabled: false, reason: deps.voice.reason }
+              : { enabled: true },
+          }
+        : {}),
+    }),
+  );
 
   app.post("/api/chat", async (c) => {
     const body = await c.req.json().catch(() => undefined);
@@ -51,6 +68,7 @@ export function buildApp(deps: AppDeps): Hono {
   // Mounted before the SPA fallback, or the catch-all would swallow the
   // settings section and every sign-in route with a 404-shaped page.
   if (deps.auth) app.route("/", deps.auth);
+  if (deps.voice) app.route("/", deps.voice.app);
 
   app.get("*", (c) => {
     const asset = readUiAsset(deps.uiRoot, c.req.path);

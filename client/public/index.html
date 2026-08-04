@@ -39,6 +39,8 @@
       }
       button { padding: 10px 16px; border-radius: 8px; border: 0; background: #4d5bd8; color: white; }
       button[disabled] { opacity: 0.5; }
+      #talk { background: #2c8a5f; display: none; user-select: none; touch-action: none; }
+      #talk.recording { background: #c14953; }
     </style>
   </head>
   <body>
@@ -49,6 +51,7 @@
     <div id="log"></div>
     <form id="composer">
       <input id="message" autocomplete="off" placeholder="Ask about the desktop…" autofocus />
+      <button id="talk" type="button">Hold to talk</button>
       <button id="send" type="submit">Send</button>
     </form>
     <script type="module">
@@ -68,21 +71,31 @@
         return el;
       }
 
+      const talk = document.getElementById("talk");
+      const VOICE_BASE = "/api/agents/session/voice";
+
       fetch("/api/health")
         .then((r) => r.json())
         .then((health) => {
           scope.textContent = `scope ${health.desktopScope} · ${health.tools.length} tools`;
+          if (health.voice) {
+            // Offered only when the hub says it can speak; when it cannot,
+            // the button stays visible but explains itself instead of failing.
+            talk.style.display = "block";
+            if (!health.voice.enabled) {
+              talk.disabled = true;
+              talk.title = health.voice.reason ?? "Voice is off.";
+              talk.textContent = "Voice off";
+            }
+          }
         })
         .catch(() => {
           scope.textContent = "no hub";
         });
 
-      form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const message = input.value.trim();
-        if (!message) return;
-        input.value = "";
-        send.disabled = true;
+      // One turn, whether the words were typed or spoken. The agent cannot
+      // tell the difference, which is the point.
+      async function sendTurn(message, { speakReply = false } = {}) {
         say("you", message);
         const pending = say("agent", "…");
         try {
@@ -95,14 +108,102 @@
           if (!response.ok) throw new Error(reply.error ?? `HTTP ${response.status}`);
           threadId = reply.threadId ?? threadId;
           pending.textContent = reply.text || `(${reply.status})`;
+          if (speakReply && reply.text) await speak(reply.text);
         } catch (error) {
           pending.classList.add("failed");
           pending.textContent = String(error);
+        }
+      }
+
+      async function speak(text) {
+        // The words already reached the conversation; losing the audio is a
+        // shrug, not an error worth interrupting anyone over.
+        try {
+          const res = await fetch(`${VOICE_BASE}/speak`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ text, speakerId: "nova" }),
+          });
+          if (!res.ok) return;
+          const audio = new Audio(URL.createObjectURL(await res.blob()));
+          await audio.play().catch(() => {});
+        } catch {}
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const message = input.value.trim();
+        if (!message) return;
+        input.value = "";
+        send.disabled = true;
+        try {
+          await sendTurn(message);
         } finally {
           send.disabled = false;
           input.focus();
         }
       });
+
+      // Hold to talk: record while pressed, transcribe on release, and send
+      // the transcript down exactly the same lane a typed message takes.
+      let recorder;
+      let chunks = [];
+
+      talk.addEventListener("pointerdown", async (event) => {
+        if (talk.disabled || recorder) return;
+        event.preventDefault();
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          recorder = new MediaRecorder(stream);
+          chunks = [];
+          recorder.addEventListener("dataavailable", (e) => chunks.push(e.data));
+          recorder.start();
+          talk.classList.add("recording");
+          talk.textContent = "Listening…";
+        } catch {
+          recorder = undefined;
+          say("agent", "The microphone was refused, so nothing was recorded.", true);
+        }
+      });
+
+      async function finishRecording() {
+        if (!recorder) return;
+        const active = recorder;
+        recorder = undefined;
+        talk.classList.remove("recording");
+        talk.textContent = "Hold to talk";
+        await new Promise((resolve) => {
+          active.addEventListener("stop", resolve, { once: true });
+          active.stop();
+        });
+        active.stream.getTracks().forEach((t) => t.stop());
+        const mimetype = active.mimeType || "audio/webm";
+        const filetype = mimetype.includes("mp4") ? "mp4" : "webm";
+        const blob = new Blob(chunks, { type: mimetype });
+
+        const body = new FormData();
+        body.set("audio", new File([blob], `audio.${filetype}`, { type: mimetype }));
+        body.set("options", JSON.stringify({ filetype }));
+        try {
+          const res = await fetch(`${VOICE_BASE}/listen`, { method: "POST", body });
+          const heard = await res.json();
+          if (!res.ok) throw new Error(heard.error ?? `HTTP ${res.status}`);
+          const transcript = (heard.text ?? "").trim();
+          if (!transcript) {
+            // An empty turn is worse than a failed one: the agent would
+            // answer a question nobody asked.
+            say("agent", "Nothing was transcribed, so nothing was sent. Try again closer to the mic.", true);
+            return;
+          }
+          await sendTurn(transcript, { speakReply: true });
+        } catch (error) {
+          say("agent", String(error), true);
+        }
+      }
+
+      talk.addEventListener("pointerup", finishRecording);
+      talk.addEventListener("pointercancel", finishRecording);
+      talk.addEventListener("pointerleave", finishRecording);
     </script>
   </body>
 </html>

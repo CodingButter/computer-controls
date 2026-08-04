@@ -64,6 +64,25 @@ test("the sign-in surface serves through the booted hub, not just its own module
   expect(JSON.stringify(body)).not.toMatch(/access|refresh|sk-|eyJ/);
 });
 
+test("the voice routes serve through the booted hub, not just their own module", async () => {
+  // Same wiring lesson as the sign-in surface: the module can pass every test
+  // it owns and still be a 404 in the running process. The probe route must
+  // answer through the real hub, whatever this machine's credential state is:
+  // a list of speakers when voice is on, an empty list when it is off.
+  const speakers = await fetch(`${baseUrl}/api/agents/session/voice/speakers`);
+  expect(speakers.status).toBe(200);
+  expect(Array.isArray(await speakers.json())).toBe(true);
+
+  // And health must say which of those two worlds the browser is in.
+  const voiceHealth = (await fetch(`${baseUrl}/api/health`).then((r) => r.json())) as {
+    voice?: { enabled: boolean; reason?: string };
+  };
+  expect(voiceHealth.voice).toBeDefined();
+  if (!voiceHealth.voice!.enabled) {
+    expect(voiceHealth.voice!.reason).toMatch(/OpenAI/);
+  }
+});
+
 test("test_desktop_tools_are_minted_at_observe_scope", async () => {
   const minted = health.tools.filter((name) => name.startsWith("desktop_")).sort();
   expect(health.desktopScope).toBe("observe");
