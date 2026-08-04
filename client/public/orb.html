@@ -60,6 +60,15 @@
       }
       #orb[data-off="true"] { opacity: 0.35; cursor: not-allowed; animation: none; }
 
+      /* The WebGL canvas replaces the button when a 3D context is available.
+         Same 180px footprint, higher render resolution for sharpness. */
+      #orb-canvas {
+        width: 180px;
+        height: 180px;
+        cursor: pointer;
+      }
+      #orb-canvas[hidden] { display: none; }
+
       @keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
       @keyframes pulse { 0%, 100% { transform: scale(1.02); } 50% { transform: scale(1.1); } }
       @keyframes churn { from { transform: rotate(0deg) scale(1.02); } to { transform: rotate(360deg) scale(1.02); } }
@@ -121,6 +130,7 @@
   <body>
     <main id="stage">
       <button id="orb" data-state="idle" aria-label="Toggle listening"></button>
+      <canvas id="orb-canvas" width="360" height="360" aria-label="Toggle listening" hidden></canvas>
       <p id="caption" aria-live="polite"></p>
       <p id="reason" hidden></p>
     </main>
@@ -134,6 +144,11 @@
       </form>
     </aside>
 
+    <!-- three.js r169 — vendored as an ES module, served by the hub at
+         /vendor/three.module.js. No bundler, no runtime CDN fetch (#103). -->
+    <script type="importmap">
+      { "imports": { "three": "/vendor/three.module.js" } }
+    </script>
     <script type="module" src="/orb.js"></script>
   </body>
 </html>

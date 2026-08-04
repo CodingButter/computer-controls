@@ -10,6 +10,8 @@
 // The seams above `init()` are exported and DOM-free so they can be tested
 // without a browser, the same way `app.js` splits its own decisions out.
 
+import { hasWebGl, syntheticLevel } from "./orb-webgl.js";
+
 const ORB_BASE = "/api/orb";
 
 /** Every state the hub can report, and the only ones this page will render. */
@@ -57,6 +59,7 @@ export function availability(status) {
 
 function init() {
   const orb = document.getElementById("orb");
+  const canvas = document.getElementById("orb-canvas");
   const caption = document.getElementById("caption");
   const reason = document.getElementById("reason");
   const log = document.getElementById("log");
@@ -68,7 +71,17 @@ function init() {
   let threadId;
   let usable = false;
 
-  const setState = (state) => orb.setAttribute("data-state", state);
+  // The WebGL orb — null when the browser lacks WebGL or the DOM orb is the
+  // active face. setState feeds both renderers; the DOM orb stays in sync
+  // whether it's visible or hidden, which costs nothing.
+  let webglOrb = null;
+  let currentState = "idle";
+
+  const setState = (state) => {
+    orb.setAttribute("data-state", state);
+    currentState = state;
+    webglOrb?.setState(state);
+  };
 
   const appendTurn = (text, who) => {
     const line = document.createElement("div");
@@ -102,6 +115,41 @@ function init() {
   };
 
   orb.addEventListener("click", () => void gesture("toggle"));
+
+  // Feature-detect WebGL. If the browser supports it, mount the shader sphere
+  // and hide the DOM button. If not — or if the dynamic import fails for any
+  // reason — the DOM orb stays, and its CSS animations carry state. This is
+  // the single point where the fallback decision is made (#110 ruling 5).
+  if (canvas && hasWebGl(canvas)) {
+    import("./orb-webgl.js")
+      .then(({ mountWebGlOrb }) => {
+        const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        return mountWebGlOrb({ canvas, reducedMotion });
+      })
+      .then((orb3d) => {
+        webglOrb = orb3d;
+        webglOrb.setState(currentState);
+        canvas.hidden = false;
+        orb.hidden = true;
+        canvas.addEventListener("click", () => void gesture("toggle"));
+      })
+      .catch(() => {
+        // three.js failed to load or the WebGL context failed. The DOM orb
+        // was never hidden, so the page is already in its fallback state.
+      });
+  }
+
+  // The page owns the single animation loop. It synthesizes a level from the
+  // current state and feeds it to the WebGL orb each frame. When the DOM orb
+  // is the active face, webglOrb is null and this is a no-op.
+  const loop = (now) => {
+    if (webglOrb) {
+      webglOrb.setLevel(syntheticLevel(currentState, now));
+      webglOrb.tick(now);
+    }
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
 
   drawerToggle.addEventListener("click", () => {
     const open = drawer.getAttribute("data-open") !== "true";
