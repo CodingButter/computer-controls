@@ -609,6 +609,90 @@ def scope_of(obj: Atspi.Accessible) -> tuple[str, str]:
     return window_ref, app_ref
 
 
+def ancestry_of(obj: Atspi.Accessible) -> tuple[str, ...]:
+    """Where an object sits, nearest first: itself, its parents, its window, its application.
+
+    The same walk `scope_of` does for attribution, kept whole instead of
+    reduced to its two ends. Attribution only ever needed to know which window
+    an effect happened in; a permission hung on a place in the tree needs every
+    step between the target and that window, because the anchor may be on any
+    of them and "is this inside that" is a question about the steps.
+
+    The application appears twice, as its id and as its name, because both are
+    legitimate ways to name it: a configuration file says "chrome" and the
+    desktop says `app-3f2a91b8`, and an anchor written either way should hang
+    on the same application.
+
+    An object whose window has already gone answers with what it can, for the
+    same reason a partial scope is still worth having — except that here the
+    caller must not read a short answer as permission. A grant that hangs above
+    a step this walk could not reach refuses, and the refusal is checked
+    against the live tree before it is reported.
+    """
+    steps: list[str] = []
+    node = obj
+    for _ in range(MAX_ANCESTOR_WALK):
+        if node is None:
+            break
+        role = _safe(node.get_role_name, "") or ""
+        if role in WINDOW_ROLES:
+            steps.append(window_id(node))
+            break
+        node_id = element_id(node)
+        # An id that was never handed out still has to resolve, because an
+        # anchor onto it is about to be checked and the client may ask about
+        # this node next.
+        _remember(node, node_id)
+        steps.append(node_id)
+        node = _safe(node.get_parent)
+
+    app = _safe(obj.get_application)
+    if app is not None:
+        steps.append(application_id(app))
+        name = _safe(app.get_name, "") or ""
+        if name:
+            steps.append(name)
+    return tuple(steps)
+
+
+def anchor_lives(target: str) -> bool | None:
+    """Whether a grant's anchor still names something on this desktop.
+
+    True when it resolves and False when it is gone. The contract allows None
+    for "it matches more than one thing", which the caller treats as gone
+    rather than as a coin toss — the same answer `rediscover` gives for the
+    same reason. This backend never answers None, and the reason is worth
+    stating rather than leaving as an absence:
+
+    An id is minted from the object's own address, so two live objects cannot
+    wear the same one. Ambiguity arises only when a dead id is *re-found* by
+    description, and that is `rediscover`'s question, which already refuses to
+    guess. An application name is not a reference to a node at all: it is the
+    substring rule the ceiling and the grant have always used, where covering
+    two applications that answer to "chrome" is the stated behaviour rather
+    than a confusion.
+
+    The object table is a memo, not a liveness test — it keeps handing back a
+    proxy for a window that closed. So the answer here is the same one
+    `fingerprint_of` trusts: ask the peer something, and let a dead peer raise.
+    """
+    target = (target or "").strip()
+    if not target:
+        return False
+    if target.startswith(("win-", "el-")):
+        obj = find_window(target) if target.startswith("win-") else lookup(target)
+        if obj is None:
+            return False
+        return _safe(obj.get_role_name) is not None
+    if target.startswith("app-"):
+        return any(application_id(app) == target for app in _iter_desktop_apps())
+    wanted = target.casefold()
+    return any(
+        wanted in (_safe(app.get_name, "") or "").casefold()
+        for app in _iter_desktop_apps()
+    )
+
+
 def fingerprint_of(reference: dict[str, Any]) -> registry.Fingerprint | None:
     """Current fingerprint of a previously described object, or None if it is gone.
 

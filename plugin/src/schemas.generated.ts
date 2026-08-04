@@ -1,6 +1,6 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 9ffcc3f641ed0521
+// Protocol version: 1.0   schema sha256: d935fa8ad6624c91
 
 import { z } from "@mastra/code-sdk/plugin";
 
@@ -64,6 +64,12 @@ export const elementClaimSchema = z.object({
   heldForMs: z.number().int().min(0),
   leaseMs: z.number().int().min(0).describe("The lease as granted, so a caller can tell a long claim from an old one."),
   reason: z.string().describe("What the holder said it was doing. Present when it said.").optional(),
+});
+
+export const scopeAnchorSchema = z.object({
+  coversDescendants: z.boolean().describe("Whether this speaks for everything under it or only for the one node it names. Defaults to false: a grant on a single field that silently reached everything beneath it would be the widening anchors exist to prevent.").optional(),
+  operationClasses: z.array(z.enum(["observe", "edit", "activate", "submit", "destructive"])).describe("What may be done at this place. Faces the ceiling like every other class named in a grant: an anchor is a narrowing device, never a side door."),
+  target: z.string().max(200).describe("The place this hangs on: an element id, a window id, or an application name. Ids are matched exactly, because an id is minted rather than typed and a substring of one is a coincidence. Application names are matched as substrings, the same way they are everywhere else."),
 });
 
 export const semanticElementSchema: z.ZodType<unknown> = z.lazy(() =>
@@ -252,6 +258,7 @@ export const getRevisionResult = z.object({
 });
 
 export const grantScopeParams = z.object({
+  anchors: z.array(scopeAnchorSchema).describe("Places in the tree this grant hangs on, instead of hanging on whole applications. A grant that names anchors has said where it applies, so anywhere else is outside it — the same rule naming applications individually has always had. Omit to grant across applications as before.").optional(),
   applications: z.array(z.string().max(200)).describe("Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing.").optional(),
   clientId: z.string().optional(),
   confirm: z.boolean().optional(),
@@ -260,6 +267,7 @@ export const grantScopeParams = z.object({
   seconds: z.number().int().min(30).max(86400).describe("How long the grant survives without use. Idle time, not a lifetime — a grant being used every second does not expire mid-sentence.").optional(),
 });
 export const grantScopeResult = z.object({
+  anchors: z.array(scopeAnchorSchema).describe("Where this grant now hangs. Returned so a client can tell an anchor that was accepted from one that was quietly dropped.").optional(),
   applications: z.array(z.string()).optional(),
   ceiling: z.array(z.string()).describe("The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice."),
   expiresInSeconds: z.number().int().optional(),

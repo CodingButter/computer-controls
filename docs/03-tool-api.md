@@ -2,7 +2,7 @@
 
 Generated from `protocol/schema.json` — do not edit.
 Run: `node scripts/generate-tool-api-doc.mjs`
-Protocol version: 1.0   schema sha256: 9ffcc3f641ed0521
+Protocol version: 1.0   schema sha256: d935fa8ad6624c91
 
 The contract between any client and the desktop service. Frozen at 1.0. Additive changes only: new methods and new optional fields. Removing a method, renaming or removing a field, narrowing a type, changing an error code, or adding a required request field is a breaking change and requires a major version.
 
@@ -345,6 +345,7 @@ Ask for the operation classes this client may use, within the ceiling the user's
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `anchors` | [`scopeAnchor`](#scopeanchor)[] | no | Places in the tree this grant hangs on, instead of hanging on whole applications. A grant that names anchors has said where it applies, so anywhere else is outside it — the same rule naming applications individually has always had. Omit to grant across applications as before. |
 | `applications` | string[] | no | Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing. |
 | `clientId` | string | no |  |
 | `confirm` | boolean | no |  |
@@ -356,6 +357,7 @@ Ask for the operation classes this client may use, within the ceiling the user's
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `anchors` | [`scopeAnchor`](#scopeanchor)[] | no | Where this grant now hangs. Returned so a client can tell an anchor that was accepted from one that was quietly dropped. |
 | `applications` | string[] | no |  |
 | `ceiling` | string[] | yes | The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice. |
 | `expiresInSeconds` | integer | no |  |
@@ -950,6 +952,18 @@ Fields every response carries so a caller always knows when it was observed and 
 | `fallbacksUsed` | string[] | no | Backends tried before the one that answered. Empty when the preferred backend worked. |
 | `observationMode` | `active` \| `idle` | no |  |
 | `revision` | integer | no | The session revision these results were observed at. |
+
+---
+
+### `scopeAnchor`
+
+A place in the accessibility tree that a permission hangs on, and what may be done there. An application is the outermost place there is, and most tasks mean something far narrower: 'fill in this form' expressed as 'edit anything in the browser' draws the boundary around the wrong thing. Anchors are resolved against the live tree on every call, never remembered as an answer, and the nearest one covering the target decides — so a subtree granted observe with one field inside it granted edit composes without either rule knowing about the other.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `coversDescendants` | boolean | no | Whether this speaks for everything under it or only for the one node it names. Defaults to false: a grant on a single field that silently reached everything beneath it would be the widening anchors exist to prevent. |
+| `operationClasses` | `observe` \| `edit` \| `activate` \| `submit` \| `destructive`[] | yes | What may be done at this place. Faces the ceiling like every other class named in a grant: an anchor is a narrowing device, never a side door. |
+| `target` | string | yes | The place this hangs on: an element id, a window id, or an application name. Ids are matched exactly, because an id is minted rather than typed and a substring of one is a coincidence. Application names are matched as substrings, the same way they are everywhere else. |
 
 ---
 

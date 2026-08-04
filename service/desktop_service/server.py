@@ -1449,12 +1449,32 @@ def _method_grant_scope(params: dict[str, Any]) -> dict[str, Any]:
         _client_id(params),
         classes=classes,
         applications=params.get("applications") or (),
+        anchors=[
+            security.Anchor(
+                target=anchor.get("target") or "",
+                classes=frozenset(anchor.get("operationClasses") or ()),
+                covers_descendants=bool(anchor.get("coversDescendants")),
+            )
+            for anchor in params.get("anchors") or ()
+            if isinstance(anchor, dict)
+        ],
         seconds=params.get("seconds"),
         reason=params.get("reason") or "",
     )
     return {
         "operationClasses": sorted(grant.classes),
         "applications": sorted(grant.applications),
+        # Returned rather than assumed: a client that asked for three anchors
+        # and got two back has learned something a silent success would have
+        # cost it an afternoon to find out.
+        "anchors": [
+            {
+                "target": anchor.target,
+                "operationClasses": sorted(anchor.classes),
+                "coversDescendants": anchor.covers_descendants,
+            }
+            for anchor in grant.anchors
+        ],
         "expiresInSeconds": int(grant.idle_seconds),
         "ceiling": sorted(_consent.ceiling.classes),
     }
@@ -1834,6 +1854,70 @@ def _needs_application(operation_class: str) -> bool:
     return False
 
 
+def _place_named_by(params: dict[str, Any]) -> str:
+    """The window or element this call is about, or "" for a call about the desktop.
+
+    A window wins over an element for the same reason it does when the
+    application is resolved: a call that names both is acting on the window.
+    """
+    window_id = params.get("windowId")
+    if isinstance(window_id, str) and window_id:
+        return window_id
+    element_id = params.get("elementId")
+    return element_id if isinstance(element_id, str) and element_id else ""
+
+
+def _ancestry_of(params: dict[str, Any]) -> tuple[str, ...]:
+    """Where this call's target sits in the tree, nearest first.
+
+    Resolved on the same terms as the application: only when a rule depends on
+    it, which here means only when this client's grant actually hung itself
+    somewhere. A grant that named no anchors pays nothing, which is the whole of
+    the fifth acceptance criterion — the common call is unchanged, and the walk
+    is one the toolkit thread was going to do for attribution anyway.
+
+    A target that cannot be resolved answers with nothing rather than with a
+    guess. An empty ancestry means a grant with anchors covers none of it, which
+    refuses; it never falls through to the general hand.
+    """
+    target = _place_named_by(params)
+    if not target:
+        return ()
+
+    def resolve() -> tuple[str, ...]:
+        obj = (
+            atspi.find_window(target)
+            if target.startswith("win-")
+            else atspi.lookup(target)
+        )
+        return atspi.ancestry_of(obj) if obj is not None else ()
+
+    try:
+        return loop.call_on_loop(resolve, timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS)
+    except Exception:
+        return ()
+
+
+def _anchor_lives(target: str) -> bool | None:
+    """Whether a grant's anchor still names something. Asked only on the refusal path.
+
+    An allowed call never reaches this: the grant covered the target, so
+    nothing about the rest of the tree can change the answer. It is the price of
+    a refusal, where one extra lookup buys the difference between "you may not"
+    and "it is gone" — and a client that cannot tell those apart re-asks for a
+    scope it already has, forever.
+    """
+    try:
+        return loop.call_on_loop(
+            lambda: atspi.anchor_lives(target), timeout=SINGLE_ELEMENT_TIMEOUT_SECONDS
+        )
+    except Exception:
+        # The desktop did not answer in time. Reporting the anchor dead on a
+        # timeout would turn a slow application into a revoked grant, so the
+        # refusal stands as a refusal.
+        return True
+
+
 #: Methods whose parameters carry other calls inside them. A batch reaches the
 #: desktop through its steps, and a step's target is not visible in the
 #: parameters the batch itself was checked against — so a rule about which
@@ -1864,6 +1948,7 @@ def _enforce_nested(method: str, params: dict[str, Any], client_id: str) -> None
     steps = params.get("actions")
     if not isinstance(steps, list):
         return
+    anchored = bool(_consent.grant_of(client_id).anchors)
     for step in steps:
         if not isinstance(step, dict):
             continue
@@ -1872,15 +1957,26 @@ def _enforce_nested(method: str, params: dict[str, Any], client_id: str) -> None
             continue
         inner_params = step.get("params")
         inner_class = protocol_generated.OPERATION_CLASS.get(inner, "submit")
+        has_params = isinstance(inner_params, dict)
         _consent.enforce(
             method=inner,
             operation_class=inner_class,
             client_id=client_id,
             application=(
                 _application_of(inner_params)
-                if isinstance(inner_params, dict) and _needs_application(inner_class)
+                if has_params and _needs_application(inner_class)
                 else ""
             ),
+            # A step's target is a different place from the batch's, so an
+            # anchored grant has to be asked about each one. This is the same
+            # reason the application is resolved per step.
+            ancestry=_ancestry_of(inner_params) if has_params and anchored else (),
+            # Every method that may appear in a batch acts on a window or an
+            # element, so a step is always about a place — including the
+            # malformed step that named none, which an anchored grant must
+            # refuse rather than answer from the hand it holds elsewhere.
+            names_a_place=anchored,
+            anchor_lives=_anchor_lives,
             # The batch carried the confirmation. Asking for it again per step
             # would make a confirmed batch impossible to express.
             confirmed=bool(params.get("confirm")),
@@ -1948,6 +2044,8 @@ def _guarded(method: str, handler):
         # refusing rather than towards allowing.
         client_id = _client_id(params)
         application = _application_of(params) if _needs_application(operation_class) else ""
+        anchored = bool(_consent.grant_of(client_id).anchors)
+        ancestry = _ancestry_of(params) if anchored else ()
         record = audit.Record(
             method=method,
             operation_class=operation_class,
@@ -1965,6 +2063,10 @@ def _guarded(method: str, handler):
                 operation_class=operation_class,
                 client_id=client_id,
                 application=application,
+                ancestry=ancestry,
+                names_a_place=anchored and bool(_place_named_by(params)),
+                anchor_lives=_anchor_lives,
+                reaches_through_steps=method in _NESTING_METHODS,
                 confirmed=bool(params.get("confirm")),
             )
             _enforce_presence(operation_class, params)

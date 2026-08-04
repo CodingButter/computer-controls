@@ -1,9 +1,9 @@
 // Generated from protocol/schema.json — do not edit.
 // Run: node scripts/generate-protocol.mjs
-// Protocol version: 1.0   schema sha256: 9ffcc3f641ed0521
+// Protocol version: 1.0   schema sha256: d935fa8ad6624c91
 
 export const PROTOCOL_VERSION = "1.0" as const;
-export const SCHEMA_DIGEST = "9ffcc3f641ed0521" as const;
+export const SCHEMA_DIGEST = "d935fa8ad6624c91" as const;
 
 /** What a method does to the world. Declared here at freeze time so enforcement can be added later without changing any request shape. */
 export type OperationClass = "observe" | "edit" | "activate" | "submit" | "destructive";
@@ -138,6 +138,16 @@ export interface ResponseCommon {
   observationMode?: "active" | "idle";
   /** The session revision these results were observed at. */
   revision?: number;
+}
+
+/** A place in the accessibility tree that a permission hangs on, and what may be done there. An application is the outermost place there is, and most tasks mean something far narrower: 'fill in this form' expressed as 'edit anything in the browser' draws the boundary around the wrong thing. Anchors are resolved against the live tree on every call, never remembered as an answer, and the nearest one covering the target decides — so a subtree granted observe with one field inside it granted edit composes without either rule knowing about the other. */
+export interface ScopeAnchor {
+  /** Whether this speaks for everything under it or only for the one node it names. Defaults to false: a grant on a single field that silently reached everything beneath it would be the widening anchors exist to prevent. */
+  coversDescendants?: boolean;
+  /** What may be done at this place. Faces the ceiling like every other class named in a grant: an anchor is a narrowing device, never a side door. */
+  operationClasses: "observe" | "edit" | "activate" | "submit" | "destructive"[];
+  /** The place this hangs on: an element id, a window id, or an application name. Ids are matched exactly, because an id is minted rather than typed and a substring of one is a coincidence. Application names are matched as substrings, the same way they are everywhere else. */
+  target: string;
 }
 
 /** One thing on the desktop, as a caller sees it. */
@@ -382,6 +392,8 @@ export interface GetRevisionResult {
 
 /** Ask for the operation classes this client may use, within the ceiling the user's configuration sets. Only ever narrows: a request above the ceiling is refused by naming the config key, because the answer to 'why can't I' should be a file the user owns rather than a shrug. Classified as observe so that a client holding nothing can still ask — refusing the request for permission is not a security boundary, it is a dead end. (operation class: observe) */
 export interface GrantScopeParams {
+  /** Places in the tree this grant hangs on, instead of hanging on whole applications. A grant that names anchors has said where it applies, so anywhere else is outside it — the same rule naming applications individually has always had. Omit to grant across applications as before. */
+  anchors?: ScopeAnchor[];
   /** Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing. */
   applications?: string[];
   clientId?: string;
@@ -394,6 +406,8 @@ export interface GrantScopeParams {
   seconds?: number;
 }
 export interface GrantScopeResult {
+  /** Where this grant now hangs. Returned so a client can tell an anchor that was accepted from one that was quietly dropped. */
+  anchors?: ScopeAnchor[];
   applications?: string[];
   /** The most this configuration will ever grant, returned whether or not the request needed all of it, so a client can tell 'not yet' from 'not ever' without asking twice. */
   ceiling: string[];

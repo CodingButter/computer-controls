@@ -264,6 +264,24 @@
       "additionalProperties": false
     },
 
+    "scopeAnchor": {
+      "type": "object",
+      "description": "A place in the accessibility tree that a permission hangs on, and what may be done there. An application is the outermost place there is, and most tasks mean something far narrower: 'fill in this form' expressed as 'edit anything in the browser' draws the boundary around the wrong thing. Anchors are resolved against the live tree on every call, never remembered as an answer, and the nearest one covering the target decides — so a subtree granted observe with one field inside it granted edit composes without either rule knowing about the other.",
+      "properties": {
+        "target": { "type": "string", "maxLength": 200, "description": "The place this hangs on: an element id, a window id, or an application name. Ids are matched exactly, because an id is minted rather than typed and a substring of one is a coincidence. Application names are matched as substrings, the same way they are everywhere else." },
+        "operationClasses": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["observe", "edit", "activate", "submit", "destructive"] },
+          "minItems": 1,
+          "maxItems": 5,
+          "description": "What may be done at this place. Faces the ceiling like every other class named in a grant: an anchor is a narrowing device, never a side door."
+        },
+        "coversDescendants": { "type": "boolean", "description": "Whether this speaks for everything under it or only for the one node it names. Defaults to false: a grant on a single field that silently reached everything beneath it would be the widening anchors exist to prevent." }
+      },
+      "required": ["target", "operationClasses"],
+      "additionalProperties": false
+    },
+
     "actionResult": {
       "type": "object",
       "description": "The result of one action, including the effects it was seen to have. A caller that reads this does not need to re-inspect.",
@@ -1183,6 +1201,12 @@
             "maxItems": 50,
             "description": "Application names this grant covers, matched as substrings of the application's own name. Omit for every application the configuration allows. Never matched against window titles: a title is text the user typed, and a boundary drawn on it can be moved by typing."
           },
+          "anchors": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/scopeAnchor" },
+            "maxItems": 50,
+            "description": "Places in the tree this grant hangs on, instead of hanging on whole applications. A grant that names anchors has said where it applies, so anywhere else is outside it — the same rule naming applications individually has always had. Omit to grant across applications as before."
+          },
           "seconds": {
             "type": "integer",
             "minimum": 30,
@@ -1211,6 +1235,11 @@
           "applications": {
             "type": "array",
             "items": { "type": "string" }
+          },
+          "anchors": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/scopeAnchor" },
+            "description": "Where this grant now hangs. Returned so a client can tell an anchor that was accepted from one that was quietly dropped."
           },
           "expiresInSeconds": { "type": "integer" },
           "ceiling": {
