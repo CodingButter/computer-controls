@@ -149,14 +149,14 @@ def inspect_tree(
                 # window contains 29 things" and "you were shown 29 of 952".
                 if children(obj):
                     truncated = True
-                    element.truncated = True
+                    object.__setattr__(element, "truncated", True)
                 continue
             kids = children(obj)
             for index, child_obj in enumerate(kids):
                 if count >= bounds.max_nodes:
                     truncated = True
                     exhausted = True
-                    element.truncated = True
+                    object.__setattr__(element, "truncated", True)
                     break
                 child, child_fp, child_ref = describe(child_obj, index, digest)
                 count += 1
@@ -356,7 +356,7 @@ def _expand_neighbourhood(
                 observations.append((elem.id, elem.backend, ref, fp))
                 described.append((elem, fp))
                 prev_digest = fp.digest()
-            match.ancestry = [e for e, _ in reversed(described)]
+            object.__setattr__(match, "ancestry", [e for e, _ in reversed(described)])
 
         if neighbourhood_truncated:
             break
@@ -373,11 +373,11 @@ def _expand_neighbourhood(
                     # the depth boundary with children must say so, or a cut
                     # subtree is indistinguishable from one that ended.
                     if children(obj):
-                        parent_elem.truncated = True
+                        object.__setattr__(parent_elem, "truncated", True)
                     continue
                 for index, child_obj in enumerate(children(obj)):
                     if not can_expand():
-                        parent_elem.truncated = True
+                        object.__setattr__(parent_elem, "truncated", True)
                         break
                     child_elem, child_fp, child_ref = describe(
                         child_obj, index, parent_dig
