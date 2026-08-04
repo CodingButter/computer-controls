@@ -45,6 +45,25 @@ test("test_client_boots_and_serves_the_ui", async () => {
   expect(await deepLink.text()).toContain("<title>computer controls</title>");
 });
 
+test("the sign-in surface serves through the booted hub, not just its own module", async () => {
+  // This is the wiring the auth module cannot test for itself: the entry
+  // module has to actually mount it, or every route below is a 404 dressed
+  // as the SPA fallback.
+  const flows = await fetch(`${baseUrl}/api/oauth/flows`);
+  expect(flows.status).toBe(200);
+  const body = (await flows.json()) as { providers: Array<{ provider: string }> };
+  const providers = body.providers.map((p) => p.provider).sort();
+  expect(providers).toEqual(["anthropic", "openai"]);
+
+  const settings = await fetch(`${baseUrl}/settings/accounts`);
+  expect(settings.status).toBe(200);
+  expect(settings.headers.get("content-type")).toContain("text/html");
+
+  // Read-only routes against the real store: whatever this machine's
+  // connection state is, nothing token-shaped may leave.
+  expect(JSON.stringify(body)).not.toMatch(/access|refresh|sk-|eyJ/);
+});
+
 test("test_desktop_tools_are_minted_at_observe_scope", async () => {
   const minted = health.tools.filter((name) => name.startsWith("desktop_")).sort();
   expect(health.desktopScope).toBe("observe");
