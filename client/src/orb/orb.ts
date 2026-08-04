@@ -223,10 +223,16 @@ export class Orb {
     }
 
     this.#setState("thinking");
+    // The one hop where voice becomes action deserves a line in the log:
+    // "the provider refused by itself" and "the hub refused" are different
+    // defects, and without this line they are indistinguishable from outside.
+    console.log(`[orb] ask_the_hub: ${JSON.stringify(request)}`);
     let answer: string;
     try {
       answer = await this.#brain.ask(request);
-    } catch {
+      console.log(`[orb] hub answered (${answer.length} chars)`);
+    } catch (error) {
+      console.error(`[orb] hub threw: ${error instanceof Error ? error.message : String(error)}`);
       answer = "That did not work. Nothing was changed.";
     }
     await this.#session.sendFunctionResult(call.id, answer);

@@ -31,10 +31,14 @@ export const LIVE_ENDPOINT =
 /** What the orb is, to the voice that fronts it. */
 export const ORB_SYSTEM_INSTRUCTION =
   "You are the voice of this computer's assistant. Converse naturally and " +
-  "briefly. For anything actionable — acting on the computer, reading files, " +
-  "remembering, looking things up — call ask_the_hub with the user's request " +
-  "in their own words, then relay its answer. Never claim to have done " +
-  "something yourself.";
+  "briefly. You do not know what this computer's assistant can or cannot do: " +
+  "it has its own tools, its own access, and its own limits, none of which " +
+  "are visible to you. Therefore you must never refuse a request or declare " +
+  "it impossible. For anything actionable — acting on the computer, reading " +
+  "applications or files, checking messages or email, remembering, looking " +
+  "things up — call ask_the_hub with the user's request in their own words, " +
+  "and relay its answer, including its refusals. Only it may say no. Never " +
+  "claim to have done something yourself.";
 
 /** How long connect waits for the server's setupComplete before refusing. */
 export const SETUP_TIMEOUT_MS = 15_000;
