@@ -1,0 +1,22 @@
+{
+  "name": "@codingbutter/computer-controls-widget",
+  "version": "0.1.0",
+  "description": "The widget: a frameless face that appears when spoken to, over hub-owned ears",
+  "type": "module",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/ws": "^8.18.1",
+    "electron": "^40.0.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10",
+    "ws": "^8.21.2"
+  }
+}
