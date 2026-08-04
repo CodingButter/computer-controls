@@ -61,7 +61,7 @@ test("the sign-in surface serves through the booted hub, not just its own module
   expect(flows.status).toBe(200);
   const body = (await flows.json()) as { providers: Array<{ provider: string }> };
   const providers = body.providers.map((p) => p.provider).sort();
-  expect(providers).toEqual(["anthropic", "openai"]);
+  expect(providers).toEqual(["anthropic", "google", "openai"]);
 
   const settings = await fetch(`${baseUrl}/settings/accounts`);
   expect(settings.status).toBe(200);
@@ -88,6 +88,38 @@ test("the voice routes serve through the booted hub, not just their own module",
   expect(voiceHealth.voice).toBeDefined();
   if (!voiceHealth.voice!.enabled) {
     expect(voiceHealth.voice!.reason).toMatch(/OpenAI/);
+  }
+});
+
+test("the orb serves as a second face through the booted hub", async () => {
+  // The orb page is a separate face over the same session, so it has to be
+  // reachable as a page and as a lane. Neither is provable from the orb modules'
+  // own tests: those build the app directly and would pass with nothing mounted.
+  const page = await fetch(`${baseUrl}/orb`);
+  expect(page.status).toBe(200);
+  expect(page.headers.get("content-type")).toContain("text/html");
+  expect(await page.text()).toContain('src="/orb.js"');
+
+  const script = await fetch(`${baseUrl}/orb.js`);
+  expect(script.status).toBe(200);
+  expect(await script.text()).toContain("/api/orb");
+
+  // The status route answers whatever this machine's credential and hardware
+  // state is — enabled with a gate state, or off with a reason a person can act
+  // on. A hub with no Google key is the expected state today.
+  const status = (await fetch(`${baseUrl}/api/orb/status`).then((r) => r.json())) as {
+    enabled: boolean;
+    reason?: string;
+    gate?: string;
+  };
+  const orbHealth = (await fetch(`${baseUrl}/api/health`).then((r) => r.json())) as {
+    orb?: { enabled: boolean; reason?: string };
+  };
+  expect(orbHealth.orb).toBeDefined();
+  expect(orbHealth.orb!.enabled).toBe(status.enabled);
+  if (!status.enabled) {
+    expect(status.reason).toMatch(/\S/);
+    expect(orbHealth.orb!.reason).toBe(status.reason);
   }
 });
 

@@ -23,6 +23,12 @@ export type UiAsset = {
  * owns its own routes. A request that escapes the UI directory is not a
  * fallback case — it is refused, because a path traversal on a process that
  * holds the desktop is the one bug worth being paranoid about here.
+ *
+ * Between those two, an extensionless path is tried as `.html`. That is what
+ * makes `/orb` a second page rather than the first one served under a different
+ * URL: without it every face the product grows would land on `index.html` and
+ * have to sort itself out in script, which is a routing decision made in the
+ * wrong process.
  */
 export function readUiAsset(uiRoot: string, urlPath: string): UiAsset | undefined {
   const root = path.resolve(uiRoot);
@@ -31,7 +37,10 @@ export function readUiAsset(uiRoot: string, urlPath: string): UiAsset | undefine
 
   if (candidate !== root && !candidate.startsWith(root + path.sep)) return undefined;
 
-  const file = fileAt(candidate) ?? fileAt(path.join(root, "index.html"));
+  const file =
+    fileAt(candidate) ??
+    (path.extname(candidate) ? undefined : fileAt(`${candidate}.html`)) ??
+    fileAt(path.join(root, "index.html"));
   if (!file) return undefined;
 
   return {

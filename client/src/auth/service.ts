@@ -25,7 +25,13 @@ import {
   type LoginSessionStatus,
   type LoginSessionStore,
 } from "./login-sessions.ts";
-import { PROVIDERS, PROVIDER_IDS, type LoginKind, type ProviderId } from "./providers.ts";
+import {
+  PROVIDERS,
+  PROVIDER_IDS,
+  hasLoginFlow,
+  type LoginKind,
+  type ProviderId,
+} from "./providers.ts";
 
 /** A refusal with the HTTP status it deserves. */
 export class LoginRequestError extends Error {
@@ -128,6 +134,17 @@ export class ProviderLoginService {
 
   async startLogin(ownerId: string, provider: ProviderId): Promise<LoginSessionView> {
     const ttlDeadline = this.now() + this.sessionTtlMs;
+
+    // A provider with no OAuth flow is refused here rather than falling through
+    // to the next branch. The branches below are not a default — they are two
+    // specific flows, and letting a third provider land in one of them would
+    // start Codex's device authorization under Google's name.
+    if (!hasLoginFlow(provider)) {
+      throw new LoginRequestError(
+        400,
+        `${PROVIDERS[provider].name} has no sign-in flow here. Paste a ${PROVIDERS[provider].name} API key instead.`,
+      );
+    }
 
     if (PROVIDERS[provider].loginKind === "paste-code") {
       const start = await this.flows.startAnthropicLogin();

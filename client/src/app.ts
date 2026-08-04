@@ -39,6 +39,12 @@ export type AppDeps = {
    * Optional for the same reason auth is; the entry module always supplies it.
    */
   voice?: { app: Hono; reason?: string };
+  /**
+   * The orb's routes and, when the orb is off, why. Same shape as voice because
+   * it is the same promise: a face that cannot run says so, and the typed lane
+   * keeps working regardless.
+   */
+  orb?: { app: Hono; reason?: string };
 };
 
 /**
@@ -59,6 +65,13 @@ export function buildApp(deps: AppDeps): Hono {
         ? {
             voice: deps.voice.reason
               ? { enabled: false, reason: deps.voice.reason }
+              : { enabled: true },
+          }
+        : {}),
+      ...(deps.orb
+        ? {
+            orb: deps.orb.reason
+              ? { enabled: false, reason: deps.orb.reason }
               : { enabled: true },
           }
         : {}),
@@ -83,6 +96,7 @@ export function buildApp(deps: AppDeps): Hono {
   // settings section and every sign-in route with a 404-shaped page.
   if (deps.auth) app.route("/", deps.auth);
   if (deps.voice) app.route("/", deps.voice.app);
+  if (deps.orb) app.route("/", deps.orb.app);
 
   app.get("*", (c) => {
     const asset = readUiAsset(deps.uiRoot, c.req.path);
