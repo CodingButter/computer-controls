@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import (
     Depends,
@@ -40,8 +41,35 @@ log = logging.getLogger(__name__)
 TAG = "computer-controls/server"
 
 
+#: Percent-encoded transcripts ride in response headers as a debugging aid.
+#: Nothing reads them programmatically, so they are the first thing that should
+#: give way — well before the 4-8 KB header budget a proxy typically allows for
+#: the whole block.
+MAX_HEADER_TEXT_BYTES = 1024
+
+
 class SessionRequest(BaseModel):
     secret: str
+
+
+def _header_safe(text: str) -> str:
+    """Render arbitrary speech as a bounded, always-sendable header value.
+
+    HTTP headers travel as latin-1 while speech is any language at all, so an
+    unencoded transcript raises UnicodeEncodeError during serialisation and
+    costs the caller the audio reply it had already paid for. Percent-encoding
+    fixes the alphabet; it also inflates CJK ninefold, so the result is
+    truncated on a character boundary rather than handed to a proxy that would
+    reject the entire response for an oversized header.
+    """
+    encoded = quote(text)
+    if len(encoded) <= MAX_HEADER_TEXT_BYTES:
+        return encoded
+    # Trim whole characters so the tail is never a severed escape sequence.
+    truncated = text
+    while len(quote(truncated)) > MAX_HEADER_TEXT_BYTES - len(quote("…")):
+        truncated = truncated[: max(1, len(truncated) * 2 // 3)]
+    return quote(truncated + "…")
 
 
 def create_app(config: ServerConfig) -> FastAPI:
@@ -128,7 +156,10 @@ def create_app(config: ServerConfig) -> FastAPI:
         return Response(
             content=reply_audio,
             media_type="audio/mpeg",
-            headers={"X-Transcript": text, "X-Reply": reply},
+            headers={
+                "X-Transcript": _header_safe(text),
+                "X-Reply": _header_safe(reply),
+            },
         )
 
     # -- WS /ws: auth-gated, token via query param --------------------------

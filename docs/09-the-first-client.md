@@ -36,7 +36,7 @@ so two agents sharing one connection become one client in four places at once.
 | `__main__.py` | Entry point: `python -m server`. |
 | `requirements.txt` | fastapi, uvicorn[standard], websockets, httpx, python-multipart. |
 
-Tests live in `server/tests/` — 43 tests including the one-connection-per-agent invariant.
+Tests live in `server/tests/` — 62 tests including the one-connection-per-agent invariant.
 
 ## What's in `clients/web/`
 
@@ -81,12 +81,19 @@ export VOICE_API_URL="http://localhost:8000"   # optional: voice API base URL
 python -m server
 ```
 
+`COMPUTER_CONTROLS_SECRET` and `COMPUTER_CONTROLS_SOCKET` are required — the server names
+whichever is missing and exits `2` rather than starting a listener that would refuse every
+request. It logs the socket path, the voice-api URL, and the listening address on startup.
+
 For HTTPS (required for microphone access and PWA install on a phone), set:
 
 ```sh
 export TLS_CERT_PATH="/path/to/cert.pem"
 export TLS_KEY_PATH="/path/to/key.pem"
 ```
+
+Set both or neither — uvicorn switches TLS on as soon as either one is present, so a lone
+certificate would fail inside its startup. The server checks the pair up front and exits `2`.
 
 ### 4. Open the PWA
 
