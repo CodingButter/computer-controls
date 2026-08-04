@@ -15,6 +15,12 @@ export type ClientStatus = {
    * declined.
    */
   plugins: { admitted: string[]; refused: string[] };
+  /** The brain: which pack this hub declared, which model a turn reaches for, and what each tier resolves to. */
+  model: {
+    pack: string;
+    thinking: string;
+    tiers: Record<string, string>;
+  };
 };
 
 export type AppDeps = {

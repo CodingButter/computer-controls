@@ -24,7 +24,13 @@ export type AgentTurnDeps = {
   getSession: () => Promise<HubSession>;
   /** Execution mode for the turn. */
   mode?: "build" | "plan" | "fast";
-  modeDefaults?: Record<string, string>;
+  /**
+   * The model the turn runs on, named rather than inferred. Without it the
+   * runner resolves a model from the mode's defaults, and those defaults are
+   * the runtime's to decide — see ./model-pack.ts for why this hub decides
+   * instead.
+   */
+  model: string;
   /**
    * The headless runner. Injected so the wiring can be proved without a model:
    * everything from the HTTP body to the runner options and back to the reply
@@ -42,7 +48,7 @@ export function createAgentTurn(deps: AgentTurnDeps): AgentTurn {
       session,
       prompt: request.message,
       mode: deps.mode ?? "build",
-      ...(deps.modeDefaults ? { modeDefaults: deps.modeDefaults } : {}),
+      model: deps.model,
       ...(request.threadId ? { thread: { id: request.threadId } } : {}),
     }).result;
 

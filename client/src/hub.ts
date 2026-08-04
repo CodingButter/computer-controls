@@ -1,9 +1,18 @@
+import path from "node:path";
+
 import { prepareAgentControllerMount, wireSessionConcerns } from "@mastra/code-sdk";
 
 import type { ClientStatus } from "./app.ts";
 import { createAgentTurn } from "./chat.ts";
 import type { AgentTurn, HubSession } from "./chat.ts";
 import type { ClientConfig } from "./config.ts";
+import {
+  hubModes,
+  MODE_BRAINS,
+  modelForTier,
+  resolveModelPack,
+  THINKING_MODE,
+} from "./model-pack.ts";
 import { mountAllowedPlugins } from "./plugins.ts";
 import { HANDS_OFF_TOOL_NAMES, hubWorkspace, listSessionTools } from "./toolbox.ts";
 
@@ -20,6 +29,10 @@ const BROWSER_RESOURCE_ID = "local-browser";
  * only recognises a Mastra config when it finds that expression there.
  */
 export async function prepareHub(config: ClientConfig) {
+  // Before anything is constructed, because a pack that cannot be resolved is a
+  // hub that would otherwise boot and think with somebody else's pick.
+  const modelPack = resolveModelPack();
+
   const { pluginManager, refused } = mountAllowedPlugins({
     projectRoot: config.root,
     configDir: config.configDir,
@@ -31,6 +44,15 @@ export async function prepareHub(config: ClientConfig) {
   const { base, mastraArgs, finalize } = await prepareAgentControllerMount({
     cwd: config.root,
     configDir: config.configDir,
+    // The modes a session can enter, each carrying the model this repository
+    // declared rather than one the runtime resolved for it. See ./model-pack.ts.
+    modes: hubModes(modelPack),
+    // Which only holds if the runtime is not reading a settings file that says
+    // otherwise: a saved model choice in the TUI's settings is stamped over a
+    // configured mode default, so the hub keeps its own file under its own root
+    // instead of inheriting the preferences of whoever last used the TUI on this
+    // machine. Credentials are a separate store and are still shared.
+    settingsPath: path.join(config.root, config.configDir, "settings.json"),
     // The desktop lives on this machine and the hub runs beside it. There is no
     // sandbox fleet to isolate a session into: isolation here is the daemon's
     // consent ceiling, which is what the plugin's scope configures.
@@ -68,10 +90,22 @@ export async function prepareHub(config: ClientConfig) {
     return session;
   }
 
+  /**
+   * The model the browser's turns run on.
+   *
+   * Named on the turn itself, not left to the mode's default, because the
+   * runtime stamps this machine's saved settings over a configured mode model
+   * whenever that file happens to hold one. A turn that names its model is the
+   * one place the chain cannot be re-entered: declaring the pack on the modes
+   * says what this hub runs, and naming it here makes it so.
+   */
+  const thinkingModel = modelForTier(modelPack, MODE_BRAINS[THINKING_MODE]);
+
   const chat: AgentTurn = createAgentTurn({
     controller: base.controller,
     getSession,
-    modeDefaults: base.effectiveDefaults,
+    mode: THINKING_MODE,
+    model: thinkingModel,
   });
 
   /**
@@ -80,6 +114,11 @@ export async function prepareHub(config: ClientConfig) {
    * catalogue instead would have made the badge a description of what was
    * mounted rather than of what the model can reach — which is exactly the gap
    * a stripped session has to be able to prove closed.
+   *
+   * It answers with the brain on the same terms: the pack that was declared,
+   * the model a turn will actually reach for, and what each tier resolves to —
+   * so "which model holds the desktop" is a question with an answer anyone can
+   * fetch, instead of one that has to be measured on a live boot.
    */
   const status = async (): Promise<ClientStatus> => ({
     tools: await listSessionTools({ controller: base.controller, session: await getSession() }),
@@ -93,9 +132,14 @@ export async function prepareHub(config: ClientConfig) {
       admitted: (base.pluginManager?.getLoadedPlugins() ?? []).map((plugin) => plugin.id).sort(),
       refused,
     },
+    model: {
+      pack: modelPack.id,
+      thinking: thinkingModel,
+      tiers: modelPack.models,
+    },
   });
 
-  return { base, mastraArgs, finalize, chat, status, getSession };
+  return { base, mastraArgs, finalize, chat, status, getSession, modelPack };
 }
 
 export type PreparedHub = Awaited<ReturnType<typeof prepareHub>>;

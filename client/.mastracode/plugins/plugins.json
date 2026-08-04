@@ -1,0 +1,15 @@
+{
+  "plugins": {
+    "desktop-control": {
+      "enabled": true,
+      "source": "local",
+      "specifier": "/home/codingbutter/computer-controls/plugin",
+      "path": "/home/codingbutter/computer-controls/plugin",
+      "entry": "src/index.ts",
+      "config": {
+        "scope": "observe"
+      }
+    }
+  },
+  "disabledPlugins": []
+}
