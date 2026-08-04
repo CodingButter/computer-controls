@@ -47,11 +47,20 @@ DEFAULT_APPLICATION = "vesktop"
 #: a screenshot, harmless enough to be left sitting in a composer.
 DEFAULT_TEXT = "keystroke tier proof"
 
-MAX_LEGAL_DEPTH = 12
+#: The depth a client that has declared attention on the application may ask for.
+#: Electron applications bury their composer twenty-odd levels down, well past the
+#: undeclared ceiling of 12 — which is exactly why declared attention exists, and a
+#: proof that reached the field any other way would not be using the client's path.
+MAX_LEGAL_DEPTH = 64
 
 #: A password field would produce an unverifiable verdict by design, which is the
 #: correct behaviour and a useless proof: the artifact could not show what landed.
 SEARCH_ROLES = atspi.TEXT_VALUE_ROLES - {"password text"}
+
+#: Driving the handlers in-process means no connection ever minted an identity,
+#: and an attention declared under an empty identity is returned, not stored.
+#: The params fallback in `_client_id` exists for exactly this caller.
+CLIENT = {"clientId": "prove-keystrokes-live"}
 
 
 def environment() -> dict[str, str]:
@@ -98,7 +107,7 @@ def find_unwritable_field(window_id: str) -> tuple[str | None, list[str]]:
     a finding worth writing down with its working shown.
     """
     tree = server._method_inspect_window(
-        {"windowId": window_id, "depth": MAX_LEGAL_DEPTH, "maxNodes": 1000}
+        {"windowId": window_id, "depth": MAX_LEGAL_DEPTH, "maxNodes": 1000, **CLIENT}
     )
     considered: list[str] = []
     for node, _depth in _walk(tree["window"]):
@@ -121,7 +130,9 @@ def attempt_the_honest_path(element_id: str, text: str) -> dict:
     where it cannot.
     """
     try:
-        result = server._method_type_text({"elementId": element_id, "text": text, "settleMs": 0})
+        result = server._method_type_text(
+            {"elementId": element_id, "text": text, "settleMs": 0, **CLIENT}
+        )
     except errors.DesktopError as refused:
         return {"ok": False, "raised": refused.code, "message": refused.message}
     return result
@@ -266,6 +277,13 @@ def main() -> int:
 
     loop.get_loop().start()
     try:
+        # Declare attention before inspecting, the way a real client would: the
+        # undeclared depth ceiling is 12, and the field this tier exists for
+        # lives below it in every application that needs the tier at all.
+        server._method_set_attention(
+            {"applications": [args.application], "depth": "tree", **CLIENT}
+        )
+
         windows = server._method_list_windows({})["windows"]
         window = next((w for w in windows if w["applicationName"] == args.application), None)
         if window is None:
@@ -293,7 +311,7 @@ def main() -> int:
 
         print(f"  typing {len(args.text)} characters — do not touch the keyboard")
         typed = server._method_type_keystrokes(
-            {"elementId": element_id, "text": args.text, "settleMs": 200}
+            {"elementId": element_id, "text": args.text, "settleMs": 200, **CLIENT}
         )
         print(f"  typeKeystrokes: ok={typed.get('ok')} backend={typed.get('backend')}")
 
