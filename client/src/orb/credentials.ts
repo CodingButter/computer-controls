@@ -42,13 +42,13 @@ export async function resolveOrbCredential(
   store: Pick<CredentialStore, "get" | "getStoredApiKey" | "getApiKey">,
 ): Promise<VoiceCredential | VoiceRefusal> {
   const storedKey = store.getStoredApiKey(GOOGLE_PROVIDER_ID);
-  if (storedKey) return { kind: "api-key", key: storedKey };
+  if (storedKey) return { kind: "api-key", key: storedKey, provider: "gemini-live" };
 
   const credential = store.get(GOOGLE_PROVIDER_ID);
   if (!credential) return { reason: NO_GOOGLE_ACCOUNT };
 
   if (credential.type === "api_key") {
-    return credential.key ? { kind: "api-key", key: credential.key } : { reason: NO_GOOGLE_ACCOUNT };
+    return credential.key ? { kind: "api-key", key: credential.key, provider: "gemini-live" } : { reason: NO_GOOGLE_ACCOUNT };
   }
 
   const refreshed = await store.getApiKey(GOOGLE_PROVIDER_ID);
@@ -57,7 +57,7 @@ export async function resolveOrbCredential(
       reason: "Your Google sign-in could not be refreshed. Sign in again to turn the orb back on.",
     };
   }
-  return { kind: "chatgpt-oauth", key: refreshed };
+  return { kind: "chatgpt-oauth", key: refreshed, provider: "gemini-live" };
 }
 
 /** Whether the orb can run at all, phrased for a page that has to explain itself. */

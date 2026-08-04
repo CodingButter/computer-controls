@@ -24,7 +24,7 @@ describe("resolving the credential the orb may use", () => {
       storeHolding({}, { [GOOGLE_PROVIDER_ID]: "goog-pasted" }),
     );
 
-    expect(resolved).toEqual({ kind: "api-key", key: "goog-pasted" });
+    expect(resolved).toEqual({ kind: "api-key", key: "goog-pasted", provider: "gemini-live" });
   });
 
   it("reads the key out of the same store the sign-in surface writes to", async () => {
@@ -35,6 +35,7 @@ describe("resolving the credential the orb may use", () => {
     await expect(resolveOrbCredential(store)).resolves.toEqual({
       kind: "api-key",
       key: "from-auth-json",
+      provider: "gemini-live",
     });
   });
 
@@ -47,6 +48,7 @@ describe("resolving the credential the orb may use", () => {
     await expect(resolveOrbCredential(store)).resolves.toEqual({
       kind: "chatgpt-oauth",
       key: "fresh",
+      provider: "gemini-live",
     });
     expect(store.getApiKey).toHaveBeenCalledWith(GOOGLE_PROVIDER_ID);
   });
@@ -79,7 +81,7 @@ describe("resolving the credential the orb may use", () => {
   });
 
   it("turns the resolution into something a page can render", async () => {
-    const enabled = orbAvailability({ kind: "api-key", key: "k" });
+    const enabled = orbAvailability({ kind: "api-key", key: "k", provider: "gemini-live" });
     const disabled = orbAvailability({ reason: "no key" });
 
     expect(enabled).toEqual({ enabled: true });
