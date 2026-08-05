@@ -1,12 +1,38 @@
-// The Overview's placeholder. Phase 3 replaces this with the live health
-// cards; the shell around it is already the real one.
+"use client";
+
+import { useEffect, useState } from "react";
+
+import { Overview } from "@/components/overview/overview";
+import { getHealth, getOrbStatus, type Fetched, type HubHealth, type OrbStatus } from "@/lib/hub";
+
+/**
+ * The Overview page. Static export means no server-side IO — the page mounts,
+ * then asks the hub it is served from. Until the answers land it says so,
+ * because a spinner pretending to be data is a small lie.
+ */
 export default function Home() {
-  return (
-    <div className="flex h-full items-center justify-center">
-      <div className="rounded-xl border border-border bg-card p-8 text-center">
-        <h1 className="text-2xl font-semibold">Overview</h1>
-        <p className="mt-2 text-sm text-muted">Live health cards arrive in the next phase.</p>
-      </div>
-    </div>
-  );
+  const [health, setHealth] = useState<Fetched<HubHealth> | null>(null);
+  const [orb, setOrb] = useState<Fetched<OrbStatus> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      const [h, o] = await Promise.all([getHealth(), getOrbStatus()]);
+      if (cancelled) return;
+      setHealth(h);
+      setOrb(o);
+    };
+    void load();
+    const timer = setInterval(load, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  if (health === null || orb === null) {
+    return <p className="text-sm text-muted">Asking the hub…</p>;
+  }
+
+  return <Overview health={health} orb={orb} />;
 }
