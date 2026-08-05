@@ -2,8 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, expect, test } from "vitest";
+import { WebSocket } from "ws";
 
 import desktopControl from "../../plugin/src/index.ts";
+import type { DevicesView } from "./devices/index.ts";
+import { EVENTS_PATH } from "./events/index.ts";
 
 /**
  * The hub, booted for real: the entry module constructs Mastra, finalizes the
@@ -19,6 +22,18 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), "comcon-client-"));
 beforeAll(async () => {
   process.env.COMCON_CLIENT_ROOT = root;
   process.env.COMCON_CLIENT_PORT = "0";
+  // The dashboard export is a build artifact; the boot proof injects the
+  // checked-in fixture so it can run on an unbuilt checkout. The real export
+  // is asserted by the gate that builds it first.
+  process.env.COMCON_DASHBOARD_OUT = path.resolve(
+    import.meta.dirname,
+    "fixtures",
+    "dashboard-out",
+  );
+  // Curing runs at boot and writes launcher overrides. Pointed at the temp
+  // root here: a test suite that edits the developer's own .desktop files
+  // would be a side effect nobody asked this test to have.
+  process.env.COMCON_APPLICATIONS_DIR = path.join(root, "applications");
   const entry = await import("./index.ts");
   baseUrl = await entry.listening;
   close = () => new Promise<void>((resolve) => entry.server.close(() => resolve()));
@@ -31,10 +46,16 @@ afterAll(async () => {
 });
 
 test("test_client_boots_and_serves_the_ui", async () => {
+  // "/" belongs to the dashboard now — the fixture stands in for the export.
   const page = await fetch(baseUrl);
   expect(page.status).toBe(200);
   expect(page.headers.get("content-type")).toContain("text/html");
-  const html = await page.text();
+  expect(await page.text()).toContain("dashboard-fixture-root");
+
+  // Chat kept everything but its address: same page, same module, at /chat.
+  const chat = await fetch(`${baseUrl}/chat`);
+  expect(chat.status).toBe(200);
+  const html = await chat.text();
   expect(html).toContain("<title>computer controls</title>");
 
   // The page's logic is one fetch away rather than inline, so the boot proof
@@ -46,11 +67,11 @@ test("test_client_boots_and_serves_the_ui", async () => {
   expect(script.headers.get("content-type")).toContain("javascript");
   expect(await script.text()).toContain("/api/chat");
 
-  // A path the page owns rather than a file on disk still lands on the page:
-  // one process serving one SPA, which is the whole point of the static lane.
+  // A path no file answers lands on the dashboard's page: it owns the SPA
+  // fallback, which is the whole point of the static lane.
   const deepLink = await fetch(`${baseUrl}/threads/whatever`);
   expect(deepLink.status).toBe(200);
-  expect(await deepLink.text()).toContain("<title>computer controls</title>");
+  expect(await deepLink.text()).toContain("dashboard-fixture-root");
 });
 
 test("the sign-in surface serves through the booted hub, not just its own module", async () => {
@@ -142,6 +163,31 @@ test("the orb serves as a second face through the booted hub", async () => {
   if (!status.enabled) {
     expect(status.reason).toMatch(/\S/);
     expect(orbHealth.orb!.reason).toBe(status.reason);
+  }
+});
+
+test("the devices route answers through the booted hub, and counts a real face", async () => {
+  // Same wiring lesson as the sign-in and voice surfaces — the module's own
+  // tests build the app directly and would pass with nothing mounted — plus the
+  // one claim only the running process can make: the count is read off the live
+  // event socket, so a face connecting has to change this answer.
+  const before = (await fetch(`${baseUrl}/api/devices`).then((r) => r.json())) as DevicesView;
+  expect(before.devices[0]!.kind).toBe("hub");
+  expect(before.devices[0]!.connected).toBe(true);
+  expect(before.devices.find((d) => d.kind === "widget")!.connected).toBe(false);
+  expect(before.pairing.enabled).toBe(false);
+
+  const face = new WebSocket(`${baseUrl.replace("http://", "ws://")}${EVENTS_PATH}`);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      face.once("open", () => resolve());
+      face.once("error", reject);
+    });
+
+    const during = (await fetch(`${baseUrl}/api/devices`).then((r) => r.json())) as DevicesView;
+    expect(during.devices.find((d) => d.kind === "widget")!.connected).toBe(true);
+  } finally {
+    face.close();
   }
 });
 

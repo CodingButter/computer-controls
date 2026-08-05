@@ -40,6 +40,7 @@ export class Mouth {
   #queue: { utterance: Utterance; done: () => void }[] = [];
   #playing: { utterance: Utterance; controller: AbortController } | undefined;
   #draining = false;
+  #idleWaiters: (() => void)[] = [];
   readonly #events: MouthEvents;
 
   constructor(events: MouthEvents = {}) {
@@ -58,6 +59,22 @@ export class Mouth {
   /** How many utterances are waiting behind the one playing. */
   get waiting(): number {
     return this.#queue.length;
+  }
+
+  /**
+   * Resolves when the mouth has nothing left to say.
+   *
+   * The queue is what keeps two sounds from overlapping, but anything that
+   * would *provoke* a new sound has to line up too — a signal pushed into the
+   * realtime session while the orb is mid-sentence makes the provider abandon
+   * the sentence it was already speaking, which is an interruption the queue
+   * never sees. Callers on that side wait here first.
+   */
+  whenIdle(): Promise<void> {
+    if (!this.#playing && this.#queue.length === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      this.#idleWaiters.push(resolve);
+    });
   }
 
   speak(utterance: Utterance): Promise<void> {
@@ -103,6 +120,9 @@ export class Mouth {
         next.done();
       }
       this.#events.onIdle?.();
+      const waiters = this.#idleWaiters;
+      this.#idleWaiters = [];
+      for (const resolve of waiters) resolve();
     } finally {
       this.#draining = false;
     }
