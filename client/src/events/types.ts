@@ -22,7 +22,22 @@ export type StateEvent =
   | { type: "speaking" }
   | { type: "idle" }
   | { type: "touching"; id: string; x: number; y: number; width: number; height: number }
-  | { type: "released"; id: string };
+  | { type: "released"; id: string }
+  | { type: "progress"; id: string; text: string }
+  | { type: "answer"; id: string; text: string }
+  | { type: "voice_opened" }
+  | { type: "voice_closed" };
+
+/*
+ * `progress` and `answer` are the hub replying to an `ask` — the id is the
+ * asker's correlation id, echoed back so a mouth holding several function
+ * calls open can route each reply to the right one. `voice_opened` and
+ * `voice_closed` report set transitions, not memberships: one broadcast when
+ * the first mouth opens, one when the last closes. A client that opened a
+ * voice session and hears `voice_opened` caused it; a client that hears it
+ * without having opened knows to plug its own ears. No word carries who —
+ * which device is talking is arbitration state, not content a face renders.
+ */
 
 /*
  * `touching` and `released` are the hub pointing at its own hands.
@@ -47,7 +62,23 @@ export type StateEvent =
 export type Gesture =
   | { type: "mute" }
   | { type: "dismiss" }
-  | { type: "drag"; x: number; y: number };
+  | { type: "drag"; x: number; y: number }
+  | { type: "ask"; id: string; request: string }
+  | { type: "voice_open" }
+  | { type: "voice_close" }
+  | { type: "caption"; text: string };
+
+/*
+ * `ask`, `voice_open`, `voice_close` and `caption` are the words a client-side
+ * mouth speaks. A mouth is still a face — it holds no tool and no path to the
+ * daemon — but it does hold a conversation, and these are the only four things
+ * a conversation needs from the hub: route a request to the brain (`ask`, with
+ * a client-chosen id the replies echo), declare the microphone session open
+ * and closed (arbitration, so other mouths can plug their ears), and report
+ * what was heard or said (`caption`) so faces that are not mouths can render
+ * it. Still no audio: a caption is text the client's own session already
+ * transcribed, published deliberately, frame by frame.
+ */
 
 export type StateEventType = StateEvent["type"];
 export type GestureType = Gesture["type"];
@@ -67,9 +98,21 @@ export const STATE_EVENT_TYPES = [
   "idle",
   "touching",
   "released",
+  "progress",
+  "answer",
+  "voice_opened",
+  "voice_closed",
 ] as const satisfies readonly StateEventType[];
 
-export const GESTURE_TYPES = ["mute", "dismiss", "drag"] as const satisfies readonly GestureType[];
+export const GESTURE_TYPES = [
+  "mute",
+  "dismiss",
+  "drag",
+  "ask",
+  "voice_open",
+  "voice_close",
+  "caption",
+] as const satisfies readonly GestureType[];
 
 /**
  * The exact keys each word carries, including `type`.
@@ -87,12 +130,20 @@ const STATE_EVENT_KEYS: Record<StateEventType, readonly string[]> = {
   idle: ["type"],
   touching: ["type", "id", "x", "y", "width", "height"],
   released: ["type", "id"],
+  progress: ["type", "id", "text"],
+  answer: ["type", "id", "text"],
+  voice_opened: ["type"],
+  voice_closed: ["type"],
 };
 
 const GESTURE_KEYS: Record<GestureType, readonly string[]> = {
   mute: ["type"],
   dismiss: ["type"],
   drag: ["type", "x", "y"],
+  ask: ["type", "id", "request"],
+  voice_open: ["type"],
+  voice_close: ["type"],
+  caption: ["type", "text"],
 };
 
 /** A JSON object and nothing else — not null, not an array, not a primitive. */
@@ -116,6 +167,14 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+/**
+ * A string with something in it. An `ask` with no request is not a question,
+ * and a reply with no id has no asker — both are noise, not errors.
+ */
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value !== "";
+}
+
 export function isStateEvent(value: unknown): value is StateEvent {
   if (!isPlainRecord(value)) return false;
   const type = value.type;
@@ -124,6 +183,9 @@ export function isStateEvent(value: unknown): value is StateEvent {
   if (!hasExactKeys(value, STATE_EVENT_KEYS[type as StateEventType])) return false;
   if (type === "caption") return typeof value.text === "string";
   if (type === "released") return typeof value.id === "string" && value.id !== "";
+  if (type === "progress" || type === "answer") {
+    return isNonEmptyString(value.id) && isNonEmptyString(value.text);
+  }
   if (type === "touching") {
     if (typeof value.id !== "string" || value.id === "") return false;
     if (!isFiniteNumber(value.x) || !isFiniteNumber(value.y)) return false;
@@ -142,6 +204,8 @@ export function isGesture(value: unknown): value is Gesture {
   if (!(GESTURE_TYPES as readonly string[]).includes(type)) return false;
   if (!hasExactKeys(value, GESTURE_KEYS[type as GestureType])) return false;
   if (type === "drag") return isFiniteNumber(value.x) && isFiniteNumber(value.y);
+  if (type === "ask") return isNonEmptyString(value.id) && isNonEmptyString(value.request);
+  if (type === "caption") return isNonEmptyString(value.text);
   return true;
 }
 

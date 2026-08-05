@@ -23,6 +23,11 @@ client/.mastracode/settings.json
 .mastracode/settings-audit.jsonl
 client/.mastracode/hub-settings.json
 client/.mastracode/settings-audit.jsonl
+# The secrets paired devices present at the /events door — the one file here a
+# leak of which would let a stranger open a window onto this machine's spoken
+# conversation. Both spellings, same anchoring trap as above.
+.mastracode/device-credentials.json
+client/.mastracode/device-credentials.json
 
 # The hub's own plugin registry: derived from the allowlist on every boot
 .mastracode-hub/

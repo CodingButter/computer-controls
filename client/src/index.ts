@@ -13,7 +13,13 @@ import { cureChromiumApps, type CureReport } from "./curing/curing.ts";
 import { resolveClientConfig } from "./config.ts";
 import { buildDevicesApp } from "./devices/index.ts";
 import { buildDesktopConfigApp } from "./desktop-config/routes.ts";
-import { attachEventSocket, combineEventSources, createTouchLane } from "./events/index.ts";
+import {
+  DEVICE_CREDENTIALS_FILE,
+  attachEventSocket,
+  combineEventSources,
+  createDeviceCredentialStore,
+  createTouchLane,
+} from "./events/index.ts";
 import { prepareHub } from "./hub.ts";
 import { wrapTurnWithPermissionAwareness } from "./permissions/aware-turn.ts";
 import { defaultConfigPath } from "./permissions/config-file.ts";
@@ -26,7 +32,7 @@ import { commandSpeaker, startMicrophone } from "./orb/audio-host.ts";
 import { createCaptureLifecycle } from "./orb/capture-lifecycle.ts";
 import { pocEarChain } from "./orb/ear-poc.ts";
 import { diskClipStore, unwiredSpeaker } from "./orb/host.ts";
-import { chooseFaceSource, mountOrb } from "./orb/index.ts";
+import { chooseFaceSource, createHubBrain, mountOrb } from "./orb/index.ts";
 import { geminiLiveProvider } from "./orb/live-gemini.ts";
 import { FileSettingsAudit } from "./settings/audit.ts";
 import { SettingsGate } from "./settings/gate.ts";
@@ -273,4 +279,20 @@ export const server = serve(
  * the agent's hands is the hub's business, not the face's.
  */
 export const eventSource = combineEventSources(chooseFaceSource(orb), touchLane);
-export const eventSocket = attachEventSocket(server, eventSource);
+
+/**
+ * The lane's brain rides the same wrapped turn as the orb's and the typed
+ * route's — an `ask` that arrives over the socket is indistinguishable
+ * downstream from one that was typed or spoken. Built here rather than
+ * borrowed from the orb because the orb may be refused on this machine, and a
+ * mouth on another device still deserves an answer: the dispatch seam depends
+ * on the agent, never on a hub-side realtime session.
+ */
+export const eventSocket = attachEventSocket(server, eventSource, {
+  brain: createHubBrain({ turn: chat }),
+  // The store is empty until QR pairing (#35) mints into it; loopback still
+  // walks in. Wired now so the door checks the same file pairing will write.
+  credentials: createDeviceCredentialStore(
+    path.join(config.root, config.configDir, DEVICE_CREDENTIALS_FILE),
+  ),
+});
