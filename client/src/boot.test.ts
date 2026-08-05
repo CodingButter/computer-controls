@@ -162,6 +162,18 @@ test("test_desktop_tools_are_minted_at_observe_scope", async () => {
   for (const name of minted) expect(everyTool).toContain(name);
 });
 
+test("the configuration agent is reachable by dispatch and its verbs are not the main agent's", () => {
+  // The desktop agent gets one new capability: it can hand work to another
+  // mind. That is the whole seam — "tell the configuration agent what to do"
+  // is a tool call, so a spoken request and a typed one arrive the same way.
+  expect(health.tools).toContain("subagent");
+
+  // And it gets no settings verbs of its own. The agent holding the desktop
+  // cannot change what it is allowed to hold: the tools are absent from it,
+  // exactly as the desktop tools are absent from the configuration agent.
+  expect(health.tools.filter((name) => name.startsWith("settings_"))).toEqual([]);
+});
+
 async function mintedAt(scope: string): Promise<string[]> {
   const pluginDir = path.resolve(import.meta.dirname, "..", "..", "plugin");
   const tools = await desktopControl.tools({

@@ -10,6 +10,11 @@ __pycache__/
 # The hub keeps the runtime's settings under its own root rather than the
 # machine's shared one (client/src/hub.ts); what lands there is local state.
 .mastracode/settings.json
+# What this machine's owner picked, and the record of them picking it. Both are
+# facts about one person's machine, and the audit is the one file here that
+# would be actively wrong to publish (client/src/settings/).
+.mastracode/hub-settings.json
+.mastracode/settings-audit.jsonl
 
 # The hub's own plugin registry: derived from the allowlist on every boot
 .mastracode-hub/

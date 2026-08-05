@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { serve } from "@hono/node-server";
 import { AuthStorage } from "@mastra/code-sdk/auth/storage";
 import { Mastra } from "@mastra/core/mastra";
@@ -13,6 +15,10 @@ import { pocEarChain } from "./orb/ear-poc.ts";
 import { diskClipStore, unwiredSpeaker } from "./orb/host.ts";
 import { chooseFaceSource, mountOrb } from "./orb/index.ts";
 import { geminiLiveProvider } from "./orb/live-gemini.ts";
+import { FileSettingsAudit } from "./settings/audit.ts";
+import { SettingsGate } from "./settings/gate.ts";
+import { FilePreferenceStore } from "./settings/preferences.ts";
+import { SettingsService } from "./settings/service.ts";
 import {
   createSessionVoice,
   isRefusal,
@@ -22,7 +28,31 @@ import {
 import { buildVoiceApp } from "./voice/routes.ts";
 
 const config = resolveClientConfig();
-const hub = await prepareHub(config);
+
+/**
+ * Sign-in writes to the same file-backed `auth.json` the TUI reads, so a login
+ * through the browser is a login everywhere on this machine.
+ *
+ * Built before the hub, because the configuration agent the hub mounts needs
+ * something to configure — and it is handed the same login service the settings
+ * page's own routes use, not a second copy of it. Connecting an account by
+ * asking and connecting one by clicking are the same flow, writing the same
+ * file, or the two surfaces would eventually disagree about what is connected.
+ */
+const storage = new AuthStorage();
+const providerAuth = createProviderAuth({ storage });
+const hubDir = path.join(config.root, config.configDir);
+const preferences = new FilePreferenceStore(hubDir);
+const settings = new SettingsGate({
+  audit: new FileSettingsAudit(hubDir),
+  settings: new SettingsService({
+    voiceCredentials: storage,
+    preferences,
+    login: providerAuth.service,
+  }),
+});
+
+const hub = await prepareHub(config, { settings });
 
 /**
  * The literal stays here, in the entry module, on purpose: the deployer's
@@ -34,23 +64,23 @@ export const mastra = new Mastra(hub.mastraArgs);
 await hub.finalize();
 
 /**
- * Sign-in writes to the same file-backed `auth.json` the TUI reads, so a login
- * through the browser is a login everywhere on this machine.
- */
-const storage = new AuthStorage();
-const providerAuth = createProviderAuth({ storage });
-
-/**
  * The ear and the mouth resolve from the same store the sign-in surface
  * writes, at boot: connect a voice account and the next start has a voice.
  * No credential, no voice; the reason travels to the UI through /api/health.
  *
- * Which account, when more than one is connected, is the person's setting —
- * `config.voiceProvider`. The list of mouths they could pick from is read per
- * request instead, because connecting one must not require a restart to show up
- * in the settings section.
+ * Which account, when more than one is connected, is the person's setting. It
+ * can arrive two ways: `COMCON_VOICE_PROVIDER`, which is the deployer stating a
+ * default, and the saved preference, which is a person having said so. The
+ * saved one wins — it is the newer fact, and the whole point of being able to
+ * change a setting by asking is that the change outlives the sentence.
+ *
+ * The list of mouths they could pick from is read per request instead, because
+ * connecting one must not require a restart to show up in the settings section.
  */
-const voiceCredential = await resolveVoiceProvider(storage, config.voiceProvider);
+const voiceCredential = await resolveVoiceProvider(
+  storage,
+  preferences.read().voiceProvider ?? config.voiceProvider,
+);
 const voice = {
   app: buildVoiceApp({
     voice: createSessionVoice(voiceCredential),
