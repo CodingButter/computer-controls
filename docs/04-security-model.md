@@ -421,7 +421,11 @@ function: ask the hub) are locked server-side; the mint accepts no request
 body, so a requester cannot shape its own constraints. The token is
 short-lived, single-use for session start, and a redial means a fresh mint.
 A stolen token is a bounded loss: one constrained conversation window, no
-key, no account.
+key, no account. One residency to know about: the constrained endpoint takes
+the token as a URL query parameter on the device's own dial, so anything on
+the device that records request URLs — a crash reporter, a debugging proxy —
+would hold it for its lifetime. Neither client ships such a recorder, and
+the bound above is why the exposure stays a window, not a key.
 
 **Audio goes from the device to the provider, never through the hub.** The
 device that heard the voice dials the provider directly with its token. The
