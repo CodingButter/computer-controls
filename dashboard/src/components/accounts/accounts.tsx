@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { ProviderLogo } from "@/components/accounts/provider-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,17 +18,6 @@ import { cn } from "@/lib/utils";
  * any of these props, because there is none in any of the answers they came
  * from — the same property the old settings page kept, carried over intact.
  */
-
-function ProviderMark(props: { name: string }) {
-  return (
-    <span
-      aria-hidden
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-sm font-semibold text-accent"
-    >
-      {props.name.charAt(0).toUpperCase()}
-    </span>
-  );
-}
 
 function ConnectionPill(props: { provider: ProviderFlow }) {
   const { provider } = props;
@@ -145,7 +135,7 @@ function ProviderRow(props: {
   return (
     <div className="rounded-lg border border-border bg-well/40 p-3">
       <div className="flex items-center gap-3">
-        <ProviderMark name={provider.name} />
+        <ProviderLogo provider={provider.provider} name={provider.name} />
         <div className="flex min-w-0 flex-col">
           <span className="font-medium text-foreground">{provider.name}</span>
           <span className="text-xs text-muted">

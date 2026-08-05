@@ -55,6 +55,10 @@ test("providers render with their connection state and the affordance each one h
   expect(html).toContain("Connect");
   expect(html).toContain('aria-label="OpenAI API key"');
   expect(html).toContain("Disconnect");
+  // The providers wear their own marks, drawn offline — no logo service, no
+  // third party learning which accounts this machine holds.
+  expect(html).not.toContain('src="http');
+  expect((html.match(/<svg/g) ?? []).length).toBeGreaterThanOrEqual(3);
 });
 
 test("voice lanes render what the hub offers, and say why a provider cannot serve", () => {
