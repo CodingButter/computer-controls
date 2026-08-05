@@ -1,0 +1,25 @@
+{
+  // The live module's browser delivery. No bundler exists in this repo and
+  // none may be added: tsc emits src/live/*.ts as plain multi-file ESM into
+  // public/live/, and `rewriteRelativeImportExtensions` turns the source's
+  // `./x.ts` specifiers into `./x.js` so a browser can resolve them natively.
+  // `types` is deliberately empty — a module that compiles here is a module
+  // that never leaned on Node.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": [],
+    "strict": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "rootDir": "src/live",
+    "outDir": "public/live"
+  },
+  "include": ["src/live"],
+  "exclude": ["src/live/*.test.ts"]
+}

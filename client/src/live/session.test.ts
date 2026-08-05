@@ -5,7 +5,7 @@ import {
   ORB_SYSTEM_INSTRUCTION,
   geminiLiveProvider,
   type SocketLike,
-} from "./live-gemini.ts";
+} from "./session.ts";
 import { HUB_FUNCTION_NAME, LIVE_VOICE, realtimeConfig, type RealtimeEvents } from "./live.ts";
 
 // A socket the tests own completely: every frame sent is recorded, and the
