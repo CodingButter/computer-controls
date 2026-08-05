@@ -33,6 +33,23 @@ const shipped = readdirSync(SRC)
 const read = (name: string) => readFileSync(new URL(name, import.meta.url), "utf8");
 const allSource = shipped.map(read).join("\n");
 
+/**
+ * The face ships too, and the scan above does not reach it.
+ *
+ * `shipped` is a flat read of src/, so everything under src/face/ — the shader
+ * the widget actually draws with, and the three.js it draws through — falls
+ * outside it. That placement is deliberate and load-bearing: three.module.js
+ * carries audio-path source the widget never invokes, and a flat scan would
+ * read those dead strings as an ear.
+ *
+ * The exemption stops at the vendored library. `orb-webgl.js` is this
+ * project's own code, it runs in the same renderer as everything else, and it
+ * gets read by the same list. three.module.js is held honest a different way:
+ * face-parity.test.ts pins it byte-for-byte to the hub's copy, so it cannot
+ * acquire anything here that it did not have there.
+ */
+const face = read("face/orb-webgl.js");
+
 test("test_the_widget_process_holds_no_microphone_access", () => {
   // The suite is reading real files, not an empty directory that would make
   // every assertion below vacuously true.
@@ -56,6 +73,16 @@ test("test_the_widget_process_holds_no_microphone_access", () => {
   ];
   for (const call of waysToOpenAnEar) {
     expect(allSource, `the widget must not reach for ${call}`).not.toContain(call);
+    expect(face, `the face must not reach for ${call}`).not.toContain(call);
+  }
+
+  // three.js can open an ear of its own — an AudioListener is a WebAudio
+  // context wearing a scene-graph hat. Nothing the widget draws with may name
+  // one, which is what keeps the vendored library's audio path dead rather
+  // than merely unused today.
+  for (const audio of ["AudioListener", "PositionalAudio", "AudioAnalyser", "AudioLoader"]) {
+    expect(allSource, `the widget must not construct three's ${audio}`).not.toContain(audio);
+    expect(face, `the face must not construct three's ${audio}`).not.toContain(audio);
   }
 
   // Nor does it hold a permission that would let it. The list is empty, and
@@ -89,9 +116,12 @@ test("test_idle_audio_never_leaves_the_machine_with_the_widget_running", () => {
   expect(hubEventsUrl(4111)).toBe("ws://127.0.0.1:4111/events");
   expect(hubEventsUrl(9999)).toContain("127.0.0.1");
 
-  // No other way out: no HTTP client, no second socket, no telemetry.
+  // No other way out: no HTTP client, no second socket, no telemetry. The
+  // face is read here too — a shader that phoned home for a texture would be
+  // the same hole in a prettier file.
   for (const wayOut of ["fetch(", "XMLHttpRequest", "navigator.sendBeacon", "EventSource("]) {
     expect(allSource, `the widget must not open ${wayOut}`).not.toContain(wayOut);
+    expect(face, `the face must not open ${wayOut}`).not.toContain(wayOut);
   }
 
   // The page is not permitted to load or reach anything either, belt and
