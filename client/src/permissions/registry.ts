@@ -2,7 +2,7 @@ import {
   MalformedConfigError,
   OPEN_MODE,
   readScopesConfig,
-  writePermittedApplications,
+  writePermissions,
   type PermissionsMode,
 } from "./config-file.ts";
 import type { Census } from "./daemon.ts";
@@ -21,9 +21,26 @@ export { MalformedConfigError };
  * cache, not a design.
  */
 
+/**
+ * How far inside one application an agent may go, as the page puts the
+ * question.
+ *
+ * Three of these are the states a person chooses between. `custom` is the
+ * fourth answer the file can give and the page cannot ask for: a hand-written
+ * `applicationClasses` entry naming something in between — `edit` without
+ * `activate`, say. The daemon honours it, so the page shows it rather than
+ * rounding it to whichever neighbour looks close, because rounding it would
+ * mean describing a permission the user does not have.
+ */
+export type AppAccess = "off" | "view" | "interact" | "custom";
+
 export type PermissionRow = {
   name: string;
   permitted: boolean;
+  /** What the file permits inside this application, as a state the page can draw. */
+  access: AppAccess;
+  /** The classes actually in force — carried so a `custom` row can say what it is. */
+  classes?: string[];
   running: boolean;
   /** Running on the accessibility bus. False while running means "needs a restart to become readable". */
   readable: boolean;
@@ -41,6 +58,13 @@ export type PermissionRow = {
 export type PermissionsView = {
   mode: PermissionsMode;
   daemon: { reachable: true } | { reachable: false; reason: string };
+  /**
+   * `scopes.operationClasses`, filled in up its ladder — the widest any single
+   * application can be. Carried so the page can say why "interact" is greyed
+   * out on a desktop whose global classes stop at `observe`, rather than
+   * offering a choice that would change nothing.
+   */
+  ceiling: string[];
   applications: PermissionRow[];
 };
 
@@ -137,9 +161,102 @@ export function derivePermitted(
   return matches(name, applications);
 }
 
+/**
+ * The operation ladder, in severity order — `security.OPERATION_CLASSES`.
+ * Held here as the page's own copy for the same reason the settings surface
+ * holds one: this package does not reach into the generated bindings. The
+ * ordering is the whole point, so it is a list and not a set.
+ */
+export const OPERATION_CLASSES = [
+  "observe",
+  "edit",
+  "activate",
+  "submit",
+  "destructive",
+] as const;
+
+/** `security.implied_classes`: these, and everything the highest of them contains. */
+function impliedClasses(classes: string[]): string[] {
+  const held = OPERATION_CLASSES.filter((name) =>
+    classes.some((entry) => entry.trim().toLowerCase() === name),
+  );
+  if (held.length === 0) return [];
+  return OPERATION_CLASSES.slice(0, OPERATION_CLASSES.indexOf(held[held.length - 1]!) + 1);
+}
+
+/**
+ * `security.Ceiling.classes_for`, mirrored: what the file permits inside one
+ * application, or `undefined` when it says nothing and the general answer
+ * stands.
+ *
+ * Every pattern that names this application votes and the answer is their
+ * intersection — the narrowest thing they all agree to — so the prediction
+ * cannot disagree with the daemon just because the user reordered their file.
+ * The result is then capped by the global classes, because an implication is
+ * never allowed to hand out what `operationClasses` withholds everywhere.
+ */
+export function deriveClasses(
+  name: string,
+  applicationClasses: Record<string, string[]>,
+  globalClasses: string[],
+): string[] | undefined {
+  const folded = name.toLowerCase();
+  const voters = Object.entries(applicationClasses).filter(([pattern]) => {
+    const patternFolded = pattern.trim().toLowerCase();
+    return folded.includes(patternFolded) || patternFolded.includes(folded);
+  });
+  if (voters.length === 0) return undefined;
+
+  let agreed: string[] | undefined;
+  for (const [, classes] of voters) {
+    const implied = impliedClasses(classes);
+    agreed = agreed === undefined ? implied : agreed.filter((entry) => implied.includes(entry));
+  }
+  const capped = globalClasses.length > 0 ? impliedClasses(globalClasses) : ["observe"];
+  return (agreed ?? []).filter((entry) => capped.includes(entry));
+}
+
+/**
+ * Which of the page's three states this application is in.
+ *
+ * `interact` is the absence of an entry rather than an entry naming every
+ * class: absence is what the daemon reads as "the general answer stands", it
+ * survives the user later narrowing `operationClasses`, and it keeps the file
+ * free of lines that only restate the ceiling.
+ */
+export function deriveAccess(
+  name: string,
+  mode: PermissionsMode,
+  applications: string[],
+  blockedApplications: string[],
+  applicationClasses: Record<string, string[]>,
+  globalClasses: string[],
+): { access: AppAccess; classes?: string[] } {
+  if (!derivePermitted(name, mode, applications, blockedApplications)) return { access: "off" };
+
+  // `security.Ceiling.from_config`: an absent `operationClasses` is `observe`,
+  // not everything. A page that read the absence as "interact" would draw a
+  // whole desktop of interactive applications on the default config, where the
+  // daemon refuses every click — the prediction disagreeing with the daemon in
+  // the one direction that matters.
+  const ceiling = globalClasses.length > 0 ? impliedClasses(globalClasses) : ["observe"];
+  const observeOnly = ceiling.length === 1 && ceiling[0] === "observe";
+
+  const classes = deriveClasses(name, applicationClasses, globalClasses);
+  // No entry: the general answer stands, and the general answer is the ceiling.
+  if (classes === undefined) {
+    return observeOnly ? { access: "view", classes: ceiling } : { access: "interact" };
+  }
+  if (classes.length === 1 && classes[0] === "observe") return { access: "view", classes };
+  // An entry that already names everything the ceiling permits is interact
+  // spelled the long way; anything else is a shape this page did not write.
+  if (classes.length === ceiling.length) return { access: "interact", classes };
+  return { access: "custom", classes };
+}
+
 export type PermissionRegistry = {
   view(): Promise<PermissionsView>;
-  setPermitted(app: string, permitted: boolean): Promise<PermissionsView>;
+  setAccess(app: string, access: AppAccess): Promise<PermissionsView>;
   /** Exact names of applications that exist on this machine and are not permitted. */
   unpermittedApps(): Promise<string[]>;
 };
@@ -161,6 +278,7 @@ export function createPermissionRegistry(deps: RegistryDeps): PermissionRegistry
       const row: PermissionRow = {
         name: app.name,
         permitted: false,
+        access: "off",
         running: false,
         readable: false,
         desktopId: app.desktopId,
@@ -181,6 +299,7 @@ export function createPermissionRegistry(deps: RegistryDeps): PermissionRegistry
           rows.set(folded, {
             name: app.name,
             permitted: false,
+            access: "off",
             running: true,
             readable: app.readable,
           });
@@ -189,14 +308,38 @@ export function createPermissionRegistry(deps: RegistryDeps): PermissionRegistry
     }
 
     const applications = [...new Set(rows.values())]
-      .map((row) => ({
-        ...row,
+      .map((row) => {
         // Predicted with the names the ceiling will actually test — the
         // census's when known, the launcher's and the stem's guesses when not.
-        permitted: predictionNamesOf(row).some((name) =>
+        const names = predictionNamesOf(row);
+        const permitted = names.some((name) =>
           derivePermitted(name, scopes.mode, scopes.applications, scopes.blockedApplications),
-        ),
-      }))
+        );
+        // The narrowest reading among the names this row answers to: the same
+        // instinct as the ceiling's intersection, applied to the ambiguity the
+        // page has and the daemon does not.
+        const states = names.map((name) =>
+          deriveAccess(
+            name,
+            scopes.mode,
+            scopes.applications,
+            scopes.blockedApplications,
+            scopes.applicationClasses,
+            scopes.classes,
+          ),
+        );
+        const narrowest =
+          states.find((state) => state.access === "custom") ??
+          states.find((state) => state.access === "view") ??
+          states.find((state) => state.access === "interact") ??
+          states[0]!;
+        return {
+          ...row,
+          permitted,
+          access: permitted ? narrowest.access : ("off" as AppAccess),
+          ...(permitted && narrowest.classes ? { classes: narrowest.classes } : {}),
+        };
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
 
     return {
@@ -204,6 +347,7 @@ export function createPermissionRegistry(deps: RegistryDeps): PermissionRegistry
       daemon: census.reachable
         ? { reachable: true }
         : { reachable: false, reason: census.reason },
+      ceiling: scopes.classes.length > 0 ? impliedClasses(scopes.classes) : ["observe"],
       applications,
     };
   };
@@ -211,9 +355,10 @@ export function createPermissionRegistry(deps: RegistryDeps): PermissionRegistry
   return {
     view: merge,
 
-    async setPermitted(app: string, permitted: boolean): Promise<PermissionsView> {
+    async setAccess(app: string, access: AppAccess): Promise<PermissionsView> {
       const scopes = readScopesConfig(deps.configPath);
       const current = await merge();
+      const permitted = access !== "off";
 
       // The row being toggled, found by any of its names — the page sends the
       // display name, but "Files" and "org.gnome.Nautilus" are one switch.
@@ -242,12 +387,30 @@ export function createPermissionRegistry(deps: RegistryDeps): PermissionRegistry
       // leftover identity would keep the door open behind the toggle.
       const foldedIdentities = new Set(identities.map((name) => name.toLowerCase()));
       names = names.filter((name) => !foldedIdentities.has(name.toLowerCase()));
-      if (permitted) names.push(...(row ? writeNamesFor(row) : [app]));
+      const writeNames = row ? writeNamesFor(row) : [app];
+      if (permitted) names.push(...writeNames);
 
-      writePermittedApplications(
+      // The class map is edited by the same rule as the list: every name this
+      // row answers to comes out first, because a leftover pattern would go on
+      // capping the application from behind the control that just changed it.
+      const applicationClasses: Record<string, string[]> = {};
+      for (const [pattern, classes] of Object.entries(scopes.applicationClasses)) {
+        if (!foldedIdentities.has(pattern.trim().toLowerCase())) {
+          applicationClasses[pattern] = classes;
+        }
+      }
+      if (access === "view") {
+        // `observe` alone, written as the user's own word. The ladder is
+        // filled in where the answer is read, so the file keeps saying the
+        // narrow thing that was actually chosen.
+        for (const name of writeNames) applicationClasses[name] = ["observe"];
+      }
+
+      writePermissions(
         deps.configPath,
         scopes.document,
         [...new Set(names)].sort(),
+        applicationClasses,
       );
       return await merge();
     },

@@ -66,7 +66,7 @@ test("GET merges the census and the launcher scan, each row carrying its permitt
 test("PUT writes per-application mode with exact names, atomically", async () => {
   const response = await app().request("/api/permissions/GIMP", {
     method: "PUT",
-    body: JSON.stringify({ permitted: true }),
+    body: JSON.stringify({ access: "interact" }),
     headers: { "content-type": "application/json" },
   });
   expect(response.status).toBe(200);
@@ -104,7 +104,7 @@ test("a PUT never touches scopes keys it does not own", async () => {
 
   await app().request("/api/permissions/Discord", {
     method: "PUT",
-    body: JSON.stringify({ permitted: true }),
+    body: JSON.stringify({ access: "interact" }),
     headers: { "content-type": "application/json" },
   });
 
@@ -125,7 +125,7 @@ test("a malformed config is refused with the reason, never silently overwritten"
 
   const put = await app().request("/api/permissions/Discord", {
     method: "PUT",
-    body: JSON.stringify({ permitted: true }),
+    body: JSON.stringify({ access: "interact" }),
     headers: { "content-type": "application/json" },
   });
   expect(put.status).toBe(409);
@@ -134,8 +134,17 @@ test("a malformed config is refused with the reason, never silently overwritten"
   expect(fs.readFileSync(configPath, "utf8")).toBe("{ this is not json");
 });
 
-test("a PUT without a boolean is a 400, not a guess", async () => {
-  for (const body of [JSON.stringify({ permitted: "yes" }), JSON.stringify({}), "not json"]) {
+test("a PUT without one of the three states is a 400, not a guess", async () => {
+  // `custom` included deliberately: it is a shape the file can hold and this
+  // route cannot be asked for, because honouring it would mean inventing which
+  // classes the caller meant.
+  for (const body of [
+    JSON.stringify({ access: "yes" }),
+    JSON.stringify({ access: "custom" }),
+    JSON.stringify({ permitted: true }),
+    JSON.stringify({}),
+    "not json",
+  ]) {
     const response = await app().request("/api/permissions/Discord", {
       method: "PUT",
       body,

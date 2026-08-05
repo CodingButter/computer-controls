@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import type { Census } from "./daemon.ts";
 import type { DesktopEntryApp } from "./desktop-entries.ts";
-import { createPermissionRegistry, derivePermitted } from "./registry.ts";
+import { createPermissionRegistry, deriveAccess, derivePermitted } from "./registry.ts";
 
 /**
  * The permitted column is a prediction of the daemon's ceiling, so the truth
@@ -91,7 +91,7 @@ describe("the registry against a real config file", () => {
     // Open mode, nothing on disk. Denying one application must not silently
     // revoke the rest of the desktop, so the write that introduces
     // per-application mode carries every application the page could see.
-    await registry().setPermitted("Discord", false);
+    await registry().setAccess("Discord", "off");
 
     const written = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
       scopes: { permissionsMode: string; applications: string[] };
@@ -109,14 +109,16 @@ describe("the registry against a real config file", () => {
       JSON.stringify({ scopes: { permissionsMode: "per-application", applications: [] } }),
     );
 
-    const view = await registry().setPermitted("Discord", true);
-    expect(view.applications.find((row) => row.name === "Discord")?.permitted).toBe(true);
+    const view = await registry().setAccess("Discord", "interact");
+    expect(view.applications.find((row: { name: string }) => row.name === "Discord")?.permitted).toBe(
+      true,
+    );
     let written = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
       scopes: { applications: string[] };
     };
     expect(written.scopes.applications).toEqual(["Discord"]);
 
-    await registry().setPermitted("Discord", false);
+    await registry().setAccess("Discord", "off");
     written = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
       scopes: { applications: string[] };
     };
@@ -138,7 +140,7 @@ describe("the registry against a real config file", () => {
       }),
     );
 
-    await registry().setPermitted("GIMP", true);
+    await registry().setAccess("GIMP", "interact");
 
     const written = JSON.parse(fs.readFileSync(configPath, "utf8")) as Record<string, any>;
     expect(written.somethingTheUserWrote).toEqual({ keep: "me" });
@@ -218,7 +220,7 @@ describe("the registry against a real config file", () => {
     });
 
     // Permitting by the display name writes the name the daemon matches on.
-    const permitted = await gnomeish.setPermitted("Files", true);
+    const permitted = await gnomeish.setAccess("Files", "interact");
     expect(permitted.applications[0]?.permitted).toBe(true);
     let written = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
       scopes: { applications: string[] };
@@ -236,7 +238,7 @@ describe("the registry against a real config file", () => {
         },
       }),
     );
-    const revoked = await gnomeish.setPermitted("org.gnome.Nautilus", false);
+    const revoked = await gnomeish.setAccess("org.gnome.Nautilus", "off");
     expect(revoked.applications[0]?.permitted).toBe(false);
     written = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
       scopes: { applications: string[] };
@@ -285,7 +287,7 @@ describe("the registry against a real config file", () => {
       ],
     });
 
-    await closedApp.setPermitted("Files", true);
+    await closedApp.setAccess("Files", "interact");
     const written = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
       scopes: { applications: string[] };
     };
@@ -304,5 +306,299 @@ describe("the registry against a real config file", () => {
     // Installed applications still render; nothing shows as running.
     expect(view.applications.map((row) => row.name).sort()).toEqual(["Discord", "GIMP"]);
     expect(view.applications.every((row) => !row.running)).toBe(true);
+  });
+});
+
+/**
+ * The class column is a prediction of `security.Ceiling.classes_for`, so it
+ * mirrors that function's semantics rather than inventing kinder ones: an
+ * absent entry is the general answer standing, overlapping patterns intersect,
+ * and the ladder is filled in on the way out and then capped.
+ */
+describe("deriveAccess, the page's reading of the class map", () => {
+  const per = (
+    applications: string[],
+    applicationClasses: Record<string, string[]>,
+    globalClasses: string[] = ["observe", "edit", "activate"],
+  ) =>
+    deriveAccess("Discord", "per-application", applications, [], applicationClasses, globalClasses);
+
+  test("no entry at all is interact: the general answer stands", () => {
+    expect(per(["Discord"], {})).toEqual({ access: "interact" });
+  });
+
+  test("observe alone is view-only", () => {
+    expect(per(["Discord"], { Discord: ["observe"] })).toEqual({
+      access: "view",
+      classes: ["observe"],
+    });
+  });
+
+  test("an unpermitted application is off whatever the class map says", () => {
+    // The list is the outer question. A class entry for an application that is
+    // not permitted describes a door that is shut.
+    expect(per([], { Discord: ["observe"] })).toEqual({ access: "off" });
+  });
+
+  test("interact implies view: a named activate fills the ladder in beneath it", () => {
+    expect(per(["Discord"], { Discord: ["activate"] })).toEqual({
+      access: "interact",
+      classes: ["observe", "edit", "activate"],
+    });
+  });
+
+  test("the implication is capped by the global ceiling, never widened past it", () => {
+    // `activate` inside one application cannot outrun an operationClasses that
+    // stops at `edit` everywhere.
+    expect(per(["Discord"], { Discord: ["activate"] }, ["observe", "edit"])).toEqual({
+      access: "interact",
+      classes: ["observe", "edit"],
+    });
+  });
+
+  test("two patterns naming one application agree on the narrower, in either order", () => {
+    const narrowFirst = per(["Discord"], { Discord: ["observe"], disc: ["activate"] });
+    const vagueFirst = per(["Discord"], { disc: ["activate"], Discord: ["observe"] });
+    expect(narrowFirst).toEqual({ access: "view", classes: ["observe"] });
+    // The same answer whichever way the user happened to order their own file.
+    expect(vagueFirst).toEqual(narrowFirst);
+  });
+
+  test("a shape the page cannot express is custom, carrying what is really in force", () => {
+    expect(
+      per(["Discord"], { Discord: ["edit"] }, ["observe", "edit", "activate"]),
+    ).toEqual({ access: "custom", classes: ["observe", "edit"] });
+  });
+
+  test("an empty entry is a thing the user typed: nothing permitted inside", () => {
+    expect(per(["Discord"], { Discord: [] })).toEqual({ access: "custom", classes: [] });
+  });
+
+  test("matching is casefolded and padding-tolerant, as the ceiling's is", () => {
+    expect(per(["Discord"], { " DISCORD ": ["observe"] })).toEqual({
+      access: "view",
+      classes: ["observe"],
+    });
+  });
+});
+
+describe("writing the three states through to the file", () => {
+  let dir: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "perm-access-"));
+    configPath = path.join(dir, "config.json");
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const census: Census = {
+    reachable: true,
+    applications: [
+      { name: "Discord", running: true, readable: true },
+      { name: "Google-chrome", running: true, readable: false },
+    ],
+  };
+  const installed: DesktopEntryApp[] = [
+    { name: "Discord", desktopId: "discord.desktop", exec: "Discord" },
+    { name: "GIMP", desktopId: "gimp.desktop", exec: "gimp-2.10" },
+  ];
+  const registry = () =>
+    createPermissionRegistry({
+      configPath,
+      readCensus: async () => census,
+      scanInstalled: () => installed,
+    });
+  const perApplication = (extra: Record<string, unknown> = {}) =>
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        scopes: { permissionsMode: "per-application", applications: ["Discord"], ...extra },
+      }),
+    );
+  const readScopes = () =>
+    (
+      JSON.parse(fs.readFileSync(configPath, "utf8")) as {
+        scopes: { applications: string[]; applicationClasses?: Record<string, string[]> };
+      }
+    ).scopes;
+
+  test("view-only permits the application and caps it in one write", async () => {
+    perApplication();
+
+    const view = await registry().setAccess("Discord", "view");
+
+    const scopes = readScopes();
+    expect(scopes.applications).toContain("Discord");
+    expect(scopes.applicationClasses).toEqual({ Discord: ["observe"] });
+    // And the page agrees with the file it just wrote.
+    expect(view.applications.find((row) => row.name === "Discord")?.access).toBe("view");
+  });
+
+  test("the file keeps the user's own word, not the ladder filled in", async () => {
+    // `observe` is what was chosen; the implication happens where the answer is
+    // read. A file that said "observe, edit, activate" would mean something
+    // different the day the user narrows operationClasses.
+    perApplication();
+    await registry().setAccess("Discord", "view");
+    expect(readScopes().applicationClasses).toEqual({ Discord: ["observe"] });
+  });
+
+  test("interact removes the cap rather than writing one that restates the ceiling", async () => {
+    perApplication({
+      applicationClasses: { Discord: ["observe"] },
+      operationClasses: ["observe", "edit", "activate"],
+    });
+
+    const view = await registry().setAccess("Discord", "interact");
+
+    // The key is deleted rather than left as an empty object: the daemon reads
+    // the two identically, so `{}` would be this page's litter in a file the
+    // user opens and reads.
+    expect(readScopes().applicationClasses).toBeUndefined();
+    expect(view.applications.find((row) => row.name === "Discord")?.access).toBe("interact");
+  });
+
+  test("turning an application off takes its cap with it", async () => {
+    // A leftover pattern would go on capping the application from behind the
+    // control that just changed it — and would silently reappear as view-only
+    // the next time it was permitted.
+    perApplication({ applicationClasses: { Discord: ["observe"] } });
+
+    await registry().setAccess("Discord", "off");
+
+    const scopes = readScopes();
+    expect(scopes.applications).not.toContain("Discord");
+    expect(scopes.applicationClasses).toBeUndefined();
+  });
+
+  test("a cap on one application is left alone when another is changed", async () => {
+    perApplication({
+      applications: ["Discord", "GIMP"],
+      applicationClasses: { Discord: ["observe"] },
+    });
+
+    await registry().setAccess("GIMP", "view");
+
+    expect(readScopes().applicationClasses).toEqual({
+      Discord: ["observe"],
+      GIMP: ["observe"],
+    });
+  });
+
+  test("every name a row answers to is capped, and later uncapped, together", async () => {
+    // "Files" and "org.gnome.Nautilus" are one application wearing two names.
+    // Capping one and not the other would leave the door open behind the row.
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ scopes: { permissionsMode: "per-application", applications: [] } }),
+    );
+    const gnomeish = createPermissionRegistry({
+      configPath,
+      readCensus: async () => ({ reachable: true, applications: [] }) as Census,
+      scanInstalled: () => [
+        { name: "Files", desktopId: "org.gnome.Nautilus.desktop", exec: "nautilus" },
+      ],
+    });
+
+    await gnomeish.setAccess("Files", "view");
+    expect(readScopes().applicationClasses).toEqual({
+      Files: ["observe"],
+      "org.gnome.Nautilus": ["observe"],
+    });
+
+    await gnomeish.setAccess("Files", "interact");
+    expect(readScopes().applicationClasses).toBeUndefined();
+  });
+
+  test("a write preserves a hand-written cap on an application the page never touched", async () => {
+    perApplication({
+      applications: ["Discord", "GIMP"],
+      applicationClasses: { Slack: ["observe", "edit"] },
+      operationClasses: ["observe", "edit", "activate"],
+    });
+
+    await registry().setAccess("GIMP", "view");
+
+    const written = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
+      scopes: Record<string, unknown>;
+    };
+    expect(written.scopes.applicationClasses).toEqual({
+      Slack: ["observe", "edit"],
+      GIMP: ["observe"],
+    });
+    expect(written.scopes.operationClasses).toEqual(["observe", "edit", "activate"]);
+  });
+
+  test("the transition out of open mode carries the caps that were already there", async () => {
+    // Open mode has no list, so the first choice writes one. A cap the user had
+    // hand-written must survive the moment the page takes the file over.
+    fs.writeFileSync(configPath, JSON.stringify({ scopes: { applicationClasses: { GIMP: ["observe"] } } }));
+
+    await registry().setAccess("Discord", "view");
+
+    const scopes = readScopes();
+    expect(scopes.applications).toContain("GIMP");
+    expect(scopes.applicationClasses).toEqual({ GIMP: ["observe"], Discord: ["observe"] });
+  });
+});
+
+/**
+ * The global `operationClasses` is the outermost of the three questions, and
+ * the page does not own it — the settings surface does. What the page owes is
+ * an honest reading of it: `security.Ceiling.from_config` treats an absent
+ * `operationClasses` as `observe` alone, so a page that read the absence as
+ * "everything" would draw a desktop full of interactive applications while the
+ * daemon refused every click.
+ */
+describe("the global ceiling bounds what the page can offer", () => {
+  const permitted = (globalClasses: string[], applicationClasses: Record<string, string[]> = {}) =>
+    deriveAccess("Discord", "per-application", ["Discord"], [], applicationClasses, globalClasses);
+
+  test("an absent operationClasses is observe-only, and the row says view", () => {
+    expect(permitted([])).toEqual({ access: "view", classes: ["observe"] });
+  });
+
+  test("an operationClasses of observe alone is the same answer, said out loud", () => {
+    expect(permitted(["observe"])).toEqual({ access: "view", classes: ["observe"] });
+  });
+
+  test("one rung above observe is enough for an application to be interactive", () => {
+    expect(permitted(["observe", "edit"])).toEqual({ access: "interact" });
+  });
+
+  test("a view-only cap under an observe-only ceiling is still just view", () => {
+    // Both say the same thing; the page must not report it as a contradiction.
+    expect(permitted([], { Discord: ["observe"] })).toEqual({ access: "view", classes: ["observe"] });
+  });
+
+  test("the view reports the ceiling with its ladder filled in", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perm-ceiling-"));
+    const configPath = path.join(dir, "config.json");
+    try {
+      fs.writeFileSync(
+        configPath,
+        JSON.stringify({ scopes: { permissionsMode: "per-application", operationClasses: ["activate"] } }),
+      );
+      const view = await createPermissionRegistry({
+        configPath,
+        readCensus: async () => ({ reachable: true, applications: [] }) as Census,
+        scanInstalled: () => [],
+      }).view();
+      expect(view.ceiling).toEqual(["observe", "edit", "activate"]);
+
+      fs.writeFileSync(configPath, JSON.stringify({ scopes: { permissionsMode: "per-application" } }));
+      const bare = await createPermissionRegistry({
+        configPath,
+        readCensus: async () => ({ reachable: true, applications: [] }) as Census,
+        scanInstalled: () => [],
+      }).view();
+      expect(bare.ceiling).toEqual(["observe"]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

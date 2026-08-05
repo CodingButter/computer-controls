@@ -13,7 +13,7 @@ describe("the hub barrel", () => {
       "getHealth",
       "getOrbStatus",
       "getPermissions",
-      "putPermission",
+      "putAccess",
       "getFlows",
       "getVoiceProviders",
       "getAudit",

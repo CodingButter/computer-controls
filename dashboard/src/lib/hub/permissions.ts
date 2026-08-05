@@ -1,9 +1,19 @@
 /** /api/permissions — the merged application view, and the page's one write. */
 
+/**
+ * How far inside one application an agent may go. `off`, `view` and `interact`
+ * are the states this page sets; `custom` is one only a hand-written config
+ * produces, shown as itself rather than rounded to a neighbour.
+ */
+export type AppAccess = "off" | "view" | "interact" | "custom";
+
 /** One row of the permissions checklist, as the hub's merged view reports it. */
 export type PermissionRow = {
   name: string;
   permitted: boolean;
+  access: AppAccess;
+  /** What is actually in force — present when the row is capped. */
+  classes?: readonly string[];
   running: boolean;
   /** Running on the accessibility bus. Running-but-not-readable is the "needs a restart" state. */
   readable: boolean;
@@ -13,6 +23,13 @@ export type PermissionRow = {
 export type PermissionsView = {
   mode: "open" | "per-application";
   daemon: { reachable: true } | { reachable: false; reason: string };
+  /**
+   * The widest any single application can be — `scopes.operationClasses` with
+   * its ladder filled in. A desktop whose global classes stop at `observe`
+   * cannot have an interactive application in it, and the page says so instead
+   * of offering the choice.
+   */
+  ceiling: readonly string[];
   applications: readonly PermissionRow[];
 };
 
@@ -44,17 +61,38 @@ export function parsePermissions(body: unknown): PermissionsView {
             reachable: false,
             reason: typeof daemon.reason === "string" ? daemon.reason : "unreachable",
           },
+    // A hub that does not report one is read as the daemon's own default,
+    // which is `observe` and not everything.
+    ceiling: Array.isArray(raw.ceiling)
+      ? raw.ceiling.filter((entry): entry is string => typeof entry === "string")
+      : ["observe"],
     applications: (Array.isArray(raw.applications) ? raw.applications : [])
       .filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null)
       .filter((row) => typeof row.name === "string")
       .map((row) => ({
         name: row.name as string,
         permitted: row.permitted === true,
+        access: readAccess(row.access, row.permitted === true),
+        ...(Array.isArray(row.classes)
+          ? { classes: row.classes.filter((entry): entry is string => typeof entry === "string") }
+          : {}),
         running: row.running === true,
         readable: row.readable === true,
         ...(typeof row.desktopId === "string" ? { desktopId: row.desktopId } : {}),
       })),
   };
+}
+
+/**
+ * An unrecognised access reads as the permitted flag alone. The two always
+ * agree when they come from this hub; disagreeing here would mean showing a
+ * row as off while the flag beside it says permitted.
+ */
+function readAccess(value: unknown, permitted: boolean): AppAccess {
+  if (value === "off" || value === "view" || value === "interact" || value === "custom") {
+    return value;
+  }
+  return permitted ? "interact" : "off";
 }
 
 async function fetchPermissions(path: string, init?: RequestInit): Promise<PermissionsFetch> {
@@ -84,11 +122,14 @@ export function getPermissions(): Promise<PermissionsFetch> {
   return fetchPermissions("/api/permissions");
 }
 
-/** The page's one write: toggle a single application, exactly as named. */
-export function putPermission(app: string, permitted: boolean): Promise<PermissionsFetch> {
+/** The page's one write: set a single application's access, exactly as named. */
+export function putAccess(
+  app: string,
+  access: Exclude<AppAccess, "custom">,
+): Promise<PermissionsFetch> {
   return fetchPermissions(`/api/permissions/${encodeURIComponent(app)}`, {
     method: "PUT",
-    body: JSON.stringify({ permitted }),
+    body: JSON.stringify({ access }),
     headers: { "content-type": "application/json" },
   });
 }

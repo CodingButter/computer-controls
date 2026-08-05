@@ -5,9 +5,87 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
-import type { PermissionRow, PermissionsView } from "@/lib/hub";
+import type { AppAccess, PermissionRow, PermissionsView } from "@/lib/hub";
 import { cn } from "@/lib/utils";
+
+/** The states a person can choose, in the order they widen. */
+const CHOICES: { value: Exclude<AppAccess, "custom">; label: string; hint: string }[] = [
+  { value: "off", label: "Off", hint: "Not permitted at all" },
+  { value: "view", label: "View only", hint: "Read the window; change nothing" },
+  { value: "interact", label: "Interact", hint: "Read and act — viewing is included" },
+];
+
+/**
+ * The three-state control, and the page's whole answer to #127.
+ *
+ * A segmented radio group rather than two switches, because "view only" and
+ * "interact" are one question with three answers and not two independent
+ * flags — a pair of switches would let a person ask for interaction without
+ * viewing, which is a state the daemon will not hold and nobody means.
+ */
+function AccessControl(props: {
+  row: PermissionRow;
+  onChoose: (app: string, access: Exclude<AppAccess, "custom">) => void;
+  /** The widest any application can be here — `scopes.operationClasses`. */
+  ceiling: readonly string[];
+  className?: string;
+}) {
+  const { row, onChoose } = props;
+  // A desktop whose global classes stop at `observe` has no interactive
+  // application in it. Offering the button would offer a write that lands in
+  // the file and changes nothing the daemon does.
+  const interactReachable = props.ceiling.some((entry) => entry !== "observe");
+  return (
+    <div
+      role="radiogroup"
+      aria-label={`Access for ${row.name}`}
+      className={cn("flex rounded-full border border-border bg-well p-0.5", props.className)}
+      onClick={(event) => event.stopPropagation()}
+    >
+      {CHOICES.map((choice) => {
+        const unreachable = choice.value === "interact" && !interactReachable;
+        return (
+          <button
+            key={choice.value}
+            type="button"
+            role="radio"
+            aria-checked={row.access === choice.value}
+            disabled={unreachable}
+            title={
+              unreachable
+                ? "This desktop's operation classes stop at observe, so no application can be interacted with."
+                : choice.hint
+            }
+            onClick={() => onChoose(row.name, choice.value)}
+            className={cn(
+              "rounded-full px-3 py-0.5 text-xs transition-colors",
+              row.access === choice.value
+                ? "bg-accent font-medium text-well"
+                : "text-muted hover:text-foreground",
+              unreachable && "cursor-not-allowed opacity-40 hover:text-muted",
+            )}
+          >
+            {choice.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * The honest label for a row whose config says something this page cannot.
+ * Shown instead of silently rounding to the nearest button.
+ */
+function CustomClassesNote(props: { row: PermissionRow }) {
+  if (props.row.access !== "custom") return null;
+  return (
+    <p className="text-xs text-muted">
+      Set by hand in the config file to {props.row.classes?.join(", ") || "nothing"}. Choosing
+      one of the three above replaces it.
+    </p>
+  );
+}
 
 /**
  * The permissions page per the approved design: heading, mode control, the
@@ -57,6 +135,7 @@ function AppAvatar(props: { name: string; desktopId?: string; className?: string
 function AccessPill(props: { row: PermissionRow }) {
   const { row } = props;
   if (!row.permitted) return <Badge variant="muted">Not permitted</Badge>;
+  if (row.access === "view") return <Badge variant="muted">View only</Badge>;
   if (row.running && !row.readable) {
     // The Chromium condition: windows on screen, nothing on the accessibility
     // bus. Curing plus a restart fixes it, and the pill is honest about which
@@ -96,8 +175,12 @@ function ModeControl(props: { mode: PermissionsView["mode"] }) {
   );
 }
 
-function DetailPanel(props: { row: PermissionRow; onToggle: (app: string, permitted: boolean) => void }) {
-  const { row, onToggle } = props;
+function DetailPanel(props: {
+  row: PermissionRow;
+  onChoose: (app: string, access: Exclude<AppAccess, "custom">) => void;
+  ceiling: readonly string[];
+}) {
+  const { row, onChoose } = props;
   return (
     <Card className="h-fit w-72 shrink-0">
       <CardHeader className="flex-row items-center gap-3">
@@ -105,14 +188,17 @@ function DetailPanel(props: { row: PermissionRow; onToggle: (app: string, permit
         <CardTitle className="text-lg text-foreground">{row.name}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-muted">Permitted</span>
-          <Switch
-            checked={row.permitted}
-            onCheckedChange={(next) => onToggle(row.name, next)}
-            aria-label={`Permit ${row.name}`}
-          />
+        <div className="flex flex-col gap-2">
+          <span className="text-sm text-muted">Access</span>
+          <AccessControl row={row} onChoose={onChoose} ceiling={props.ceiling} className="self-start" />
+          <CustomClassesNote row={row} />
         </div>
+        {row.access === "interact" ? (
+          <p className="text-xs text-muted">
+            Interacting includes viewing: an agent permitted to click a control it could not
+            read would be clicking blind.
+          </p>
+        ) : null}
         <dl className="flex flex-col gap-1 text-sm">
           <div className="flex justify-between">
             <dt className="text-muted">Running</dt>
@@ -143,9 +229,9 @@ function DetailPanel(props: { row: PermissionRow; onToggle: (app: string, permit
 export function PermissionsPanel(props: {
   view: PermissionsView;
   /** Fired with the row's exact name — the ceiling matches substrings, so fragments are never sent. */
-  onToggle: (app: string, permitted: boolean) => void;
+  onChoose: (app: string, access: Exclude<AppAccess, "custom">) => void;
 }) {
-  const { view, onToggle } = props;
+  const { view, onChoose } = props;
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<string | undefined>(undefined);
 
@@ -179,6 +265,14 @@ export function PermissionsPanel(props: {
         New applications arrive unpermitted. Nothing an agent does can widen this list.
       </div>
 
+      {!view.ceiling.some((entry) => entry !== "observe") ? (
+        <p className="text-sm text-muted">
+          This desktop&rsquo;s operation classes stop at observe, so every permitted
+          application is view-only whatever is chosen here. Widening that is a change to{" "}
+          <code>scopes.operationClasses</code> in the config file, which this page does not
+          own.
+        </p>
+      ) : null}
       {view.mode === "open" ? (
         <p className="text-sm text-muted">
           This machine is in open mode — nothing has been withheld yet. The first toggle
@@ -213,12 +307,8 @@ export function PermissionsPanel(props: {
               >
                 <AppAvatar name={row.name} desktopId={row.desktopId} />
                 <span className="flex-1 truncate font-medium">{row.name}</span>
-                <Switch
-                  checked={row.permitted}
-                  onCheckedChange={(next) => onToggle(row.name, next)}
-                  aria-label={`Permit ${row.name}`}
-                />
-                {row.permitted ? <Badge variant="default">Permitted</Badge> : null}
+                <AccessControl row={row} onChoose={onChoose} ceiling={view.ceiling} />
+                {row.access === "custom" ? <Badge variant="warning">Custom</Badge> : null}
                 <span className="flex w-64 justify-end">
                   <AccessPill row={row} />
                 </span>
@@ -226,7 +316,9 @@ export function PermissionsPanel(props: {
             ))
           )}
         </div>
-        {selectedRow ? <DetailPanel row={selectedRow} onToggle={onToggle} /> : null}
+        {selectedRow ? (
+          <DetailPanel row={selectedRow} onChoose={onChoose} ceiling={view.ceiling} />
+        ) : null}
       </div>
     </div>
   );
