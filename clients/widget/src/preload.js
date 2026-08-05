@@ -1,4 +1,11 @@
-import { contextBridge, ipcRenderer } from "electron";
+"use strict";
+// A sandboxed preload is CommonJS by construction: Electron evaluates it inside
+// the renderer sandbox with a `require` shim that resolves only `electron` and
+// a handful of built-ins. An `import` statement here is a syntax error at load
+// time, and a preload that fails to load leaves the page with no bridge at all
+// — which is how this file shipped broken once. CJS is not a style choice; it
+// is the only dialect this seam speaks.
+const { contextBridge, ipcRenderer } = require("electron");
 
 /**
  * The bridge, carrying as little as a bridge can carry.
