@@ -137,6 +137,11 @@ export async function prepareHub(config: ClientConfig) {
       thinking: thinkingModel,
       tiers: modelPack.models,
     },
+    // Which OS adapter booted, and what it admits it cannot do. Reported
+    // because the adapters for the unscheduled OSes answer "nothing installed"
+    // rather than throwing, and a person on one of those deserves to be told
+    // the difference between an empty desktop and an unwritten scanner.
+    platform: { id: config.platform.id, supports: config.platform.supports },
   });
 
   return { base, mastraArgs, finalize, chat, status, getSession, modelPack };
