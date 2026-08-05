@@ -48,6 +48,13 @@ export function buildOrbApp(mount: OrbMount | { reason: string }): Hono {
     if (!("orb" in mount)) {
       return c.json<OrbStatus>({ enabled: false, reason: mount.reason });
     }
+    // A permanent provider refusal is dynamic — the orb booted healthy, then
+    // the socket died with a 1008 mid-session. It reads as off-with-reason, the
+    // same shape as a boot refusal, so the page shows the person what happened
+    // instead of a mute orb that looks fine.
+    if (mount.orb.refusal) {
+      return c.json<OrbStatus>({ enabled: false, reason: mount.orb.refusal });
+    }
     return c.json<OrbStatus>({
       enabled: true,
       state: mount.orb.state,

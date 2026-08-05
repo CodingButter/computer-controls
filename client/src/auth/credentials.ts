@@ -18,7 +18,7 @@
 import type { AuthStorage } from "@mastra/code-sdk/auth/storage";
 import type { OAuthCredentials } from "@mastra/code-sdk/auth/types";
 
-import { PROVIDERS, PROVIDER_IDS, getAuthProviderId, type ProviderId } from "./providers.ts";
+import { PROVIDER_IDS, describeProvider, getAuthProviderId, type ProviderId } from "./providers.ts";
 
 /**
  * The prefix `AuthStorage` files pasted API keys under.
@@ -78,13 +78,13 @@ export class AuthStorageCredentialStore implements CredentialStore {
   }
 
   connectApiKey(provider: ProviderId, key: string): void {
+    const [primaryEnvVar, ...alsoRead] = describeProvider(provider).apiKeyEnvVars;
+
     // The env var goes with it: `setStoredApiKey` sets it so model resolution
-    // finds the key in this process without a restart.
-    this.storage.setStoredApiKey(
-      getAuthProviderId(provider),
-      key,
-      PROVIDERS[provider].apiKeyEnvVar,
-    );
+    // finds the key in this process without a restart. It takes one name, and
+    // some providers are read under more than one, so the rest are set here.
+    this.storage.setStoredApiKey(getAuthProviderId(provider), key, primaryEnvVar);
+    for (const envVar of alsoRead) process.env[envVar] = key;
   }
 
   disconnect(provider: ProviderId): void {
@@ -100,14 +100,15 @@ export class AuthStorageCredentialStore implements CredentialStore {
     // starting the process did not ask us to unset it, and a disconnect that
     // silently emptied their environment would be a worse surprise than the
     // one it was trying to prevent.
-    const envVar = PROVIDERS[provider].apiKeyEnvVar;
-    if (storedKey !== undefined && process.env[envVar] === storedKey) {
-      delete process.env[envVar];
+    for (const envVar of describeProvider(provider).apiKeyEnvVars) {
+      if (storedKey !== undefined && process.env[envVar] === storedKey) {
+        delete process.env[envVar];
+      }
     }
   }
 
   status(provider: ProviderId): ProviderConnection {
-    const descriptor = PROVIDERS[provider];
+    const descriptor = describeProvider(provider);
     const credential = this.storage.get(descriptor.authProviderId);
 
     if (credential?.type === "oauth") {

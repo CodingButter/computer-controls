@@ -34,20 +34,25 @@ function readStage() {
 /**
  * The bridge, carrying as little as a bridge can carry.
  *
- * The renderer needs four things from the process around it: the port the hub
- * is on, the piece of desk this window covers so it can turn the screen
+ * The renderer needs a handful of things from the process around it: the port
+ * the hub is on, the piece of desk this window covers so it can turn the screen
  * coordinates the hub reports into places on its own page, a way to say "the
- * pointer is over me now" so the shell can stop letting clicks fall through,
- * and a way to leave. Everything else it does — the socket, the state, the
- * drawing — it does with the web platform, in a sandbox.
+ * pointer is over me now" so the shell can stop letting clicks fall through, a
+ * way to say "I am being dragged", somewhere to hear where that drag landed, a
+ * way to ask for the dashboard, and a way to leave. Everything else it does —
+ * the socket, the state, the drawing — it does with the web platform, in a
+ * sandbox.
  *
  * What is deliberately absent is the more interesting half of this file. There
  * is no filesystem here, no shell, no ipcRenderer handed over wholesale, and
  * nothing that reaches the daemon. The stage is a measurement handed down, not
  * a way to ask about the desktop: it says how big this window is and where, and
  * there is no call here that could answer a question about anything else on the
- * screen. A skin author gets these four things, and a skin that wanted more
- * would find nothing to call.
+ * screen. Note what the drag members do *not* carry: the page reports a
+ * distance travelled and is told a place to draw, and neither direction ever
+ * names the window's own position — which the page has no honest way to know
+ * and no reason to. The dashboard names no URL. A skin author gets these
+ * things, and a skin that wanted more would find nothing to call.
  */
 contextBridge.exposeInMainWorld("widget", {
   /** Where the hub listens. Read from the environment, not chosen by the page. */
@@ -66,6 +71,61 @@ contextBridge.exposeInMainWorld("widget", {
    */
   setPointerOverShape(over) {
     ipcRenderer.send("widget:pointer-over-shape", Boolean(over));
+  },
+
+  /**
+   * The hand moved the face.
+   *
+   * Reported as a distance from where the press started, not as a place to put
+   * the window: the page does not know where its own window is on a desk with
+   * three monitors, and the shell does. `snap` is simply whether shift is
+   * down — which edge that means, if any, is the shell's arithmetic.
+   *
+   * @param {"begin" | "move" | "end"} phase
+   * @param {number} dx
+   * @param {number} dy
+   * @param {boolean} snap
+   */
+  drag(phase, dx, dy, snap) {
+    ipcRenderer.send("widget:drag", {
+      phase: String(phase),
+      dx: Number(dx),
+      dy: Number(dy),
+      snap: Boolean(snap),
+    });
+  },
+
+  /**
+   * Where the face ended up, in this page's own coordinates.
+   *
+   * The counterpart to `drag`, and the piece the stage made necessary: when the
+   * window moved, the page never had to learn the result, because the result
+   * *was* the window moving. Now the window is the whole display and the orb
+   * moves inside it, so the shell does the snapping and the clamping and hands
+   * back a place to draw.
+   *
+   * Page coordinates, not screen coordinates — the stage origin is subtracted
+   * before it crosses, so this member cannot become a way to ask where the
+   * window is.
+   *
+   * @param {(placement: { x: number, y: number }) => void} listener
+   */
+  onPlaced(listener) {
+    ipcRenderer.on("widget:placed", (_event, placement) => {
+      listener({ x: Number(placement?.x), y: Number(placement?.y) });
+    });
+  },
+
+  /**
+   * Show me the dashboard.
+   *
+   * No URL crosses this seam. The renderer asks for the one page the shell
+   * knows how to open, and the shell builds the loopback address itself — a
+   * bridge that took a link from the page would make an always-on-top window
+   * into a way to open anything at all.
+   */
+  openDashboard() {
+    ipcRenderer.send("widget:open-dashboard");
   },
 
   /**

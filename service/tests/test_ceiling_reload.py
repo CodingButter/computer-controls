@@ -51,6 +51,39 @@ def test_a_saved_edit_takes_effect_on_the_next_request(rig):
     assert not server._consent.ceiling.permits_application("discord")
 
 
+def test_a_saved_per_application_class_takes_effect_on_the_next_request(rig):
+    # The setting a permissions page exists to write: view-only for one
+    # application, everything else untouched. It rides the same reload as the
+    # rest of the file rather than a mechanism of its own.
+    built, _, save = rig
+    assert server._consent.ceiling.classes_for("discord") is None
+    save(
+        {
+            "operationClasses": ["observe", "edit", "activate"],
+            "applicationClasses": {"discord": ["observe"]},
+        }
+    )
+    call(built, "getRevision", clientId="a")
+    assert server._consent.ceiling.classes_for("discord") == frozenset({"observe"})
+    assert server._consent.ceiling.classes_for("slack") is None
+
+
+def test_a_malformed_application_class_keeps_the_ceiling_it_had(rig):
+    # A typo in a class name is refused where a typo in the JSON is: the old
+    # ceiling stands. Falling back to defaults would fail permissive on a
+    # misspelling of the word that was meant to restrict.
+    built, _, save = rig
+    save(
+        {
+            "operationClasses": ["observe", "edit", "activate"],
+            "applicationClasses": {"discord": ["intract"]},
+        }
+    )
+    call(built, "getRevision", clientId="a")
+    assert server._consent.ceiling.classes_for("discord") is None
+    assert server._consent.ceiling.classes == frozenset({"observe", "edit", "activate"})
+
+
 def test_a_malformed_save_keeps_the_ceiling_it_had(rig):
     built, path, save = rig
     save({"operationClasses": ["observe"], "blockedApplications": ["discord"]})

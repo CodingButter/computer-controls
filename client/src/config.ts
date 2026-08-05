@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveHubPlatform, type HubPlatform } from "./platform/index.ts";
 import { DEFAULT_PLUGIN_ALLOWLIST } from "./plugins.ts";
 import { parseVoiceProviderId, type VoiceProviderId } from "./voice/providers.ts";
 
@@ -40,6 +41,36 @@ export type ClientConfig = {
   pluginAllowlist: string[];
   /** Directory the browser UI is served from. */
   uiRoot: string;
+  /**
+   * The OS adapter this hub booted with: where it may write, how it lists what
+   * is installed, and where it finds an application's icon.
+   *
+   * Resolved here so "which operating system" is answered once, at boot, and
+   * every module downstream takes the answer as a dependency instead of asking
+   * `process.platform` again.
+   */
+  platform: HubPlatform;
+  /**
+   * The dashboard's built static export, served at "/". Injectable via
+   * COMCON_DASHBOARD_OUT so tests can point it at a fixture; the default finds
+   * the sibling dashboard package's out/ in the repo layout.
+   */
+  dashboardRoot: string;
+  /**
+   * Where curing writes its user-scope launcher overrides. Injectable via
+   * COMCON_APPLICATIONS_DIR because the alternative is a boot that edits the
+   * developer's own launchers every time the suite starts the hub for real.
+   */
+  applicationsDir: string;
+  /**
+   * The skill commons this hub reads merged routes from, when there is one.
+   *
+   * Absent in a release, which is the ordinary case: the folder lives in the
+   * repository so its history is the provenance, and it is not packaged, so an
+   * installed hub carries none of it until curated skills are shipped
+   * deliberately. See ./skill-commons.ts.
+   */
+  commonsPath?: string;
   /**
    * Which mouth the person picked, when they picked one. Absent means "the one
    * that is connected" — the behaviour a machine with a single voice account
@@ -96,6 +127,20 @@ export function resolveClientConfig(env: NodeJS.ProcessEnv = process.env): Clien
     pluginHome: env.COMCON_PLUGIN_HOME ? path.resolve(env.COMCON_PLUGIN_HOME) : os.homedir(),
     pluginAllowlist: [...DEFAULT_PLUGIN_ALLOWLIST, ...readAllowlist(env.COMCON_PLUGIN_ALLOWLIST)],
     uiRoot: path.join(packageRoot, "public"),
+    platform: resolveHubPlatform(env),
+    dashboardRoot: env.COMCON_DASHBOARD_OUT
+      ? path.resolve(env.COMCON_DASHBOARD_OUT)
+      : path.resolve(packageRoot, "..", "dashboard", "out"),
+    applicationsDir: env.COMCON_APPLICATIONS_DIR
+      ? path.resolve(env.COMCON_APPLICATIONS_DIR)
+      : path.join(os.homedir(), ".local", "share", "applications"),
+    // Beside the package rather than under the hub's state root: the commons is
+    // a folder in the checkout, and `root` is wherever this hub was told to keep
+    // its own files — which in a test is a temporary directory with nothing in
+    // it. Overridable so a test can mount a commons it built.
+    commonsPath: env.COMCON_SKILL_COMMONS
+      ? path.resolve(env.COMCON_SKILL_COMMONS)
+      : path.resolve(packageRoot, "..", "skills"),
     ...(voiceProvider ? { voiceProvider } : {}),
   };
 }

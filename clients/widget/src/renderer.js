@@ -26,6 +26,7 @@ const orbElement = document.getElementById("orb");
 const orbCanvas = document.getElementById("orb-canvas");
 const captionElement = document.getElementById("caption");
 const menuElement = document.getElementById("menu");
+const menuDashboard = document.getElementById("menu-dashboard");
 const menuDismiss = document.getElementById("menu-dismiss");
 const menuQuit = document.getElementById("menu-quit");
 const scoutLayer = document.getElementById("scouts");
@@ -48,10 +49,11 @@ const defaultOrb = stage
 
 let state = INITIAL_STATE;
 let webglOrb = null;
-// Where the orb is being dragged to, while a drag is in progress. The committed
-// position lives in the state machine; this is the frame-by-frame preview, so
-// the orb follows the hand without a gesture going to the hub per pixel.
-let dragPreview = null;
+// Where the shell last said the orb is, in this page's coordinates. It is the
+// answer to a drag rather than a guess made alongside one: the snapping and the
+// clamping happen where the shape of the desk is known, and this is what came
+// back.
+let placed = null;
 // The shader reads a single face state rather than the widget's
 // presence+activity pair. The mapping is pure and tested apart from this DOM.
 let shaderState = shaderStateFor(state);
@@ -67,12 +69,28 @@ let shaderState = shaderStateFor(state);
  * @returns {{ x: number, y: number }}
  */
 function orbOrigin() {
-  const chosen = dragPreview ?? state.position;
+  if (placed) return clampToPage(placed);
+  const chosen = state.position;
   if (!chosen) return defaultOrb;
   const local = stage ? { x: chosen.x - stage.x, y: chosen.y - stage.y } : chosen;
+  return clampToPage(local);
+}
+
+/**
+ * Inside the page, always.
+ *
+ * The shell clamps to the work area and this clamps to the window, and both are
+ * worth doing: they are answers to different questions, and the second one is
+ * the one that holds when a remembered position arrives from a desk that has
+ * since changed shape.
+ *
+ * @param {{ x: number, y: number }} point
+ * @returns {{ x: number, y: number }}
+ */
+function clampToPage(point) {
   return {
-    x: Math.min(Math.max(0, local.x), Math.max(0, window.innerWidth - WIDTH)),
-    y: Math.min(Math.max(0, local.y), Math.max(0, window.innerHeight - HEIGHT)),
+    x: Math.min(Math.max(0, point.x), Math.max(0, window.innerWidth - WIDTH)),
+    y: Math.min(Math.max(0, point.y), Math.max(0, window.innerHeight - HEIGHT)),
   };
 }
 
@@ -119,6 +137,15 @@ function paint() {
   webglOrb?.setState(shaderState);
 }
 
+// The shell answers every drag with a place to draw. Nothing else moves the
+// orb: a position that arrived from the hub is where the face was left, and a
+// position that arrives here is where the hand just put it.
+window.widget.onPlaced?.((placement) => {
+  if (!Number.isFinite(placement.x) || !Number.isFinite(placement.y)) return;
+  placed = placement;
+  paint();
+});
+
 const hub = connectToHub({
   port: window.widget.hubPort,
   onEvent: (event) => {
@@ -163,6 +190,11 @@ window.addEventListener("mousemove", (event) => {
   // and a mousemove that released clicks would drop the menu through the
   // floor.
   if (menuVisible) return;
+  // A drag locks it for a harder reason. A hand moving faster than the window
+  // follows leaves the pointer outside the orb for a frame, and releasing the
+  // claim there would hand the rest of the gesture — including the mouseup —
+  // to whatever is behind the widget, dropping the face mid-drag.
+  if (dragging) return;
   const orb = orbElement.getBoundingClientRect();
   const caption = state.caption ? captionElement.getBoundingClientRect() : null;
   const over = isOverVisibleShape(
@@ -172,6 +204,11 @@ window.addEventListener("mousemove", (event) => {
   );
   if (over === claiming) return;
   claiming = over;
+  // Hover acknowledges the pointer and does nothing else: no gesture, no
+  // message, no record that the pointer was ever there. It is the one piece of
+  // feedback that tells the user the orb is a thing that can be touched rather
+  // than a picture painted on the desk.
+  orbElement.classList.toggle("hovered", over);
   window.widget.setPointerOverShape(over);
 });
 
@@ -182,8 +219,9 @@ window.addEventListener("mousemove", (event) => {
  * Right-click opens it where the pointer is. While it is open, the window
  * keeps claiming clicks so the buttons stay clickable, and a click anywhere
  * else — on the orb, on transparent pixels the window is capturing — closes
- * it. Dismiss and Quit are the two things the face can do: go away for this
- * turn, or go away for good.
+ * it. The three items are the three things the face can do that are not
+ * gestures: show the user the dashboard, go away for this turn, or go away for
+ * good.
  */
 let menuVisible = false;
 
@@ -210,6 +248,13 @@ window.addEventListener("contextmenu", (event) => {
   else showMenu(event.clientX, event.clientY);
 });
 
+menuDashboard.addEventListener("click", () => {
+  hideMenu();
+  // Shell-level, like quit: the hub is not asked for permission to show the
+  // user their own settings page, and nothing about this crosses the socket.
+  window.widget.openDashboard();
+});
+
 menuDismiss.addEventListener("click", () => {
   hideMenu();
   perform({ type: "dismiss" });
@@ -232,53 +277,63 @@ window.addEventListener("mousedown", (event) => {
 /*
  * Dragging moves the face.
  *
- * The face moves inside the window now instead of the window moving under the
- * compositor, which is what makes the orb something that can be anywhere on the
- * desk. The arithmetic is the pointer's travel added to where the orb started,
- * rather than the pointer's position taken as the orb's: a drag picked up by
- * one edge would otherwise snap the orb's corner under the cursor.
+ * Two things happen, and they are different things.
  *
- * The position is reported to the hub so the other faces and the next launch
- * agree about where the user put it — the widget is not the owner of that
+ * The face follows the hand — and the shell is the half that decides where it
+ * lands, asked for here as a distance travelled since the press, because the
+ * page has no idea where its own window sits on the desk. What moves is the orb
+ * inside the stage rather than the window under the compositor, which is what
+ * makes the face something that can be anywhere: a window that moved would be a
+ * window that could only ever be in one place at a time, and the scouts need
+ * the whole desk. Where it ended up comes back through `onPlaced`, in this
+ * page's coordinates, and that answer is the only thing drawn — no local guess
+ * runs alongside it, so a snap is never briefly overruled by a preview.
+ *
+ * And the position is reported to the hub, so the other faces and the next
+ * launch agree about where the user put it; the widget is not the owner of that
  * preference any more than it is the owner of anything else.
+ *
+ * Holding shift while dragging asks for a snap. Which edge, corner, or centre
+ * that lands on — or whether the release was too far from any of them to snap
+ * at all — is decided by the shell, which is the half that knows the shape of
+ * the screen.
  */
 let dragging = null;
 orbElement.addEventListener("mousedown", (event) => {
   if (menuVisible) return;
-  const origin = orbOrigin();
-  dragging = {
-    x: event.screenX,
-    y: event.screenY,
-    moved: false,
-    // Back in screen coordinates, which is the space a drag is reported in.
-    origin: { x: origin.x + (stage?.x ?? 0), y: origin.y + (stage?.y ?? 0) },
-  };
+  // The left button drags and, without travel, mutes. The right button belongs
+  // to the menu: a right-click that also started a drag would end its own
+  // mouseup as a mute, and silence the ears on the way to opening a menu.
+  if (event.button !== 0) return;
+  dragging = { x: event.screenX, y: event.screenY, moved: false };
+  window.widget.drag("begin", 0, 0, event.shiftKey);
 });
 window.addEventListener("mousemove", (event) => {
   if (!dragging) return;
   if (wasDrag(dragging, event.screenX, event.screenY)) dragging.moved = true;
+  // Below the threshold nothing moves, so a hand resting on the mouse does not
+  // nudge the face a pixel sideways on its way to a click.
   if (!dragging.moved) return;
-  dragPreview = {
-    x: dragging.origin.x + (event.screenX - dragging.x),
-    y: dragging.origin.y + (event.screenY - dragging.y),
-  };
-  paint();
+  window.widget.drag("move", event.screenX - dragging.x, event.screenY - dragging.y, event.shiftKey);
 });
 window.addEventListener("mouseup", (event) => {
   if (!dragging) return;
-  const moved = dragging.moved;
-  const landed = {
-    x: dragging.origin.x + (event.screenX - dragging.x),
-    y: dragging.origin.y + (event.screenY - dragging.y),
-  };
+  const { moved, x, y } = dragging;
   dragging = null;
-  dragPreview = null;
 
   // Press and release without travelling is a click, and a click on the orb
   // is the mute. Dragging a widget across the desk must not also mute it,
   // which is what a plain `click` listener beside this one would have done.
-  if (moved) perform({ type: "drag", x: landed.x, y: landed.y });
-  else perform({ type: "mute" });
+  if (!moved) {
+    perform({ type: "mute" });
+    return;
+  }
+  window.widget.drag("end", event.screenX - x, event.screenY - y, event.shiftKey);
+  // Back in screen coordinates, which is the space the hub is told about
+  // positions in — and taken from where the orb actually landed rather than
+  // from where the pointer happened to be, which are different by however far
+  // down the face the user grabbed it.
+  if (placed) perform({ type: "drag", x: placed.x + (stage?.x ?? 0), y: placed.y + (stage?.y ?? 0) });
 });
 
 /*

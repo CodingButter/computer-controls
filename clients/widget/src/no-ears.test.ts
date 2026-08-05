@@ -7,6 +7,7 @@ import { describe, expect, test } from "vitest";
 // this suite could only run on a machine with a display.
 import { GRANTED_PERMISSIONS, HEIGHT, placeOrb, stageFor } from "./window-shape.js";
 import { hubEventsUrl, nextRetryDelay } from "./connection.js";
+import { dashboardUrl } from "./dashboard.js";
 
 /**
  * The widget is a face, never an ear — checked against the code that ships.
@@ -112,9 +113,19 @@ test("test_idle_audio_never_leaves_the_machine_with_the_widget_running", () => {
   // widget's half — that there is no second connection, to anywhere, over
   // which anything at all could leave.
 
-  // Exactly one address is built in this process, and it is loopback.
+  // Two addresses are built in this process, and both are loopback: the socket
+  // the face listens on, and the dashboard the shell hands to a browser. Only
+  // the port varies in either, and a port does not change which machine the
+  // traffic reaches.
   expect(hubEventsUrl(4111)).toBe("ws://127.0.0.1:4111/events");
   expect(hubEventsUrl(9999)).toContain("127.0.0.1");
+  expect(dashboardUrl(4111)).toBe("http://127.0.0.1:4111/");
+  expect(dashboardUrl(9999)).toContain("http://127.0.0.1:");
+  // A port that is not a port opens nothing at all, rather than an address
+  // assembled out of whatever was in the environment.
+  for (const notAPort of [Number.NaN, 0, -1, 70000, 4111.5]) {
+    expect(dashboardUrl(notAPort), String(notAPort)).toBeNull();
+  }
 
   // No other way out: no HTTP client, no second socket, no telemetry. The
   // face is read here too — a shader that phoned home for a texture would be
@@ -152,6 +163,15 @@ describe("the shell", () => {
     // Clicks fall through the transparent rectangle by default.
     expect(main).toContain("setIgnoreMouseEvents(true");
 
+    // And the default is the only unconditional setting there is. The window is
+    // made click-through when it opens, and the single other call is the
+    // renderer's report of what it drew — so a hit test that goes wrong leaves
+    // the widget transparent, which is the direction the issue insists a bug
+    // here must fail in. Swallowing a click meant for the user's editor is the
+    // worst outcome available.
+    const flips = [...main.matchAll(/setIgnoreMouseEvents\(([^,)]*)/g)].map((match) => match[1]);
+    expect(flips).toEqual(["true", "!over"]);
+
     // It never steals what the user was typing into.
     expect(main).toContain("focusable: false");
     expect(main).toContain("showInactive()");
@@ -182,9 +202,17 @@ describe("the shell", () => {
     expect(required).toEqual(['"electron"']);
     // Handing the page `ipcRenderer` itself would give it every channel at
     // once, including ones added later by someone who never saw this file. So
-    // the object may reference it only to send on a named channel; it may not
-    // pass the thing along. Importing it is fine and unavoidable — the check
-    // is on how it is used, which is the part that could leak.
+    // the object may reference it only to send on a named channel, or to
+    // listen on one; it may not pass the thing along. Importing it is fine and
+    // unavoidable — the check is on how it is used, which is the part that
+    // could leak.
+    //
+    // Listening was added when the window became the whole display: the shell
+    // does the snapping and has to hand back somewhere to draw, and a page
+    // that cannot be told anything would have to guess. It is still a named
+    // channel and still one direction — the page cannot ask a question
+    // through it, and a bare `ipcRenderer.on` with no channel named right
+    // there fails this test exactly as a passed-along reference does.
     // Comments and imports are stripped first: this is a question about what
     // the code does, and prose that merely mentions the name is not a leak.
     // The CJS require destructure is the import, in the dialect a sandboxed
@@ -193,8 +221,10 @@ describe("the shell", () => {
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/^\s*(import|\/\/).*$/gm, "")
       .replace(/^\s*const\s*\{[^}]*\}\s*=\s*require\(.*$/gm, "");
-    const uses = [...body.matchAll(/ipcRenderer(.{0,7})/g)].map((match) => match[1] ?? "");
-    const passedAlong = uses.filter((after) => !after.startsWith(".send("));
+    const uses = [...body.matchAll(/ipcRenderer(.{0,12})/g)].map((match) => match[1] ?? "");
+    const passedAlong = uses.filter(
+      (after) => !after.startsWith(".send(") && !after.startsWith('.on("widget:'),
+    );
     expect(passedAlong, "ipcRenderer may only be used to send on a named channel").toEqual([]);
   });
 
@@ -320,9 +350,97 @@ describe("the exit", () => {
     expect(page).toContain('id="menu"');
     expect(page).toContain('id="menu-quit"');
     expect(page).toContain('id="menu-dismiss"');
+    expect(page).toContain('id="menu-dashboard"');
 
     // Right-click is still the interaction; it now opens a menu rather than
     // dismissing immediately.
     expect(renderer).toContain("contextmenu");
+  });
+});
+
+describe("the dashboard", () => {
+  test("opens in a browser, on a channel, at an address the page cannot choose", () => {
+    const preload = read("preload.js");
+    const main = read("main.js");
+
+    expect(preload).toContain('ipcRenderer.send("widget:open-dashboard"');
+    expect(main).toContain('ipcMain.on("widget:open-dashboard"');
+
+    // The bridge carries no URL, and the shell opens exactly one thing: the
+    // address it built itself. An always-on-top window that opened links
+    // chosen by its page would be a phishing surface with a nice animation,
+    // and this is the assertion that keeps a later `openExternal(link)` from
+    // slipping in beside this one.
+    expect(preload).not.toContain("http");
+    const opened = [...main.matchAll(/openExternal\(([^)]*)\)/g)].map((match) => match[1]);
+    expect(opened).toEqual(["url"]);
+    expect(main).toContain("const url = dashboardUrl(hubPort())");
+  });
+
+  test("never reaches the hub", () => {
+    // Same ruling as quit: showing the user their own settings page is a
+    // shell-level action, so it does not enter the closed gesture vocabulary
+    // and nothing about it travels the socket.
+    for (const file of ["connection.js", "state-machine.js"]) {
+      expect(read(file), `${file} must know nothing about the dashboard`).not.toContain("dashboard");
+    }
+  });
+});
+
+describe("the drag", () => {
+  test("the page reports a distance; the shell owns where it lands", () => {
+    const preload = read("preload.js");
+    const renderer = read("renderer.js");
+    const main = read("main.js");
+
+    expect(preload).toContain('ipcRenderer.send("widget:drag"');
+    expect(main).toContain('ipcMain.on("widget:drag"');
+
+    // Only the shell decides where the face lands, and only after the request
+    // has been read as a drag — a NaN reaching the placement would put the
+    // face somewhere nobody can find it.
+    expect(main).toContain("readDragRequest(request)");
+    expect(main).toContain("dragPlacement(display.workArea, wanted, drag.snap)");
+
+    // The window itself no longer moves. It is the whole display now, and a
+    // stage that slid around under the compositor would take the scouts with
+    // it — a face pointing at a button would point next to it instead. So the
+    // shell answers a drag with a place to draw rather than by moving
+    // anything, and neither half calls setPosition at all.
+    expect(main).not.toContain("setPosition");
+    expect(renderer).not.toContain("setPosition");
+    expect(main).toContain('window.webContents.send("widget:placed"');
+
+    // And what comes back is in the page's own coordinates: the stage origin
+    // is taken off before it crosses, so the answer to "where do I draw" can
+    // never become an answer to "where is my window".
+    expect(main).toContain("x: placement.x - stage.x");
+    expect(renderer).toContain("window.widget.onPlaced");
+
+    // The page never names a place, only a distance travelled since the press.
+    // It cannot name one honestly: on a desk with three monitors it does not
+    // know where its own window is.
+    expect(renderer).toContain('window.widget.drag("begin"');
+    expect(renderer).toContain('window.widget.drag("end"');
+  });
+
+  test("the position is written down once, when the hand lets go", () => {
+    const main = read("main.js");
+
+    // Persisting on every mousemove would rewrite a file on disk sixty times a
+    // second for the length of a drag.
+    const writes = [...main.matchAll(/writePlacement\(/g)];
+    expect(writes).toHaveLength(1);
+    expect(main).toMatch(/drag\.phase === "end"[\s\S]*writePlacement\(/);
+
+    // And it is read back when the window opens, resolved against the display
+    // it is opening on rather than replayed as raw pixels. The resolving lives
+    // in the stage now, because the stored spot decides two things at once —
+    // which display to cover, and where on it the face starts — and they must
+    // be answered from the same reading or the face lands on the wrong desk.
+    expect(main).toContain("readPlacement(placementFile())");
+    expect(main).toContain("screen.getDisplayNearestPoint({ x: stored.x, y: stored.y })");
+    expect(main).toContain("stageFor(display, stored ??");
+    expect(read("window-shape.js")).toContain("restorePlacement(display.workArea, placement)");
   });
 });

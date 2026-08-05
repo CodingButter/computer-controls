@@ -15,6 +15,8 @@ import {
   THINKING_MODE,
 } from "./model-pack.ts";
 import { mountAllowedPlugins } from "./plugins.ts";
+import { createConfigSubagent } from "./settings/agent.ts";
+import type { SettingsGate } from "./settings/gate.ts";
 import { HANDS_OFF_TOOL_NAMES, hubWorkspace, listSessionTools } from "./toolbox.ts";
 
 /** The browser is one caller, so its turns share one session and one thread history. */
@@ -29,7 +31,18 @@ const BROWSER_RESOURCE_ID = "local-browser";
  * literal in the entry module is not cosmetic — the deployer's Babel plugin
  * only recognises a Mastra config when it finds that expression there.
  */
-export type HubOptions = {
+export interface PrepareHubOptions {
+  /**
+   * The settings door, when the caller has assembled one.
+   *
+   * Optional because the settings service needs a credential store, and the
+   * hub is prepared before that store exists — the entry module builds both and
+   * hands this back down. A hub prepared without it simply has no configuration
+   * agent: the tools are absent rather than present and refusing, which is the
+   * same rule the desktop tools follow.
+   */
+  settings?: SettingsGate;
+
   /**
    * Told about every controller event of every turn.
    *
@@ -39,9 +52,9 @@ export type HubOptions = {
    * before — which is what every test that does not care about faces boots.
    */
   observe?: (event: AgentControllerEvent) => void;
-};
+}
 
-export async function prepareHub(config: ClientConfig, options: HubOptions = {}) {
+export async function prepareHub(config: ClientConfig, options: PrepareHubOptions = {}) {
   // Before anything is constructed, because a pack that cannot be resolved is a
   // hub that would otherwise boot and think with somebody else's pick.
   const modelPack = resolveModelPack();
@@ -74,7 +87,7 @@ export async function prepareHub(config: ClientConfig, options: HubOptions = {})
     // door onto this machine that the hub is allowed to knock on; a shell, a
     // file write, or a language-server spawn would be a second door, opening
     // without a scope check and without an audit line. See ./toolbox.ts.
-    workspace: hubWorkspace,
+    workspace: hubWorkspace({ commonsPath: config.commonsPath }),
     disabledTools: HANDS_OFF_TOOL_NAMES,
     // Left to itself the runtime resolves plugins from this project *and* from
     // the operator's home directory, which handed a session that holds a
@@ -87,6 +100,19 @@ export async function prepareHub(config: ClientConfig, options: HubOptions = {})
     // neither belongs to a session mounted at an observe-shaped scope.
     disableMcp: true,
     disableHooks: true,
+    // The configuration agent, and nothing else. The runtime's own subagent
+    // list defaults to empty, so this is the whole set: one mind that can
+    // change settings and cannot touch the desktop, beside one that holds the
+    // desktop and cannot change settings. See ./settings/agent.ts.
+    subagents: options.settings
+      ? [
+          createConfigSubagent({
+            gate: options.settings,
+            surface: "conversation",
+            modelId: modelForTier(modelPack, "standard"),
+          }),
+        ]
+      : [],
   });
 
   let pending: Promise<HubSession> | undefined;
@@ -151,6 +177,11 @@ export async function prepareHub(config: ClientConfig, options: HubOptions = {})
       thinking: thinkingModel,
       tiers: modelPack.models,
     },
+    // Which OS adapter booted, and what it admits it cannot do. Reported
+    // because the adapters for the unscheduled OSes answer "nothing installed"
+    // rather than throwing, and a person on one of those deserves to be told
+    // the difference between an empty desktop and an unwritten scanner.
+    platform: { id: config.platform.id, supports: config.platform.supports },
   });
 
   return { base, mastraArgs, finalize, chat, status, getSession, modelPack };

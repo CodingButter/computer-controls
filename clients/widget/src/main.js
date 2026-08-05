@@ -1,4 +1,4 @@
-import { BrowserWindow, app, ipcMain, screen, session } from "electron";
+import { BrowserWindow, app, ipcMain, screen, session, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,9 +19,21 @@ import { fileURLToPath } from "node:url";
  * of what a thing that draws needs.
  */
 
-import { stageFor } from "./window-shape.js";
+import {
+  dragPlacement,
+  readDragRequest,
+  stageFor,
+} from "./window-shape.js";
+import { readPlacement, writePlacement } from "./placement-store.js";
+import { dashboardUrl } from "./dashboard.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+/** Where the drag is written down, beside whatever else this app stores. */
+const placementFile = () => path.join(app.getPath("userData"), "placement.json");
+
+/** The hub's port, read from the environment exactly as the bridge reads it. */
+const hubPort = () => Number(process.env.COMCON_CLIENT_PORT ?? 4111);
 
 /**
  * The flag the stage travels on, spelled the same way in the preload.
@@ -33,9 +45,29 @@ const here = path.dirname(fileURLToPath(import.meta.url));
  */
 const STAGE_ARGUMENT = "--comcon-stage=";
 
+/**
+ * Which desk to draw on, and where on it the face starts.
+ *
+ * Two questions that used to be one. The window covers a display, so the
+ * display is chosen first — the one the face was last left on, or the primary
+ * one when it has never been left anywhere. Where the orb sits inside that
+ * stage is then either the remembered spot, resolved against this display's
+ * work area, or the default corner.
+ *
+ * A remembered spot on a monitor that is no longer plugged in resolves onto a
+ * display that is, which is the whole reason the placement is stored as an
+ * intention rather than as a pair of pixels.
+ */
+function openingStage() {
+  const stored = readPlacement(placementFile());
+  const display = stored
+    ? screen.getDisplayNearestPoint({ x: stored.x, y: stored.y })
+    : screen.getPrimaryDisplay();
+  return stageFor(display, stored ?? process.env.COMCON_WIDGET_PLACEMENT ?? "corner");
+}
+
 function createWindow() {
-  const placement = process.env.COMCON_WIDGET_PLACEMENT ?? "corner";
-  const stage = stageFor(screen.getPrimaryDisplay(), placement);
+  const stage = openingStage();
 
   const window = new BrowserWindow({
     // The window is the whole display. It is transparent and click-through, so
@@ -100,7 +132,11 @@ function createWindow() {
   window.loadFile(path.join(here, "index.html"));
   window.once("ready-to-show", () => window.showInactive());
 
-  return window;
+  // The stage travels out with the window because the drag handler needs the
+  // same origin the page was given. Two readings of the display could disagree
+  // after a monitor changed, and a face drawn against one origin and placed
+  // against another is a face in the wrong place for no visible reason.
+  return { window, stage };
 }
 
 function refuseEverything() {
@@ -125,7 +161,7 @@ function refuseEverything() {
 
 app.whenReady().then(() => {
   refuseEverything();
-  const window = createWindow();
+  const { window, stage } = createWindow();
 
   // The renderer knows what shape it painted; the shell owns the window. While
   // the pointer is over the orb the window takes clicks, and the moment it
@@ -133,6 +169,68 @@ app.whenReady().then(() => {
   ipcMain.on("widget:pointer-over-shape", (_event, over) => {
     if (window.isDestroyed()) return;
     window.setIgnoreMouseEvents(!over, { forward: true });
+  });
+
+  /*
+   * Dragging moves the face, and the shell is the half that can say where.
+   *
+   * The page reports the distance the pointer has travelled since the press;
+   * everything else happens here, where the shape of the desk is actually
+   * known. What changed when the window became the stage is only the subject
+   * of the arithmetic: the orb moves inside a window that stays where the desk
+   * is, rather than the window moving under the compositor. The rule the page
+   * lives by did not change at all — it reports travel, never a position,
+   * because on a desk with three monitors it has no honest way to know one.
+   *
+   * The result is handed back in page coordinates, because the page is the
+   * thing that draws now. That is the one direction this seam gained, and it
+   * carries a place to draw rather than an answer about where the window is.
+   *
+   * The origin is taken once, at the press, so a long drag accumulates no
+   * rounding error and a snap that pulls the orb to an edge does not drag the
+   * cursor's frame of reference with it.
+   *
+   * The write happens on release only. A face persisted on every mousemove
+   * would be a JSON file rewritten sixty times a second.
+   */
+  let orb = stage.orb;
+  let dragOrigin = null;
+  ipcMain.on("widget:drag", (_event, request) => {
+    if (window.isDestroyed()) return;
+    const drag = readDragRequest(request);
+    if (!drag) return;
+
+    if (drag.phase === "begin") {
+      dragOrigin = { x: orb.x, y: orb.y };
+      return;
+    }
+    if (!dragOrigin) return;
+
+    const wanted = { x: dragOrigin.x + drag.dx, y: dragOrigin.y + drag.dy };
+    // Clamped and snapped against the display the hand is over, which is not
+    // always the display the stage is on — a face dragged towards a second
+    // monitor stops at the edge of the desk it is drawn on rather than
+    // half-existing on one it cannot reach.
+    const display = screen.getDisplayNearestPoint(wanted);
+    const placement = dragPlacement(display.workArea, wanted, drag.snap);
+    orb = { x: placement.x, y: placement.y };
+    window.webContents.send("widget:placed", {
+      x: placement.x - stage.x,
+      y: placement.y - stage.y,
+    });
+
+    if (drag.phase === "end") {
+      dragOrigin = null;
+      writePlacement(placementFile(), placement);
+    }
+  });
+
+  // The dashboard opens in the user's browser, not in this process. A widget
+  // that rendered a settings page would have become a second application, and
+  // this one is a face.
+  ipcMain.on("widget:open-dashboard", () => {
+    const url = dashboardUrl(hubPort());
+    if (url) shell.openExternal(url);
   });
 
   // A face the user asked to leave leaves. The process closes its own windows

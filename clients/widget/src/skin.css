@@ -136,6 +136,23 @@ body {
 }
 
 /*
+ * The pointer is over the orb, and the orb says so. Nothing else happens on
+ * hover — no gesture, no message — but a face that is about to take a click
+ * should look like one, otherwise the only way to find out whether the orb is
+ * touchable is to click it and see what happens to the window underneath.
+ */
+#orb.hovered {
+  box-shadow:
+    0 0 32px rgba(120, 168, 255, 0.85),
+    0 0 4px rgba(255, 255, 255, 0.6);
+  cursor: grab;
+}
+
+#orb.hovered:active {
+  cursor: grabbing;
+}
+
+/*
  * When the shader mounts, the CSS orb steps aside. Its gradient and its motion
  * are the fallback; the shader draws both. The canvas fills the #orb box at the
  * size the skin set, and is hidden entirely until the renderer confirms WebGL

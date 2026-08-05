@@ -5,6 +5,7 @@ import { createSkillTools, createWorkspaceTools, WORKSPACE_TOOLS } from "@mastra
 import type { AnyWorkspace, WorkspaceToolsConfig } from "@mastra/core/workspace";
 
 import type { HubController, HubSession } from "./chat.ts";
+import { commonsSkillExtension } from "./skill-commons.ts";
 
 /**
  * The hub rides the coding runtime, and that runtime's default session comes
@@ -78,20 +79,28 @@ export const HANDS_OFF_TOOL_NAMES: string[] = [
 
 /**
  * The workspace the hub's sessions run on: the runtime's own resolution, with
- * the tool catalogue narrowed on the way out.
+ * the skill commons mounted and the tool catalogue narrowed on the way out.
  *
  * Narrowing has to happen here rather than once at boot because the runtime
  * re-applies its full catalogue to a reused workspace every time it resolves
  * one — a single `setToolsConfig` after boot would be quietly undone by the
  * next session.
+ *
+ * The commons is passed in rather than found here so that the one place that
+ * decides where this hub reads skills from is the boot config. See
+ * ./skill-commons.ts for why it is a read-only extension root and not a folder
+ * moved under a path the runtime already scans.
  */
-export const hubWorkspace = async (args: {
-  requestContext: RequestContext;
-  mastra?: Parameters<typeof getDynamicWorkspace>[0]["mastra"];
-}) => {
-  const workspace = await getDynamicWorkspace(args);
-  workspace.setToolsConfig(HUB_WORKSPACE_TOOLS);
-  return workspace;
+export const hubWorkspace = (options: { commonsPath?: string } = {}) => {
+  const skillExtension = commonsSkillExtension(options.commonsPath);
+  return async (args: {
+    requestContext: RequestContext;
+    mastra?: Parameters<typeof getDynamicWorkspace>[0]["mastra"];
+  }) => {
+    const workspace = await getDynamicWorkspace({ ...args, skillExtension });
+    workspace.setToolsConfig(HUB_WORKSPACE_TOOLS);
+    return workspace;
+  };
 };
 
 /**
