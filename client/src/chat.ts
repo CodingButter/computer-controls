@@ -37,8 +37,12 @@ export type AgentTurnDeps = {
    * runner resolves a model from the mode's defaults, and those defaults are
    * the runtime's to decide — see ./model-pack.ts for why this hub decides
    * instead.
+   *
+   * A function when the choice can move: a pack picked on the Models page has
+   * to reach the next turn, and a string captured at construction would have
+   * pinned this hub to whatever was chosen when the process started.
    */
-  model: string;
+  model: string | (() => string);
   /**
    * The headless runner. Injected so the wiring can be proved without a model:
    * everything from the HTTP body to the runner options and back to the reply
@@ -66,7 +70,9 @@ export function createAgentTurn(deps: AgentTurnDeps): AgentTurn {
       session,
       prompt: request.message,
       mode: deps.mode ?? "build",
-      model: deps.model,
+      // Read per turn, so the pack a person picked answers the next thing they
+      // say rather than the next time this process boots.
+      model: typeof deps.model === "function" ? deps.model() : deps.model,
       ...(request.threadId ? { thread: { id: request.threadId } } : {}),
     });
 

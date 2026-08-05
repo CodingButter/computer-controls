@@ -22,3 +22,4 @@ export * from "./devices";
 export * from "./realtime";
 export * from "./autostart";
 export * from "./desktop-config";
+export * from "./model-packs";

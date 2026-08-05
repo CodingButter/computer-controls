@@ -141,6 +141,58 @@ test("test_the_hub_sees_the_agent_work_on_a_turn_that_asked_for_nothing", async 
   expect(asked).toEqual(events);
 });
 
+test("the model is read per turn, so a pack chosen after boot answers the next thing said", async () => {
+  const asked: string[] = [];
+  let pack = "anthropic/claude-sonnet-4-6";
+  const turn = createAgentTurn({
+    controller: hubController,
+    getSession: hubSession,
+    // A function rather than a string: this is the seam the Models page moves.
+    model: () => pack,
+    run: ((options: Record<string, unknown>) => {
+      asked.push(options.model as string);
+      return {
+        result: Promise.resolve({ status: "completed", text: "ok", threadId: "t" }),
+      };
+    }) as never,
+  });
+
+  await turn({ message: "before" });
+  pack = "anthropic/claude-opus-4-6";
+  await turn({ message: "after" });
+
+  // No restart between them: the second turn thinks with the pack that was
+  // picked while the first one was still the answer.
+  expect(asked).toEqual(["anthropic/claude-sonnet-4-6", "anthropic/claude-opus-4-6"]);
+});
+
+test("the hub thinks with the pack it is handed, and health says which one", async () => {
+  const config = resolveClientConfig({ ...process.env, COMCON_CLIENT_ROOT: root });
+  let chosen = {
+    id: "picked-on-the-page",
+    models: {
+      minimal: "anthropic/claude-haiku-4-5",
+      standard: "anthropic/claude-opus-4-6",
+      heavy: "anthropic/claude-opus-4-6",
+    },
+  };
+  const hub = await prepareHub(config, { activePack: () => chosen });
+
+  const first = await hub.status();
+  expect(first.model).toEqual({
+    pack: "picked-on-the-page",
+    thinking: "anthropic/claude-opus-4-6",
+    tiers: chosen.models,
+  });
+
+  chosen = { ...chosen, id: "picked-again", models: { ...chosen.models, standard: "anthropic/claude-haiku-4-5" } };
+  const second = await hub.status();
+  // Health reports the pack answering now rather than the one this process
+  // booted with, which is what makes a switch checkable rather than claimed.
+  expect(second.model.pack).toBe("picked-again");
+  expect(second.model.thinking).toBe("anthropic/claude-haiku-4-5");
+}, 120_000);
+
 test("an empty message is refused before it reaches the agent", async () => {
   const before = received.length;
   const response = await app.request("/api/chat", {

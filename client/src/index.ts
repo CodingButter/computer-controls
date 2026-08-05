@@ -20,6 +20,10 @@ import {
   createTouchLane,
 } from "./events/index.ts";
 import { prepareHub } from "./hub.ts";
+import { resolveModelPack } from "./model-pack.ts";
+import { buildModelPacksApp } from "./model-packs/routes.ts";
+import { ModelPacksService } from "./model-packs/service.ts";
+import { FilePackStore } from "./model-packs/store.ts";
 import { auditFile, configFile } from "./paths.ts";
 import { wrapTurnWithPermissionAwareness } from "./permissions/aware-turn.ts";
 import { findDaemonSocket, readCensus } from "./permissions/daemon.ts";
@@ -74,7 +78,29 @@ const settings = new SettingsGate({
   }),
 });
 
-const hub = await prepareHub(config, { settings, observe: touchLane.observe });
+/**
+ * The packs, and the one a person picked.
+ *
+ * Built before the hub because the hub asks it which pack to think with on
+ * every turn. The read is deliberately wrapped: a pack file somebody hand-edited
+ * into unreadable shape must not take the chat down with it, so the turn falls
+ * back to the pack this build declares — the same pack a machine with no file at
+ * all runs. Nothing is hidden by that fallback: the Models page's own route
+ * refuses with the parser's reason, which is where a person can act on it.
+ */
+const modelPacks = new ModelPacksService({
+  store: new FilePackStore(hubDir),
+  credentials: providerAuth.credentials,
+});
+const activePack = () => {
+  try {
+    return modelPacks.activePack();
+  } catch {
+    return resolveModelPack();
+  }
+};
+
+const hub = await prepareHub(config, { settings, observe: touchLane.observe, activePack });
 
 /**
  * The permission registry, and the one wrapping of the hub's turn.
@@ -215,6 +241,7 @@ const app = buildApp({
    * pen.
    */
   autostart: buildAutostartApp({ platform: config.platform }),
+  modelPacks: buildModelPacksApp(modelPacks),
 });
 
 // Cure at boot, once, and never fatally: a launcher that could not be
