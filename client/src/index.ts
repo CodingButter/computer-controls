@@ -5,6 +5,7 @@ import { Mastra } from "@mastra/core/mastra";
 import { buildApp } from "./app.ts";
 import { createProviderAuth } from "./auth/index.ts";
 import { resolveClientConfig } from "./config.ts";
+import { buildDesktopConfigApp } from "./desktop-config/routes.ts";
 import { attachEventSocket } from "./events/index.ts";
 import { prepareHub } from "./hub.ts";
 import { commandSpeaker, startMicrophone } from "./orb/audio-host.ts";
@@ -111,6 +112,12 @@ const app = buildApp({
   auth: providerAuth.app,
   voice,
   orb,
+  /**
+   * No path is passed, so it edits the file the daemon actually reads. The hub
+   * runs as the user and rewrites the user's own file; nothing here reaches the
+   * daemon socket, which remains unable to author its own ceiling.
+   */
+  desktopConfig: buildDesktopConfigApp(),
 });
 
 let announce: (url: string) => void;

@@ -45,6 +45,13 @@ export type AppDeps = {
    * keeps working regardless.
    */
   orb?: { app: Hono; reason?: string };
+  /**
+   * The read and write door onto the user's desktop configuration, which the
+   * Settings page's three depths are lenses over. Optional like the rest so a
+   * test that is not about settings can boot without one; the entry module
+   * always supplies it.
+   */
+  desktopConfig?: Hono;
 };
 
 /**
@@ -97,6 +104,7 @@ export function buildApp(deps: AppDeps): Hono {
   if (deps.auth) app.route("/", deps.auth);
   if (deps.voice) app.route("/", deps.voice.app);
   if (deps.orb) app.route("/", deps.orb.app);
+  if (deps.desktopConfig) app.route("/", deps.desktopConfig);
 
   app.get("*", (c) => {
     const asset = readUiAsset(deps.uiRoot, c.req.path);
