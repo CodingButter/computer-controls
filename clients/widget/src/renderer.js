@@ -15,6 +15,9 @@ import { INITIAL_STATE, applyGesture, reduce } from "./state-machine.js";
 const root = document.getElementById("widget");
 const orbElement = document.getElementById("orb");
 const captionElement = document.getElementById("caption");
+const menuElement = document.getElementById("menu");
+const menuDismiss = document.getElementById("menu-dismiss");
+const menuQuit = document.getElementById("menu-quit");
 
 let state = INITIAL_STATE;
 
@@ -55,6 +58,11 @@ function perform(gesture) {
  */
 let claiming = false;
 window.addEventListener("mousemove", (event) => {
+  // While the menu is open, claiming stays locked: the pointer may move off
+  // the orb onto the menu, which is not part of the visible-shape hit-test,
+  // and a mousemove that released clicks would drop the menu through the
+  // floor.
+  if (menuVisible) return;
   const orb = orbElement.getBoundingClientRect();
   const caption = state.caption ? captionElement.getBoundingClientRect() : null;
   const over = isOverVisibleShape(
@@ -67,10 +75,58 @@ window.addEventListener("mousemove", (event) => {
   window.widget.setPointerOverShape(over);
 });
 
-// A right-click anywhere on the face dismisses this turn's widget.
+/*
+ * The menu: the one way out of a face that has no frame, no taskbar entry, and
+ * never takes focus.
+ *
+ * Right-click opens it where the pointer is. While it is open, the window
+ * keeps claiming clicks so the buttons stay clickable, and a click anywhere
+ * else — on the orb, on transparent pixels the window is capturing — closes
+ * it. Dismiss and Quit are the two things the face can do: go away for this
+ * turn, or go away for good.
+ */
+let menuVisible = false;
+
+/** @param {number} x @param {number} y */
+function showMenu(x, y) {
+  menuElement.style.left = `${x}px`;
+  menuElement.style.top = `${y}px`;
+  menuElement.hidden = false;
+  menuVisible = true;
+  claiming = true;
+  window.widget.setPointerOverShape(true);
+}
+
+function hideMenu() {
+  menuElement.hidden = true;
+  menuVisible = false;
+  claiming = false;
+  window.widget.setPointerOverShape(false);
+}
+
 window.addEventListener("contextmenu", (event) => {
   event.preventDefault();
+  if (menuVisible) hideMenu();
+  else showMenu(event.clientX, event.clientY);
+});
+
+menuDismiss.addEventListener("click", () => {
+  hideMenu();
   perform({ type: "dismiss" });
+});
+
+menuQuit.addEventListener("click", () => {
+  hideMenu();
+  window.widget.quit();
+});
+
+// A click outside the menu closes it. This fires before the contextmenu
+// event on a right-click, so a second right-click repositions rather than
+// toggling: the mousedown hides, then contextmenu shows at the new spot.
+window.addEventListener("mousedown", (event) => {
+  if (!menuVisible) return;
+  if (menuElement.contains(event.target)) return;
+  hideMenu();
 });
 
 /*
@@ -82,6 +138,7 @@ window.addEventListener("contextmenu", (event) => {
  */
 let dragging = null;
 orbElement.addEventListener("mousedown", (event) => {
+  if (menuVisible) return;
   dragging = { x: event.screenX, y: event.screenY, moved: false };
 });
 window.addEventListener("mousemove", (event) => {

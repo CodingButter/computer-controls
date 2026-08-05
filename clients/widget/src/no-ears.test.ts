@@ -132,7 +132,7 @@ describe("the shell", () => {
     expect(main).toContain("webviewTag: false");
   });
 
-  test("hands the page two functions and no more", () => {
+  test("hands the page what it needs and nothing it shouldn't", () => {
     const preload = read("preload.js");
 
     // The bridge is the one seam between the sandbox and the process. What is
@@ -207,5 +207,46 @@ describe("the connection", () => {
     // user restarts by hand.
     expect(Math.max(...delays)).toBeLessThanOrEqual(5000);
     expect(delays.at(-1)).toBe(5000);
+  });
+});
+
+describe("the exit", () => {
+  test("quit rides a named IPC channel, not a gesture and not a kill", () => {
+    const preload = read("preload.js");
+    const main = read("main.js");
+
+    // The bridge offers quit, and it reaches the shell by name. The regex in
+    // the bridge test above permits exactly this form — ipcRenderer.send on a
+    // named channel — and nothing else, which is why this is the only shape a
+    // quit affordance can take.
+    expect(preload).toContain('ipcRenderer.send("widget:quit"');
+    expect(main).toContain('ipcMain.on("widget:quit"');
+    // The shell closes its own windows: never a kill from outside.
+    expect(main).toContain("app.quit()");
+  });
+
+  test("quit never reaches the hub", () => {
+    // Quit is a process-level action, not a conversation gesture. It does not
+    // travel the WebSocket, because the hub does not own this process's
+    // lifetime — and a face that could ask the hub to kill it would have a
+    // power the vocabulary is closed against.
+    const connection = read("connection.js");
+    expect(connection).not.toContain("quit");
+    const stateMachine = read("state-machine.js");
+    expect(stateMachine).not.toContain("quit");
+  });
+
+  test("right-click opens a menu with a way out", () => {
+    const page = read("index.html");
+    const renderer = read("renderer.js");
+
+    // The menu is on the page.
+    expect(page).toContain('id="menu"');
+    expect(page).toContain('id="menu-quit"');
+    expect(page).toContain('id="menu-dismiss"');
+
+    // Right-click is still the interaction; it now opens a menu rather than
+    // dismissing immediately.
+    expect(renderer).toContain("contextmenu");
   });
 });
