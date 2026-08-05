@@ -11,6 +11,7 @@ import {
   readDragRequest,
   restorePlacement,
   snapZoneFor,
+  stageFor,
 } from "./window-shape.js";
 import { decodePlacement, readPlacement, writePlacement } from "./placement-store.js";
 
