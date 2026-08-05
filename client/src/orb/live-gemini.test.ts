@@ -27,6 +27,11 @@ class FakeSocket implements SocketLike {
     this.emit("close", {});
   }
 
+  /** Simulate the server closing the socket with a close code + reason. */
+  serverCloses(code: number, reason = ""): void {
+    this.emit("close", { code, reason, wasClean: code === 1000 });
+  }
+
   addEventListener(type: string, listener: (event: never) => void): void {
     const existing = this.listeners.get(type) ?? [];
     existing.push(listener as (event: unknown) => void);
@@ -87,6 +92,46 @@ describe("connecting to Gemini Live", () => {
     expect(first.setup.inputAudioTranscription).toEqual({});
     expect(first.setup.outputAudioTranscription).toEqual({});
     expect(first.setup.systemInstruction.parts[0].text).toBe(ORB_SYSTEM_INSTRUCTION);
+  });
+
+  it("omits speechConfig when no voice is chosen — provider default applies", async () => {
+    const { socket } = await connected();
+    const first = JSON.parse(socket.sent[0]);
+    expect(first.setup.generationConfig.speechConfig).toBeUndefined();
+  });
+
+  it("sends the chosen prebuilt voice in speechConfig", async () => {
+    let socket!: FakeSocket;
+    const provider = geminiLiveProvider((url) => {
+      socket = new FakeSocket(url);
+      queueMicrotask(() => {
+        socket.emit("open", {});
+        socket.serverSays({ setupComplete: {} });
+      });
+      return socket;
+    });
+    await provider.connect(
+      realtimeConfig({ apiKey: "test-key", voice: "Aoede", events: events() }),
+    );
+    const first = JSON.parse(socket.sent[0]);
+    expect(first.setup.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe("Aoede");
+  });
+
+  it("sends the chosen model instead of the default", async () => {
+    let socket!: FakeSocket;
+    const provider = geminiLiveProvider((url) => {
+      socket = new FakeSocket(url);
+      queueMicrotask(() => {
+        socket.emit("open", {});
+        socket.serverSays({ setupComplete: {} });
+      });
+      return socket;
+    });
+    await provider.connect(
+      realtimeConfig({ apiKey: "test-key", model: "gemini-3.1-pro-live-preview", events: events() }),
+    );
+    const first = JSON.parse(socket.sent[0]);
+    expect(first.setup.model).toBe("models/gemini-3.1-pro-live-preview");
   });
 
   it("does not resolve before the server says setupComplete", async () => {
@@ -298,5 +343,108 @@ describe("when the server hangs up", () => {
     expect(sockets).toHaveLength(1);
     session.sendAudio(new Uint8Array([1]));
     // No throw, no new socket: hung up means hung up.
+  });
+});
+
+// A retired model (1008) or a policy rejection (4xxx) is permanent — retrying
+// the same model loops forever. The orb must say so and stop, not redial a
+// socket the provider will refuse again. This is the exact bug that left the
+// orb mute in #129: a silent close, redial forever, nobody told the person.
+describe("permanent refusal — retired model or policy reject", () => {
+  it("rejects the dial when a 1008 arrives during setup", async () => {
+    let socket!: FakeSocket;
+    const provider = geminiLiveProvider((url) => {
+      socket = new FakeSocket(url);
+      queueMicrotask(() => {
+        socket.emit("open", {});
+        socket.serverCloses(1008, "model not found");
+      });
+      return socket;
+    });
+    await expect(
+      provider.connect(realtimeConfig({ apiKey: "k", model: "gemini-x-live", events: events() })),
+    ).rejects.toThrow(/refused the model 'gemini-x-live'.*model not found/s);
+  });
+
+  it("fires onRefusal and stops redialing on a post-setup 1008", async () => {
+    const refused: string[] = [];
+    const eventHandlers = events({ onRefusal: (reason) => refused.push(reason) });
+
+    const sockets: FakeSocket[] = [];
+    const provider = geminiLiveProvider((url) => {
+      const socket = new FakeSocket(url);
+      sockets.push(socket);
+      queueMicrotask(() => {
+        socket.emit("open", {});
+        socket.serverSays({ setupComplete: {} });
+      });
+      return socket;
+    }, () => Promise.resolve());
+
+    const session = await provider.connect(
+      realtimeConfig({ apiKey: "k", model: "gemini-x-live", events: eventHandlers }),
+    );
+    expect(session.connected).toBe(true);
+
+    sockets[0].serverCloses(1008, "model not found");
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(refused[0]).toMatch(/refused the model 'gemini-x-live'/);
+    expect(refused[0]).toMatch(/model not found/);
+    // No second socket — the redial loop was stopped.
+    expect(sockets).toHaveLength(1);
+    expect(session.connected).toBe(false);
+  });
+
+  it("still redials a 1000 idle close", async () => {
+    const refused: string[] = [];
+    const eventHandlers = events({ onRefusal: (reason) => refused.push(reason) });
+
+    const sockets: FakeSocket[] = [];
+    const provider = geminiLiveProvider((url) => {
+      const socket = new FakeSocket(url);
+      sockets.push(socket);
+      queueMicrotask(() => {
+        socket.emit("open", {});
+        socket.serverSays({ setupComplete: {} });
+      });
+      return socket;
+    }, () => Promise.resolve());
+
+    const session = await provider.connect(realtimeConfig({ apiKey: "k", events: eventHandlers }));
+
+    sockets[0].serverCloses(1000);
+    await new Promise((r) => setTimeout(r, 10));
+
+    // A 1000 is transient — redial happened, no refusal fired.
+    expect(refused).toHaveLength(0);
+    expect(sockets).toHaveLength(2);
+    expect(session.connected).toBe(true);
+  });
+
+  it("treats a 4xxx close as permanent", async () => {
+    const refused: string[] = [];
+    const eventHandlers = events({ onRefusal: (reason) => refused.push(reason) });
+
+    const sockets: FakeSocket[] = [];
+    const provider = geminiLiveProvider((url) => {
+      const socket = new FakeSocket(url);
+      sockets.push(socket);
+      queueMicrotask(() => {
+        socket.emit("open", {});
+        socket.serverSays({ setupComplete: {} });
+      });
+      return socket;
+    }, () => Promise.resolve());
+
+    await provider.connect(
+      realtimeConfig({ apiKey: "k", model: "gemini-x-live", events: eventHandlers }),
+    );
+
+    sockets[0].serverCloses(4004, "quota exceeded");
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(refused[0]).toMatch(/refused the model 'gemini-x-live'/);
+    expect(sockets).toHaveLength(1);
   });
 });

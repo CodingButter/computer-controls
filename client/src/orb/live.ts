@@ -66,6 +66,13 @@ export type RealtimeEvents = {
   onBargeIn(): void;
   /** The socket reconnected after a server-side drop. Answers queued during the gap are flushed here. */
   onReconnect?(): void;
+  /**
+   * The provider permanently refused the connection (e.g. the model was
+   * retired upstream). Redialing stops — retrying a model the provider has
+   * rejected is how the orb went mute in the first place (#129). The reason
+   * names the model so the person knows what to change.
+   */
+  onRefusal?(reason: string): void;
 };
 
 /**
@@ -100,6 +107,11 @@ export interface RealtimeSession {
 export type RealtimeConfig = {
   apiKey: string;
   model: string;
+  /**
+   * The prebuilt voice name, when one is chosen. Absent means the provider's
+   * default — the behaviour the orb had before #129 made voice a setting.
+   */
+  voice?: string;
   /** Always exactly the hub function. Present so the fence is visible at the call site. */
   tools: readonly [typeof HUB_FUNCTION_DECLARATION];
   /** Speak without waiting to be spoken to, where the provider supports it. */
@@ -133,6 +145,7 @@ export function realtimeConfig(input: {
   apiKey: string;
   events: RealtimeEvents;
   model?: string;
+  voice?: string;
   proactiveAudio?: boolean;
 }): RealtimeConfig {
   return {
@@ -141,5 +154,6 @@ export function realtimeConfig(input: {
     tools: REALTIME_TOOLS,
     proactiveAudio: input.proactiveAudio ?? true,
     events: input.events,
+    ...(input.voice !== undefined ? { voice: input.voice } : {}),
   };
 }

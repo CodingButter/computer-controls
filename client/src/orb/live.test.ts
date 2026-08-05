@@ -82,6 +82,14 @@ describe("test_the_live_provider_holds_no_desktop_or_memory_tools", () => {
     expect(realtimeConfig({ apiKey: "k", events: events() }).model).toBe(LIVE_MODEL);
   });
 
+  it("defaults to no voice, so the provider's own default speaks", () => {
+    expect(realtimeConfig({ apiKey: "k", events: events() }).voice).toBeUndefined();
+  });
+
+  it("threads a chosen voice through to the provider config", () => {
+    expect(realtimeConfig({ apiKey: "k", voice: "Aoede", events: events() }).voice).toBe("Aoede");
+  });
+
   it("asks for proactive audio, which is what lets a signal be spoken unprompted", () => {
     expect(realtimeConfig({ apiKey: "k", events: events() }).proactiveAudio).toBe(true);
   });
