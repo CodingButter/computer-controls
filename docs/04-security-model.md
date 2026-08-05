@@ -402,7 +402,46 @@ recording, which is worse. So a write failure is counted and reported through
 
 ---
 
-## 11. What this model does NOT guarantee
+## 11. Device topology: where voice runs, and what each side may hold
+
+Added with the realtime-voice client migration (2026-08-05). The daemon knows
+nothing of this section — voice never touches the accessibility socket — but
+the trust boundaries belong in the same document as the rest.
+
+**The provider key stays on the hub.** The Google API key (or OAuth token)
+lives in the hub's credential store and appears in exactly one outbound
+place: the `x-goog-api-key` header of the hub's own token-mint request to
+Google. No HTTP response, lane frame, log line, or client process ever
+carries it.
+
+**Devices hold tokens, and the tokens are constrained at the mint.** A client
+that wants to talk asks `POST /api/orb/token`. The hub mints an ephemeral
+provider token whose model, system instruction, and tool list (exactly one
+function: ask the hub) are locked server-side; the mint accepts no request
+body, so a requester cannot shape its own constraints. The token is
+short-lived, single-use for session start, and a redial means a fresh mint.
+A stolen token is a bounded loss: one constrained conversation window, no
+key, no account.
+
+**Audio goes from the device to the provider, never through the hub.** The
+device that heard the voice dials the provider directly with its token. The
+hub's `/events` lane carries words about the conversation — a session
+opened, a caption, an ask and its answer — and is typed so that nothing in
+its vocabulary can carry a sample.
+
+**The gate opens on the device that owns the microphone.** No frame leaves a
+machine until that machine's wake gate opens — by wake word, or by a
+deliberate press. The hub broadcasts session-open and session-close on the
+lane so the widget plugs its ears while any other client is talking: one
+conversation, one microphone.
+
+**The lane checks device credentials at the door.** Loopback peers are
+admitted; anything else must present a device credential minted into the
+hub's store (the slot QR pairing will fill). The credential rides the
+WebSocket subprotocol, never a URL — a token in a URL is a token in every
+access log — and every refusal is the same 403 with no hint.
+
+## 12. What this model does NOT guarantee
 
 These are not gaps to fill; they are limits stated in the source.
 

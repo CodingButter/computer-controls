@@ -7,11 +7,12 @@
  * socket, though open, is muted. Audio is forwarded only after the cheap ear has
  * said both that it was speech and that it was addressed to us.
  *
- * Issue #107 moves this chain into the hub process, at the OS audio layer,
- * rather than into a browser page. That placement is what makes the property
- * enforceable at all: a page can be closed, reloaded, or opened twice, and a
- * privacy guarantee that depends on which faces happen to be alive is not a
- * guarantee. The hub owns the microphone; every face is a renderer.
+ * This chain runs wherever the microphone lives. It was written for the hub
+ * process (#107); the client migration moved the microphones to the devices,
+ * and the gate moved with them — the widget's ears and any future client run
+ * this same file against the mic they own. The property is unchanged wherever
+ * it runs: the machine holding the microphone decides, locally, whether a
+ * frame ever leaves it.
  *
  * The gate is deliberately not the expensive model. It never calls the brain, it
  * never calls the realtime provider, and the only thing it emits when it decides

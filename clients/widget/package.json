@@ -1,7 +1,7 @@
 {
   "name": "@codingbutter/computer-controls-widget",
   "version": "0.1.0",
-  "description": "The widget: a frameless face that appears when spoken to, over hub-owned ears",
+  "description": "Mastra CC: the resident tray client — a frameless face with ears of its own, over the hub's brain",
   "type": "module",
   "private": true,
   "main": "src/main.js",
