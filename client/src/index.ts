@@ -1,13 +1,25 @@
+import os from "node:os";
+
 import { serve } from "@hono/node-server";
 import { AuthStorage } from "@mastra/code-sdk/auth/storage";
 import { Mastra } from "@mastra/core/mastra";
 
 import { buildApp } from "./app.ts";
+import { defaultAuditPath } from "./audit/log.ts";
+import { buildAuditApp } from "./audit/routes.ts";
 import { createProviderAuth } from "./auth/index.ts";
+import { cureChromiumApps, type CureReport } from "./curing/curing.ts";
 import { resolveClientConfig } from "./config.ts";
 import { buildDevicesApp } from "./devices/index.ts";
 import { attachEventSocket } from "./events/index.ts";
 import { prepareHub } from "./hub.ts";
+import { wrapTurnWithPermissionAwareness } from "./permissions/aware-turn.ts";
+import { defaultConfigPath } from "./permissions/config-file.ts";
+import { findDaemonSocket, readCensus } from "./permissions/daemon.ts";
+import { SYSTEM_APPLICATIONS_DIR, scanDesktopEntries } from "./permissions/desktop-entries.ts";
+import { createIconSource, defaultIconDirs } from "./permissions/icons.ts";
+import { createPermissionRegistry } from "./permissions/registry.ts";
+import { buildPermissionsApp } from "./permissions/routes.ts";
 import { commandSpeaker, startMicrophone } from "./orb/audio-host.ts";
 import { createCaptureLifecycle } from "./orb/capture-lifecycle.ts";
 import { pocEarChain } from "./orb/ear-poc.ts";
@@ -24,6 +36,42 @@ import { buildVoiceApp } from "./voice/routes.ts";
 
 const config = resolveClientConfig();
 const hub = await prepareHub(config);
+
+/**
+ * The permission registry, and the one wrapping of the hub's turn.
+ *
+ * Wrapped here, right after the hub hands its turn back, because this is the
+ * single site both transports flow from: the orb's `turn:` below and the
+ * typed route's `chat:` receive the same wrapped function, so a request that
+ * arrived by voice and one that arrived by typing get the same "no permission
+ * yet" context. brain, app and hub stay untouched — the signal is a wrapper,
+ * not a rewrite.
+ */
+const scanInstalled = () =>
+  scanDesktopEntries([SYSTEM_APPLICATIONS_DIR, config.applicationsDir]);
+const permissionRegistry = createPermissionRegistry({
+  configPath: defaultConfigPath(),
+  readCensus: () => readCensus(findDaemonSocket()),
+  scanInstalled,
+});
+const appIconSource = createIconSource(scanInstalled, defaultIconDirs(os.homedir()));
+const chat = wrapTurnWithPermissionAwareness(hub.chat, permissionRegistry);
+
+/**
+ * Curing, run at boot and on demand from the permissions page.
+ *
+ * At boot because a permission granted yesterday should be readable this
+ * morning without anyone clicking anything, and on demand because permitting
+ * an application is exactly the moment its launcher wants the flag. Both call
+ * the same function, and it only ever rewrites launchers under the user's own
+ * ~/.local/share/applications.
+ */
+const cureNow = async (): Promise<CureReport> =>
+  cureChromiumApps({
+    rows: (await permissionRegistry.view()).applications,
+    entries: scanInstalled(),
+    userApplicationsDir: config.applicationsDir,
+  });
 
 /**
  * The literal stays here, in the entry module, on purpose: the deployer's
@@ -83,7 +131,7 @@ let orbFaceCount: ((count: number) => void) | undefined;
 
 const orb = await mountOrb({
   credentials: storage,
-  turn: hub.chat,
+  turn: chat,
   clips: diskClipStore(config.root),
   ...(orbLive
     ? {
@@ -117,14 +165,37 @@ if (orbLive && orb.orb) {
 const devices = buildDevicesApp({ faces: () => eventSocket.faceCount });
 
 const app = buildApp({
-  chat: hub.chat,
+  chat,
   uiRoot: config.uiRoot,
+  dashboardRoot: config.dashboardRoot,
   status: hub.status,
   auth: providerAuth.app,
   voice,
   orb,
+  permissions: buildPermissionsApp(permissionRegistry, appIconSource, cureNow),
+  audit: buildAuditApp(defaultAuditPath()),
   devices,
 });
+
+// Cure at boot, once, and never fatally: a launcher that could not be
+// rewritten leaves the application unreadable, which the permissions page
+// already shows plainly. It is not a reason to refuse to start the hub.
+void cureNow()
+  .then((report) => {
+    if (report.cured.length > 0) {
+      console.log(
+        `[client] cured ${report.cured.length} launcher(s): ${report.cured
+          .map((entry) => entry.name)
+          .join(", ")}`,
+      );
+    }
+    if (report.needsRestart.length > 0) {
+      console.log(`[client] restart to become readable: ${report.needsRestart.join(", ")}`);
+    }
+  })
+  .catch((error: unknown) => {
+    console.warn(`[client] curing skipped: ${String(error)}`);
+  });
 
 let announce: (url: string) => void;
 /** Resolves once the port is actually bound — a test can wait on it, a human can read it. */

@@ -22,7 +22,7 @@ describe("the browser half of the client", () => {
 
     // What is left ships: the page loads the module this file imports, and it
     // carries no second copy of the logic inline.
-    const page = read("../../public/index.html");
+    const page = read("../../public/chat.html");
     expect(page).toContain('<script type="module" src="/app.js"></script>');
     expect(page.match(/<script\b/g)).toHaveLength(1);
     expect(page).not.toContain("VOICE_BASE");
