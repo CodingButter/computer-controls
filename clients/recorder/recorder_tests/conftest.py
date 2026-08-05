@@ -10,6 +10,7 @@ sends, and it fails on the day that shape moves.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,7 @@ import pytest
 
 from desktop_service import state
 
-from episode_recorder import Agent, Filer, Recorder
+from episode_recorder import Agent, Filer, Recorder, SkillLibrary
 
 SCHEMA = json.loads(
     (Path(__file__).resolve().parents[3] / "protocol" / "schema.json").read_text()
@@ -125,6 +126,36 @@ def reviewer() -> Agent:
 @pytest.fixture
 def recorder(tmp_path) -> Recorder:
     return Recorder(tmp_path / "episodes")
+
+
+@pytest.fixture
+def library(tmp_path, agent) -> SkillLibrary:
+    """A skill library on its own store, authored by the acting agent."""
+    return SkillLibrary(tmp_path / "skills", agent.author)
+
+
+def everything_ever_written(store) -> str:
+    """Every object in a store, contents and all, as one searchable string.
+
+    Includes commit messages, tree entries and note blobs, because a leak that
+    landed in a commit subject would be just as permanent as one in a file.
+
+    Read as bytes and decoded leniently: tree objects are binary, and a scan
+    that fell over on the first one would be a scan that had not looked at
+    everything. A secret is text, so anything a decoder mangles was not it.
+
+    `--batch-all-objects` reaches loose objects, packed objects, unreachable
+    ones and objects on branches nobody merged — which is more than any code
+    path in this package knows how to produce. That is the point of asking the
+    object store rather than asking the program.
+    """
+    objects = subprocess.run(
+        ("git", "-C", str(store.path), "cat-file", "--batch-all-objects", "--batch"),
+        capture_output=True,
+        check=True,
+    ).stdout.decode("utf-8", errors="replace")
+    refs = store.git("for-each-ref", "--format=%(refname) %(contents)")
+    return objects + "\n" + refs
 
 
 class FakeBoard:
