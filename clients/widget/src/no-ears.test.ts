@@ -139,9 +139,17 @@ describe("the shell", () => {
     // absent from it is the point: no filesystem, no shell, no wholesale
     // ipcRenderer, nothing that reaches the daemon.
     expect(preload).toContain("contextBridge.exposeInMainWorld");
-    for (const absent of ["require(", "child_process", "node:fs", "exposeInMainWorld('electron'"]) {
+    for (const absent of ["child_process", "node:fs", "exposeInMainWorld('electron'"]) {
       expect(preload).not.toContain(absent);
     }
+    // A sandboxed preload is CommonJS, so `require` must exist — but Electron's
+    // sandbox shim resolves more than just `electron` (events, timers, url),
+    // and any of those widening in here should fail this test. The one module
+    // the bridge may pull in is the one it cannot do without.
+    const required = [...preload.matchAll(/require\(\s*(["'][^"']*["'])\s*\)/g)].map(
+      (match) => match[1],
+    );
+    expect(required).toEqual(['"electron"']);
     // Handing the page `ipcRenderer` itself would give it every channel at
     // once, including ones added later by someone who never saw this file. So
     // the object may reference it only to send on a named channel; it may not
@@ -149,7 +157,12 @@ describe("the shell", () => {
     // is on how it is used, which is the part that could leak.
     // Comments and imports are stripped first: this is a question about what
     // the code does, and prose that merely mentions the name is not a leak.
-    const body = preload.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*(import|\/\/).*$/gm, "");
+    // The CJS require destructure is the import, in the dialect a sandboxed
+    // preload actually speaks, so it is stripped for the same reason.
+    const body = preload
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*(import|\/\/).*$/gm, "")
+      .replace(/^\s*const\s*\{[^}]*\}\s*=\s*require\(.*$/gm, "");
     const uses = [...body.matchAll(/ipcRenderer(.{0,7})/g)].map((match) => match[1] ?? "");
     const passedAlong = uses.filter((after) => !after.startsWith(".send("));
     expect(passedAlong, "ipcRenderer may only be used to send on a named channel").toEqual([]);
