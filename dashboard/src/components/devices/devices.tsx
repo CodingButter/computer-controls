@@ -1,5 +1,7 @@
 "use client";
 
+import { CircleDot as CircleDotIcon, Monitor as MonitorIcon, Smartphone as SmartphoneIcon } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { DeviceView, DevicesView } from "@/lib/hub";
@@ -18,16 +20,16 @@ import { cn } from "@/lib/utils";
 
 /** The mark at the head of a row: a shape per kind, never a photograph of the machine. */
 function DeviceMark(props: { kind: string; connected: boolean }) {
-  const glyph = props.kind === "hub" ? "▣" : props.kind === "widget" ? "◍" : "◇";
+  const Glyph = props.kind === "hub" ? MonitorIcon : props.kind === "widget" ? CircleDotIcon : SmartphoneIcon;
   return (
     <span
       aria-hidden
       className={cn(
-        "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-base",
+        "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
         props.connected ? "bg-accent/15 text-accent" : "bg-well text-muted",
       )}
     >
-      {glyph}
+      <Glyph className="h-4 w-4" />
     </span>
   );
 }
@@ -98,7 +100,9 @@ export function DevicesPanel(props: { view: DevicesView }) {
           ) : (
             <>
               {/* Off with a reason rather than a button that fails when pressed. */}
-              <Badge variant="muted">Not available yet</Badge>
+              <Badge variant="muted" className="self-start">
+                Not available yet
+              </Badge>
               <p className="text-sm text-muted">{pairing.reason}</p>
             </>
           )}
