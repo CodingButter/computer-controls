@@ -173,7 +173,7 @@ export function createProviderAuthApp(options: ProviderAuthRouteOptions): Hono {
   routes.post("/api-key", async (c) => {
     const body = await readJsonBody(c);
     const provider = requireProvider(body);
-    return c.json(service.saveApiKey(provider, requireString(body, "key")));
+    return c.json(await service.saveApiKey(provider, requireString(body, "key")));
   });
 
   routes.post("/disconnect", async (c) => {

@@ -33,6 +33,17 @@ const STYLES = `
   .step[hidden] { display: none; }
   code { font-size: 1.05em; letter-spacing: .08em; }
   .error { color: #b3261e; font-size: .9rem; margin-top: .5rem; }
+  .error:empty { display: none; }
+  .rejected { color: #b3261e; opacity: 1; }
+  .docs { font-size: .85rem; }
+  .docs[hidden] { display: none; }
+  details { border: 1px solid currentColor; border-radius: .5rem; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+  summary { cursor: pointer; font-size: 1rem; font-weight: 600; }
+  #filter { display: block; width: 100%; box-sizing: border-box; margin: .75rem 0; }
+  .entry { display: flex; gap: .5rem; flex-wrap: wrap; align-items: baseline; padding: .4rem 0; border-top: 1px solid currentColor; }
+  .entry[hidden] { display: none; }
+  .entry .name { flex: 1 1 10rem; }
+  .entry .key-row { flex: 1 1 100%; }
   .voice { margin: 0 0 .35rem; font-size: .9rem; }
   .voice:last-child { margin-bottom: 0; }
   .field { margin-top: .75rem; }
@@ -58,47 +69,120 @@ async function call(path, init) {
 
 const post = (path, payload) => call(path, { method: "POST", body: JSON.stringify(payload) });
 
+/**
+ * Two lists, from one answer.
+ *
+ * Everything the runtime can route to is offered, but a hundred and sixty
+ * sign-in boxes is not an offer anybody can use. What gets a box of its own is
+ * what the person is actually working with: the accounts this product can sign
+ * into, plus anything already connected. The rest is a searchable catalogue,
+ * one line each, a key field a click away.
+ */
 function render(providers) {
-  const list = document.getElementById("providers");
-  list.replaceChildren(...providers.map(build));
+  const featured = providers.filter((p) => p.loginKind !== "api-key" || p.connected);
+  const rest = providers.filter((p) => p.loginKind === "api-key" && !p.connected);
+
+  document.getElementById("providers").replaceChildren(...featured.map(build));
+  document.getElementById("catalogue").replaceChildren(...rest.map(buildEntry));
+  document.getElementById("catalogue-count").textContent =
+    rest.length + " more providers this agent can route to";
+  applyFilter();
 }
+
+function stateText(provider) {
+  if (!provider.connected) return "Not connected";
+  if (provider.rejectedReason) return "Key rejected — " + provider.rejectedReason;
+  return "Connected" + (provider.method === "api-key" ? " with an API key" : "");
+}
+
+function wireDocs(node, provider) {
+  const docs = node.querySelector(".docs");
+  docs.hidden = !provider.docUrl;
+  if (provider.docUrl) {
+    docs.href = provider.docUrl;
+    docs.textContent = "Where to get a key";
+  }
+}
+
+/** A key field and its Save button, wired to one provider. */
+function wireKeyField(section, provider, fail) {
+  section.querySelector(".save-key").addEventListener("click", guard(async () => {
+    fail("");
+    const field = section.querySelector(".key");
+    await post("/api-key", { provider: provider.provider, key: field.value });
+    field.value = "";
+    // A provider that took the key and still refused to serve it comes back as
+    // a rejection on the next read, which is where the page gets everything
+    // else it says too.
+    await refresh();
+  }, fail));
+}
+
+const guard = (fn, fail) => (...args) => fn(...args).catch((problem) => fail(problem.message));
 
 function build(provider) {
   const node = document.getElementById("provider-template").content.cloneNode(true);
   const section = node.querySelector("section");
   section.dataset.provider = provider.provider;
   section.querySelector(".name").textContent = provider.name;
-  section.querySelector(".state").textContent = provider.connected
-    ? "Connected" + (provider.method === "api-key" ? " with an API key" : "")
-    : "Not connected";
-  section.querySelector(".connect").hidden = provider.connected;
-  section.querySelector(".key-row").hidden = provider.connected;
+  const state = section.querySelector(".state");
+  state.textContent = stateText(provider);
+  state.classList.toggle("rejected", Boolean(provider.rejectedReason));
+  wireDocs(section, provider);
+  // A provider with no flow this product owns gets no button that cannot start
+  // anything: the key field is the whole offer, and it is an honest one.
+  section.querySelector(".connect").hidden = provider.connected || provider.loginKind === "api-key";
+  // A rejected key still needs replacing, so the field stays.
+  section.querySelector(".key-row").hidden = provider.connected && !provider.rejectedReason;
   section.querySelector(".disconnect").hidden = !provider.connected;
 
   const error = section.querySelector(".error");
   const fail = (reason) => { error.textContent = reason; };
-  const guard = (fn) => (...args) => fn(...args).catch((problem) => fail(problem.message));
 
   section.querySelector(".connect").addEventListener("click", guard(async () => {
     fail("");
     await drive(section, provider, await post("/start", { provider: provider.provider }));
-  }));
+  }, fail));
 
   section.querySelector(".disconnect").addEventListener("click", guard(async () => {
     fail("");
     await post("/disconnect", { provider: provider.provider });
     await refresh();
-  }));
+  }, fail));
 
-  section.querySelector(".save-key").addEventListener("click", guard(async () => {
-    fail("");
-    const field = section.querySelector(".key");
-    await post("/api-key", { provider: provider.provider, key: field.value });
-    field.value = "";
-    await refresh();
-  }));
+  wireKeyField(section, provider, fail);
+  if (provider.rejectedReason) fail(provider.rejectedReason);
 
   return node;
+}
+
+/** One catalogue line: a name, and a key field that appears when asked for. */
+function buildEntry(provider) {
+  const node = document.getElementById("entry-template").content.cloneNode(true);
+  const entry = node.querySelector(".entry");
+  entry.dataset.provider = provider.provider;
+  entry.dataset.search = (provider.name + " " + provider.provider).toLowerCase();
+  entry.querySelector(".name").textContent = provider.name;
+  wireDocs(entry, provider);
+
+  const error = entry.querySelector(".error");
+  const fail = (reason) => { error.textContent = reason; };
+
+  entry.querySelector(".add-key").addEventListener("click", () => {
+    const row = entry.querySelector(".key-row");
+    row.hidden = !row.hidden;
+    if (!row.hidden) entry.querySelector(".key").focus();
+  });
+
+  wireKeyField(entry, provider, fail);
+  return node;
+}
+
+function applyFilter() {
+  const query = document.getElementById("filter").value.trim().toLowerCase();
+  for (const entry of document.querySelectorAll(".entry")) {
+    entry.hidden = query.length > 0 && !entry.dataset.search.includes(query);
+  }
 }
 
 async function drive(section, provider, session) {
@@ -165,6 +249,8 @@ async function refreshVoices() {
     return row;
   }));
 }
+
+document.getElementById("filter").addEventListener("input", applyFilter);
 
 /**
  * The realtime model and speaking voice the orb uses. Both take effect on the
@@ -236,8 +322,13 @@ export function renderSettingsPage(basePath: string = PROVIDER_AUTH_BASE_PATH): 
 <style>${STYLES}</style>
 <main>
   <h1>Model accounts</h1>
-  <p class="lede">Sign in with your own Anthropic and OpenAI accounts. Credentials stay on this machine.</p>
+  <p class="lede">Sign in with your own Anthropic or OpenAI account, or paste a key for any other provider this agent can route to. Credentials stay on this machine.</p>
   <div id="providers"></div>
+  <details>
+    <summary id="catalogue-count">More providers</summary>
+    <input id="filter" type="search" autocomplete="off" placeholder="Search providers">
+    <div id="catalogue"></div>
+  </details>
   <h1>Voice</h1>
   <p class="lede">Which account the agent speaks and listens with. Set <code>COMCON_VOICE_PROVIDER</code> to pick one; otherwise the connected one is used.</p>
   <section id="voices"></section>
@@ -264,6 +355,7 @@ export function renderSettingsPage(basePath: string = PROVIDER_AUTH_BASE_PATH): 
     <div class="row">
       <button class="connect" type="button">Connect</button>
       <button class="disconnect" type="button">Disconnect</button>
+      <a class="docs" target="_blank" rel="noreferrer" hidden></a>
     </div>
     <div class="row key-row">
       <input class="key" type="password" autocomplete="off" placeholder="…or paste an API key">
@@ -279,6 +371,18 @@ export function renderSettingsPage(basePath: string = PROVIDER_AUTH_BASE_PATH): 
     </div>
     <p class="error" role="alert"></p>
   </section>
+</template>
+<template id="entry-template">
+  <div class="entry">
+    <span class="name"></span>
+    <a class="docs" target="_blank" rel="noreferrer" hidden></a>
+    <button class="add-key" type="button">Add a key</button>
+    <div class="row key-row" hidden>
+      <input class="key" type="password" autocomplete="off" placeholder="Paste an API key">
+      <button class="save-key" type="button">Save key</button>
+    </div>
+    <p class="error" role="alert"></p>
+  </div>
 </template>
 <script type="module">${SCRIPT.replace("__BASE__", basePath)
   .replace("__VOICE_PROVIDERS__", VOICE_PROVIDERS_PATH)

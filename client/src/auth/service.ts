@@ -25,9 +25,10 @@ import {
   type LoginSessionStatus,
   type LoginSessionStore,
 } from "./login-sessions.ts";
+import { createApiKeyVerifier, type ApiKeyVerifier } from "./key-verification.ts";
 import {
-  PROVIDERS,
   PROVIDER_IDS,
+  describeProvider,
   hasLoginFlow,
   type LoginKind,
   type ProviderId,
@@ -70,6 +71,14 @@ export interface LoginSessionView {
 /** A provider, how it signs in, and whether it currently is. */
 export interface ProviderFlowView extends ProviderConnection {
   loginKind: LoginKind;
+  /** Where a person goes to obtain a key, when the provider publishes one. */
+  docUrl?: string;
+  /**
+   * Why the provider refused the credential it has. Present only when we asked
+   * and were told no — a credential that authenticates is not a provider that
+   * will serve, and a provider we could not reach says nothing either way.
+   */
+  rejectedReason?: string;
 }
 
 /**
@@ -105,6 +114,8 @@ export interface ProviderLoginServiceOptions {
   sessions: LoginSessionStore;
   credentials: CredentialStore;
   flows: ProviderLoginFlows;
+  /** Override for tests; defaults to a real request to the provider. */
+  verifier?: ApiKeyVerifier;
   now?: () => number;
   sessionTtlMs?: number;
 }
@@ -113,23 +124,48 @@ export class ProviderLoginService {
   private readonly sessions: LoginSessionStore;
   private readonly credentials: CredentialStore;
   private readonly flows: ProviderLoginFlows;
+  private readonly verifier: ApiKeyVerifier;
   private readonly now: () => number;
   private readonly sessionTtlMs: number;
+
+  /**
+   * Providers that told us no, and what they said.
+   *
+   * In memory on purpose: it is a record of an answer we were given, not a
+   * property of the credential, and `auth.json` belongs to the SDK. A restart
+   * forgets it and the page goes back to reporting what the store knows, which
+   * is the truth it can actually stand behind.
+   */
+  private readonly rejections = new Map<ProviderId, string>();
 
   constructor(options: ProviderLoginServiceOptions) {
     this.sessions = options.sessions;
     this.credentials = options.credentials;
     this.flows = options.flows;
+    this.verifier = options.verifier ?? createApiKeyVerifier();
     this.now = options.now ?? Date.now;
     this.sessionTtlMs = options.sessionTtlMs ?? DEFAULT_LOGIN_SESSION_TTL_MS;
   }
 
   /** Every provider, how it signs in, and whether it currently is. */
   listFlows(): ProviderFlowView[] {
-    return PROVIDER_IDS.map((provider) => ({
-      ...this.credentials.status(provider),
-      loginKind: PROVIDERS[provider].loginKind,
-    }));
+    return PROVIDER_IDS.map((provider) => this.flowView(provider));
+  }
+
+  private flowView(provider: ProviderId): ProviderFlowView {
+    const descriptor = describeProvider(provider);
+    const connection = this.credentials.status(provider);
+    const view: ProviderFlowView = { ...connection, loginKind: descriptor.loginKind };
+
+    if (descriptor.docUrl !== undefined) view.docUrl = descriptor.docUrl;
+
+    const rejectedReason = this.rejections.get(provider);
+    // A rejection only means anything while the credential it was about is
+    // still there. Disconnecting clears it, and so does a store changed from
+    // somewhere else.
+    if (rejectedReason !== undefined && connection.connected) view.rejectedReason = rejectedReason;
+
+    return view;
   }
 
   async startLogin(ownerId: string, provider: ProviderId): Promise<LoginSessionView> {
@@ -142,11 +178,11 @@ export class ProviderLoginService {
     if (!hasLoginFlow(provider)) {
       throw new LoginRequestError(
         400,
-        `${PROVIDERS[provider].name} has no sign-in flow here. Paste a ${PROVIDERS[provider].name} API key instead.`,
+        `${describeProvider(provider).name} has no sign-in flow here. Paste a ${describeProvider(provider).name} API key instead.`,
       );
     }
 
-    if (PROVIDERS[provider].loginKind === "paste-code") {
+    if (describeProvider(provider).loginKind === "paste-code") {
       const start = await this.flows.startAnthropicLogin();
       const session = this.sessions.create({
         ownerId,
@@ -187,10 +223,10 @@ export class ProviderLoginService {
     // Which flow this is comes from the provider, not from the stored state: a
     // settled session has dropped its state, and answering "wrong flow" to
     // somebody asking about a login that already succeeded would be a lie.
-    if (PROVIDERS[session.provider].loginKind !== "paste-code") {
+    if (describeProvider(session.provider).loginKind !== "paste-code") {
       throw new LoginRequestError(
         400,
-        `${PROVIDERS[session.provider].name} sign-in finishes by polling, not by pasting a code.`,
+        `${describeProvider(session.provider).name} sign-in finishes by polling, not by pasting a code.`,
       );
     }
     if (session.status !== "pending" || session.state.kind !== "paste-code") {
@@ -216,10 +252,10 @@ export class ProviderLoginService {
   async pollLogin(ownerId: string, sessionId: string): Promise<LoginSessionView> {
     const session = this.requireOwnedSession(sessionId, ownerId);
 
-    if (PROVIDERS[session.provider].loginKind !== "device-code") {
+    if (describeProvider(session.provider).loginKind !== "device-code") {
       throw new LoginRequestError(
         400,
-        `${PROVIDERS[session.provider].name} sign-in finishes by pasting a code, not by polling.`,
+        `${describeProvider(session.provider).name} sign-in finishes by pasting a code, not by polling.`,
       );
     }
     // A page that keeps polling a finished flow gets the finished answer, and
@@ -252,18 +288,33 @@ export class ProviderLoginService {
    * The fallback path for a person who would rather paste a key than sign in.
    * Same store, same lookup, same disconnect — just the other credential kind.
    */
-  saveApiKey(provider: ProviderId, key: string): ProviderConnection {
+  async saveApiKey(provider: ProviderId, key: string): Promise<ProviderFlowView> {
     const trimmed = key.trim();
     if (trimmed.length === 0) {
       throw new LoginRequestError(400, "An API key cannot be empty.");
     }
+
     this.credentials.connectApiKey(provider, trimmed);
-    return this.credentials.status(provider);
+
+    // Stored first, then checked. A provider that refuses the key is worth
+    // saying out loud, but it is not a reason to throw away what the person
+    // pasted — they may have hit a rate limit, or be minutes away from topping
+    // up an account, and a key we quietly discarded is a key they have to find
+    // again.
+    const verification = await this.verifier.verify(describeProvider(provider), trimmed);
+    if (verification.status === "rejected") {
+      this.rejections.set(provider, verification.reason);
+    } else {
+      this.rejections.delete(provider);
+    }
+
+    return this.flowView(provider);
   }
 
-  disconnect(provider: ProviderId): ProviderConnection {
+  disconnect(provider: ProviderId): ProviderFlowView {
     this.credentials.disconnect(provider);
-    return this.credentials.status(provider);
+    this.rejections.delete(provider);
+    return this.flowView(provider);
   }
 
   private requireOwnedSession(sessionId: string, ownerId: string): LoginSession {

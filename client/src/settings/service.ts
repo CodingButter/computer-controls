@@ -179,8 +179,8 @@ export function describeChange(change: SettingsChange, target: string): string {
     case "selectVoiceProvider":
       return `use ${VOICE_PROVIDERS[target as VoiceProviderId]?.name ?? target} for the voice`;
     case "startAccountConnect":
-      return `start signing in to ${PROVIDERS[target as ProviderId]?.name ?? target}`;
+      return `start signing in to ${PROVIDERS.get(target as ProviderId)?.name ?? target}`;
     case "disconnectAccount":
-      return `disconnect ${PROVIDERS[target as ProviderId]?.name ?? target}`;
+      return `disconnect ${PROVIDERS.get(target as ProviderId)?.name ?? target}`;
   }
 }
