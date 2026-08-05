@@ -192,7 +192,10 @@ describe("the permissions", () => {
     expect(main).toContain("if (isDisabled()) return false;");
     expect(main).toContain('if (permission !== "media") return false;');
     expect(main).toContain("if (requestingUrl !== widgetPageUrl()) return false;");
-    expect(main).toContain('mediaTypes.every((type) => type === "audio")');
+    // The whole predicate line, including the non-empty guard: `every` on an
+    // empty array is vacuously true, and a request naming no media types
+    // must read as refusal, not as a grant with nothing attached.
+    expect(main).toContain('mediaTypes.length > 0 && mediaTypes.every((type) => type === "audio")');
     // Named devices are still refused: getUserMedia reaches the default
     // microphone; enumerating and claiming hardware is not a thing a face does.
     expect(main).toContain("setDevicePermissionHandler(() => false)");
@@ -257,12 +260,25 @@ describe("the network", () => {
     for (const wayOut of ["fetch(", "XMLHttpRequest", "navigator.sendBeacon", "EventSource("]) {
       expect(face, `the face must not open ${wayOut}`).not.toContain(wayOut);
     }
+
+    // The egress primitive this segment legitimized gets the same treatment:
+    // one socket, in one file. connection.js holds the lane; the vendored
+    // session holds the Google dial and is pinned byte-for-byte by the parity
+    // test. Nothing else in the shipped page may so much as spell the word —
+    // a renderer that opened its own WebSocket would be a second lane nobody
+    // audits.
+    for (const name of shipped.filter((file) => file !== "connection.js")) {
+      expect(code(name), `${name} must not reach for WebSocket`).not.toContain("WebSocket");
+    }
+    expect(face, "the face must not reach for WebSocket").not.toContain("new WebSocket");
   });
 
   test("the page's CSP names the two doors and closes everything else", () => {
     // Pinned whole: each widening was deliberate, and a CSP that grew a
     // third connect host or a remote script source should fail loudly, not
-    // slide by a substring check.
+    // slide by a substring check. The loopback port wildcard is deliberate
+    // too — the hub's port rides COMCON_CLIENT_PORT, so the CSP cannot name
+    // one number; script-src 'self' is what bounds who could dial it.
     const page = read("index.html");
     const policy = page.match(/http-equiv="Content-Security-Policy"\s*\n\s*content="([^"]*)"/);
     expect(policy, "the page must carry a CSP").not.toBeNull();

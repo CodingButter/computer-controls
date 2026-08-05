@@ -43,6 +43,12 @@ export function widgetExec(): string {
     "../../../clients/widget",
   );
   const electron = path.join(widget, "node_modules", ".bin", "electron");
+  // The paths are about to be double-quoted into a .desktop Exec field; a
+  // checkout path carrying a quote would break out of that quoting. Refuse
+  // rather than escape — nothing legitimate checks out to such a path.
+  if (widget.includes('"')) {
+    throw new Error("the widget checkout path contains a quote and cannot be written to an Exec field");
+  }
   return `"${electron}" "${widget}"`;
 }
 
