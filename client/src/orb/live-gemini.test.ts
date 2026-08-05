@@ -424,6 +424,56 @@ describe("permanent refusal — retired model or policy reject", () => {
     expect(session.connected).toBe(true);
   });
 
+  // The live failure this rule was written from: the provider closed 1008 with
+  // "The operation was aborted." and the orb went off wearing a message that
+  // blamed a model which — probed directly with the same setup frame, three
+  // times — connects fine. A drop the server did not blame the model for is a
+  // drop, and the redial loop is what it is for.
+  it("redials a 1008 whose reason does not name the model", async () => {
+    const refused: string[] = [];
+    const eventHandlers = events({ onRefusal: (reason) => refused.push(reason) });
+
+    const sockets: FakeSocket[] = [];
+    const provider = geminiLiveProvider((url) => {
+      const socket = new FakeSocket(url);
+      sockets.push(socket);
+      queueMicrotask(() => {
+        socket.emit("open", {});
+        socket.serverSays({ setupComplete: {} });
+      });
+      return socket;
+    }, () => Promise.resolve());
+
+    const session = await provider.connect(realtimeConfig({ apiKey: "k", events: eventHandlers }));
+
+    sockets[0].serverCloses(1008, "The operation was aborted.");
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(refused).toHaveLength(0);
+    expect(sockets).toHaveLength(2);
+    expect(session.connected).toBe(true);
+  });
+
+  it("rejects the dial, but does not give up, on a setup-time abort", async () => {
+    let dials = 0;
+    const provider = geminiLiveProvider((url) => {
+      dials++;
+      const socket = new FakeSocket(url);
+      queueMicrotask(() => {
+        socket.emit("open", {});
+        socket.serverCloses(1008, "The operation was aborted.");
+      });
+      return socket;
+    });
+    // The first dial still refuses — a hub that cannot reach the provider at
+    // boot says so — but it refuses as a socket that closed, not as a model
+    // the provider named.
+    await expect(
+      provider.connect(realtimeConfig({ apiKey: "k", model: "gemini-x-live", events: events() })),
+    ).rejects.toThrow(/closed before setup completed/);
+    expect(dials).toBe(1);
+  });
+
   it("treats a 4xxx close as permanent", async () => {
     const refused: string[] = [];
     const eventHandlers = events({ onRefusal: (reason) => refused.push(reason) });
