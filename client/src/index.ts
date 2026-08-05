@@ -116,6 +116,7 @@ if (orbLive && orb.orb) {
 const app = buildApp({
   chat: hub.chat,
   uiRoot: config.uiRoot,
+  dashboardRoot: config.dashboardRoot,
   status: hub.status,
   auth: providerAuth.app,
   voice,
