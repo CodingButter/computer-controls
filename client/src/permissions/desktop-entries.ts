@@ -19,6 +19,8 @@ export type DesktopEntryApp = {
   exec?: string;
   /** The Icon= value — a theme icon name or an absolute path, per the spec. */
   icon?: string;
+  /** Where this entry was read from. Curing copies that file; it never guesses one. */
+  sourcePath?: string;
 };
 
 export const SYSTEM_APPLICATIONS_DIR = "/usr/share/applications";
@@ -53,7 +55,7 @@ export function scanDesktopEntries(dirs: string[]): DesktopEntryApp[] {
       }
       const entry = parseDesktopEntry(text);
       if (!entry) continue;
-      byId.set(file, { ...entry, desktopId: file });
+      byId.set(file, { ...entry, desktopId: file, sourcePath: path.join(dir, file) });
     }
   }
   return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));

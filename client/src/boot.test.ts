@@ -27,6 +27,10 @@ beforeAll(async () => {
     "fixtures",
     "dashboard-out",
   );
+  // Curing runs at boot and writes launcher overrides. Pointed at the temp
+  // root here: a test suite that edits the developer's own .desktop files
+  // would be a side effect nobody asked this test to have.
+  process.env.COMCON_APPLICATIONS_DIR = path.join(root, "applications");
   const entry = await import("./index.ts");
   baseUrl = await entry.listening;
   close = () => new Promise<void>((resolve) => entry.server.close(() => resolve()));

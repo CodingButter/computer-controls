@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 
+import type { CureReport } from "../curing/curing.ts";
 import type { IconSource } from "./icons.ts";
 import { MalformedConfigError, type PermissionRegistry } from "./registry.ts";
 
@@ -14,8 +15,28 @@ import { MalformedConfigError, type PermissionRegistry } from "./registry.ts";
  * consent design exists to prevent, so the route that changes things only
  * knows how to edit a file the user already owns.
  */
-export function buildPermissionsApp(registry: PermissionRegistry, iconFor?: IconSource): Hono {
+export function buildPermissionsApp(
+  registry: PermissionRegistry,
+  iconFor?: IconSource,
+  cure?: () => Promise<CureReport>,
+): Hono {
   const app = new Hono();
+
+  // Curing edits launchers the user owns so a permitted Chromium application
+  // builds its accessibility tree at its next start. It is a POST because it
+  // writes, and it answers with what it did — including which applications the
+  // person still has to restart, because the hub never closes their windows.
+  app.post("/api/permissions/cure", async (c) => {
+    if (!cure) return c.json({ error: "Curing is not available on this machine." }, 501);
+    try {
+      return c.json(await cure());
+    } catch (error) {
+      if (error instanceof MalformedConfigError) {
+        return c.json({ error: error.message }, 409);
+      }
+      throw error;
+    }
+  });
 
   // The page's row icons, resolved from the machine's own icon themes. The
   // parameter is a desktop-file id matched against entries the hub scanned

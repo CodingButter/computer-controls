@@ -56,6 +56,8 @@ export type AppDeps = {
    * not about permissions boot without it, the entry module always supplies it.
    */
   permissions?: Hono;
+  /** The audit feed's one read-only route. Optional for the same reason. */
+  audit?: Hono;
 };
 
 /**
@@ -109,6 +111,7 @@ export function buildApp(deps: AppDeps): Hono {
   if (deps.voice) app.route("/", deps.voice.app);
   if (deps.orb) app.route("/", deps.orb.app);
   if (deps.permissions) app.route("/", deps.permissions);
+  if (deps.audit) app.route("/", deps.audit);
 
   app.get("*", (c) => {
     // The hub's own static root answers first — chat, the orb, the vendored

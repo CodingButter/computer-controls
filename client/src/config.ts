@@ -47,6 +47,12 @@ export type ClientConfig = {
    */
   dashboardRoot: string;
   /**
+   * Where curing writes its user-scope launcher overrides. Injectable via
+   * COMCON_APPLICATIONS_DIR because the alternative is a boot that edits the
+   * developer's own launchers every time the suite starts the hub for real.
+   */
+  applicationsDir: string;
+  /**
    * Which mouth the person picked, when they picked one. Absent means "the one
    * that is connected" — the behaviour a machine with a single voice account
    * already had, and the reason connecting an account is all it takes to get a
@@ -105,6 +111,9 @@ export function resolveClientConfig(env: NodeJS.ProcessEnv = process.env): Clien
     dashboardRoot: env.COMCON_DASHBOARD_OUT
       ? path.resolve(env.COMCON_DASHBOARD_OUT)
       : path.resolve(packageRoot, "..", "dashboard", "out"),
+    applicationsDir: env.COMCON_APPLICATIONS_DIR
+      ? path.resolve(env.COMCON_APPLICATIONS_DIR)
+      : path.join(os.homedir(), ".local", "share", "applications"),
     ...(voiceProvider ? { voiceProvider } : {}),
   };
 }
