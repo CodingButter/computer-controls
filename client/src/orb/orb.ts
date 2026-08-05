@@ -6,12 +6,16 @@
  * the first second of latency, the single-file mouth, and the one function call
  * that reaches the actual brain.
  *
- * The order of operations in `#onFunctionCall` is the part worth reading. A
- * filler clip is queued *before* the agent is asked, and the agent's answer is
- * queued behind it — so the clip's duration is spent on the round trip instead
- * of on top of it, and the answer still cannot begin until the clip has
- * finished, because the mouth is a queue. Both of those are properties the issue
- * names, and they are the same property seen from two ends.
+ * `#onFunctionCall` no longer waits for the brain. An acknowledgment result is
+ * returned immediately so the provider keeps its voice — the hub turn runs in
+ * the background and its answer is injected as a spoken text signal when it
+ * resolves. Filler covers the first beat; progress signals carry the rest; the
+ * answer speaks last. The provider is never left in dead air.
+ *
+ * If the socket drops while a dispatch is in flight, the answer is queued and
+ * spoken on reconnect — never silently swallowed. The one-mouth rule still
+ * holds: the Mouth is a queue, so injected answers line up behind whatever is
+ * already being said.
  */
 
 import type { Hearing, Sentiment } from "./ear.ts";
@@ -23,13 +27,33 @@ import type { Clip, UtteranceBank } from "./utterance-bank.ts";
 
 /** How the orb reaches the hub's agent: one call, text in, text out. */
 export interface HubBrain {
-  ask(request: string): Promise<string>;
+  ask(request: string, onProgress?: (signal: string) => void): Promise<string>;
 }
 
 /** Plays bytes on the machine's speaker. */
 export interface Speaker {
   play(audio: Uint8Array, signal: AbortSignal): Promise<void>;
 }
+
+/**
+ * The immediate result returned for a dispatch, so the provider keeps its voice
+ * while the hub works. First-person and ownership-framed: the provider is told
+ * it is handling this itself, never that something was dispatched elsewhere.
+ */
+const DISPATCH_ACK =
+  "Acknowledged. You are handling this yourself now — keep the user company " +
+  "while you work. The result arrives as a separate message; relay it in your " +
+  "own words, taking ownership. Never mention dispatching, agents, or the hub.";
+
+/** Frames an injected answer so the provider relays it rather than reading it as a new request. */
+const ANSWER_PREFIX =
+  'The result of your request is in. Tell the user, in your own words and taking full ownership: "';
+const ANSWER_SUFFIX = '"';
+
+/** Frames a progress signal so the provider narrates it in first person. */
+const PROGRESS_PREFIX =
+  'Progress update. Tell the user, in your own words and taking ownership: "';
+const PROGRESS_SUFFIX = '"';
 
 /**
  * What the faces watching this orb are told.
@@ -81,6 +105,9 @@ export class Orb {
   readonly #brain: HubBrain;
   readonly #onEvent: (event: OrbEvent) => void;
   #state: OrbState = "idle";
+  /** Text turns queued while the socket was down, flushed on reconnect. */
+  #pendingAnnouncements: string[] = [];
+  #closed = false;
 
   constructor(deps: OrbDeps) {
     this.#session = deps.session;
@@ -162,6 +189,13 @@ export class Orb {
    * and the microphone's state is not the notification system's business.
    */
   async announce(text: string): Promise<void> {
+    // During a reconnect gap the socket cannot carry text. Queue it instead of
+    // silently dropping — an answer that arrives mid-redial survives the gap
+    // and is spoken when the connection returns, never swallowed.
+    if (!this.#session.connected) {
+      this.#pendingAnnouncements.push(text);
+      return;
+    }
     const wasMuted = this.#session.muted;
     if (wasMuted) this.#session.unmute();
     try {
@@ -192,6 +226,8 @@ export class Orb {
       },
       // The one permitted interruption, passed straight through.
       onBargeIn: () => this.#mouth.barge(),
+      // The socket came back. Flush anything that was queued during the gap.
+      onReconnect: () => this.#flushPending(),
     };
   }
 
@@ -248,10 +284,11 @@ export class Orb {
   /**
    * The provider asked for the hub. This is the only way anything gets done.
    *
-   * The answer is handed back to the provider rather than spoken here, so the
-   * response comes out in the same voice and with the same prosody as the rest
-   * of the conversation — the provider is the mouth, including for words it did
-   * not choose.
+   * An immediate acknowledgment is returned so the provider keeps its voice —
+   * the hub turn then runs in the background and the answer is injected as a
+   * spoken text signal when it resolves. The provider is never left waiting
+   * in dead air for a result that may take minutes. Filler covers the first
+   * beat; progress signals carry the rest; the answer speaks last.
    */
   async #onFunctionCall(call: FunctionCall): Promise<void> {
     const request = call.args.request?.trim();
@@ -265,15 +302,43 @@ export class Orb {
     // "the provider refused by itself" and "the hub refused" are different
     // defects, and without this line they are indistinguishable from outside.
     console.log(`[orb] ask_the_hub: ${JSON.stringify(request)}`);
+
+    await this.#session.sendFunctionResult(call.id, DISPATCH_ACK);
+
+    void this.#dispatch(request);
+  }
+
+  /**
+   * Run the hub turn in the background and inject the answer (and any progress
+   * signals) as spoken text when they arrive. Tracked by a dispatch id so the
+   * orb knows what is in flight.
+   */
+  async #dispatch(request: string): Promise<void> {
     let answer: string;
     try {
-      answer = await this.#brain.ask(request);
+      answer = await this.#brain.ask(request, (signal) => {
+        void this.announce(PROGRESS_PREFIX + signal + PROGRESS_SUFFIX);
+      });
       console.log(`[orb] hub answered (${answer.length} chars)`);
     } catch (error) {
       console.error(`[orb] hub threw: ${error instanceof Error ? error.message : String(error)}`);
       answer = "That did not work. Nothing was changed.";
     }
-    await this.#session.sendFunctionResult(call.id, answer);
+    if (this.#closed) return;
+    await this.announce(ANSWER_PREFIX + answer + ANSWER_SUFFIX);
+  }
+
+  /** Speak everything that was queued while the socket was down. */
+  #flushPending(): void {
+    if (this.#closed) {
+      this.#pendingAnnouncements = [];
+      return;
+    }
+    const pending = this.#pendingAnnouncements;
+    this.#pendingAnnouncements = [];
+    for (const text of pending) {
+      void this.announce(text);
+    }
   }
 
   #setState(state: OrbState): void {
@@ -287,6 +352,7 @@ export class Orb {
   }
 
   async close(): Promise<void> {
+    this.#closed = true;
     this.#gate.close();
     this.#mouth.barge();
     await this.#session.close();
