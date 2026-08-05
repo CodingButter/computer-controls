@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   AUTH_TOKENS_ENDPOINT,
+  NEW_SESSION_WINDOW_MS,
   TOKEN_MINT_PATH,
+  TOKEN_TTL_MS,
   buildTokenMintApp,
 } from "./token-mint.ts";
 import { LIVE_MODEL, LIVE_VOICE } from "./live.ts";
@@ -87,8 +89,38 @@ describe("the token mint", () => {
     expect(body.bidiGenerateContentSetup.inputAudioTranscription).toEqual({});
     expect(body.bidiGenerateContentSetup.outputAudioTranscription).toEqual({});
     expect(body.bidiGenerateContentSetup.systemInstruction.parts[0].text).toContain("ask_the_hub");
-    // The session-start window is minutes tighter than the token's own life.
-    expect(Date.parse(body.newSessionExpireTime)).toBeLessThan(Date.parse(body.expireTime));
+    expect(
+      (body.bidiGenerateContentSetup as unknown as { generationConfig: { responseModalities: string[] } })
+        .generationConfig.responseModalities,
+    ).toEqual(["AUDIO"]);
+    // The clocks are security properties, not preferences: the magnitudes are
+    // pinned to the exported constants, so quietly widening either window
+    // turns this red. Ordering alone would stay green at any laxity.
+    const now = Date.now();
+    expect(Date.parse(body.expireTime) - now).toBeGreaterThan(TOKEN_TTL_MS - 10_000);
+    expect(Date.parse(body.expireTime) - now).toBeLessThanOrEqual(TOKEN_TTL_MS);
+    expect(Date.parse(body.newSessionExpireTime) - now).toBeGreaterThan(NEW_SESSION_WINDOW_MS - 10_000);
+    expect(Date.parse(body.newSessionExpireTime) - now).toBeLessThanOrEqual(NEW_SESSION_WINDOW_MS);
+    // And the windows themselves stay sane: a session-start window measured
+    // in minutes or a token lifetime measured in hours is a policy change,
+    // not a refactor.
+    expect(NEW_SESSION_WINDOW_MS).toBeLessThanOrEqual(60_000);
+    expect(TOKEN_TTL_MS).toBeLessThanOrEqual(30 * 60_000);
+  });
+
+  it("refuses a mint response that carries the key where the token belongs", async () => {
+    // The success path gets the same suspicion the error paths do: a 200 body
+    // is the response most likely to be cached, so an upstream that echoes
+    // the credential in the token's name is refused, never relayed.
+    const fetchFn = vi.fn(
+      async () => new Response(JSON.stringify({ name: `auth_tokens/${STORED_KEY}` }), { status: 200 }),
+    );
+    const app = buildTokenMintApp({ credentials: keyedStore(), fetchFn });
+    const res = await app.request(TOKEN_MINT_PATH, { method: "POST" });
+    expect(res.status).toBe(502);
+    const serialized = await res.text();
+    expect(serialized).not.toContain(STORED_KEY);
+    expect(serialized).toContain("carried a credential");
   });
 
   it("falls back to the pinned model and voice when nothing is configured", async () => {

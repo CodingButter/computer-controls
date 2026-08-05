@@ -107,6 +107,8 @@ export function buildTokenMintApp(options: TokenMintOptions): Hono {
       return c.json({ error: credential.reason }, 409);
     }
 
+    // Read per-request, deliberately fresher than the hub's own boot-time
+    // read: a token minted after a settings change reflects the new choice.
     const settings = options.settingsPath ? await readRealtimeSettings(options.settingsPath) : {};
     const model = settings.realtimeModel ?? LIVE_MODEL;
     const voice = settings.realtimeVoice ?? LIVE_VOICE;
@@ -148,6 +150,14 @@ export function buildTokenMintApp(options: TokenMintOptions): Hono {
     const minted = (await upstream.json().catch(() => undefined)) as { name?: unknown } | undefined;
     if (!minted || typeof minted.name !== "string" || minted.name === "") {
       return c.json({ error: "The provider's mint response carried no token." }, 502);
+    }
+
+    // The token name is upstream text, and the success path gets the same
+    // suspicion the error paths do: a name that carries the key is refused,
+    // not scrubbed — a redacted token would dial nothing, and a 200 is the
+    // response most likely to be cached somewhere the key must never sit.
+    if (scrub(minted.name, credential.key) !== minted.name) {
+      return c.json({ error: "The provider's mint response carried a credential where the token belongs." }, 502);
     }
 
     // Picked fields, never a pass-through: whatever else the upstream echoed
