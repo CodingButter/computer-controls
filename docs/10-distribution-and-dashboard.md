@@ -73,6 +73,39 @@ No account with us exists in this flow. Doc 06's firewall test applies from
 the first release: block everything that is not local and the product still
 works.
 
+## As built: wave 1 of the hub (2026-08-05)
+
+The dashboard exists. It is a Next.js application in `dashboard/`, TypeScript
+with shadcn/ui and Tailwind, built as a **static export** and served by the hub
+that was already running — one process, one port, one packaging story. The hub
+resolves a request against its own `public/` first and the dashboard export
+second, so the orb page is untouched and chat moved to `/chat` by being renamed
+rather than routed.
+
+Shipped in this wave:
+
+- **Overview**, **Permissions**, **Models**, **Audit**, and the shell around
+  them. Plugins, Devices and Settings are stubs with real issues behind them
+  (#139, #141, #140).
+- **Per-application permissions** (#116's hub half): the page writes the user's
+  own `~/.config/mastracode-desktop/config.json`, and the daemon's ceiling
+  follows it without a restart. No route can widen that ceiling; the hub writes
+  the file as the user's agent and nothing reachable over the daemon socket
+  changes it. Asked to act on an unpermitted application, the hub says it has no
+  permission yet and names the page — on both transports, because the signal is
+  wrapped at the one site the orb and the typed chat both flow from.
+- **Shortcut curing** (#115): permitted Chromium-family launchers get a
+  user-scope `.desktop` override carrying `--force-renderer-accessibility`.
+  System files are never edited, unpermitted applications are never cured, and
+  the hub restarts nothing — it discloses which applications need a restart and
+  leaves that to the person.
+
+The arc is recorded in
+`docs/proofs/an-unpermitted-application-is-invisible-until-the-user-says-otherwise.md`.
+
+What has *not* moved: the daemon still does not know it is being distributed,
+and this wave added nothing to its protocol.
+
 ## Three depths, one object model
 
 Easy, Standard, and Advanced are lenses over one configuration object, never

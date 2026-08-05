@@ -2,8 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, expect, test } from "vitest";
+import { WebSocket } from "ws";
 
 import desktopControl from "../../plugin/src/index.ts";
+import type { DevicesView } from "./devices/index.ts";
+import { EVENTS_PATH } from "./events/index.ts";
 
 /**
  * The hub, booted for real: the entry module constructs Mastra, finalizes the
@@ -23,6 +26,18 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), "comcon-client-"));
 beforeAll(async () => {
   process.env.COMCON_CLIENT_ROOT = root;
   process.env.COMCON_CLIENT_PORT = "0";
+  // The dashboard export is a build artifact; the boot proof injects the
+  // checked-in fixture so it can run on an unbuilt checkout. The real export
+  // is asserted by the gate that builds it first.
+  process.env.COMCON_DASHBOARD_OUT = path.resolve(
+    import.meta.dirname,
+    "fixtures",
+    "dashboard-out",
+  );
+  // Curing runs at boot and writes launcher overrides. Pointed at the temp
+  // root here: a test suite that edits the developer's own .desktop files
+  // would be a side effect nobody asked this test to have.
+  process.env.COMCON_APPLICATIONS_DIR = path.join(root, "applications");
   const entry = await import("./index.ts");
   baseUrl = await entry.listening;
   close = () => new Promise<void>((resolve) => entry.server.close(() => resolve()));
@@ -35,10 +50,16 @@ afterAll(async () => {
 });
 
 test("test_client_boots_and_serves_the_ui", async () => {
+  // "/" belongs to the dashboard now — the fixture stands in for the export.
   const page = await fetch(baseUrl);
   expect(page.status).toBe(200);
   expect(page.headers.get("content-type")).toContain("text/html");
-  const html = await page.text();
+  expect(await page.text()).toContain("dashboard-fixture-root");
+
+  // Chat kept everything but its address: same page, same module, at /chat.
+  const chat = await fetch(`${baseUrl}/chat`);
+  expect(chat.status).toBe(200);
+  const html = await chat.text();
   expect(html).toContain("<title>computer controls</title>");
 
   // The page's logic is one fetch away rather than inline, so the boot proof
@@ -50,11 +71,11 @@ test("test_client_boots_and_serves_the_ui", async () => {
   expect(script.headers.get("content-type")).toContain("javascript");
   expect(await script.text()).toContain("/api/chat");
 
-  // A path the page owns rather than a file on disk still lands on the page:
-  // one process serving one SPA, which is the whole point of the static lane.
+  // A path no file answers lands on the dashboard's page: it owns the SPA
+  // fallback, which is the whole point of the static lane.
   const deepLink = await fetch(`${baseUrl}/threads/whatever`);
   expect(deepLink.status).toBe(200);
-  expect(await deepLink.text()).toContain("<title>computer controls</title>");
+  expect(await deepLink.text()).toContain("dashboard-fixture-root");
 });
 
 test("the running hub names the OS adapter it booted with", async () => {
@@ -128,8 +149,11 @@ test("the voice routes serve through the booted hub, not just their own module",
 
   // The settings section renders that list rather than a copy of it, so the
   // page has to point at this route or the two answers can drift apart.
+  // The same page now hosts the realtime model + voice pickers (#129), and
+  // those point at the orb's settings route.
   const settings = await fetch(`${baseUrl}/settings/accounts`).then((r) => r.text());
   expect(settings).toContain("/api/voice/providers");
+  expect(settings).toContain("/api/orb/realtime-settings");
 });
 
 test("the orb serves as a second face through the booted hub", async () => {
@@ -164,6 +188,31 @@ test("the orb serves as a second face through the booted hub", async () => {
   }
 });
 
+test("the devices route answers through the booted hub, and counts a real face", async () => {
+  // Same wiring lesson as the sign-in and voice surfaces — the module's own
+  // tests build the app directly and would pass with nothing mounted — plus the
+  // one claim only the running process can make: the count is read off the live
+  // event socket, so a face connecting has to change this answer.
+  const before = (await fetch(`${baseUrl}/api/devices`).then((r) => r.json())) as DevicesView;
+  expect(before.devices[0]!.kind).toBe("hub");
+  expect(before.devices[0]!.connected).toBe(true);
+  expect(before.devices.find((d) => d.kind === "widget")!.connected).toBe(false);
+  expect(before.pairing.enabled).toBe(false);
+
+  const face = new WebSocket(`${baseUrl.replace("http://", "ws://")}${EVENTS_PATH}`);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      face.once("open", () => resolve());
+      face.once("error", reject);
+    });
+
+    const during = (await fetch(`${baseUrl}/api/devices`).then((r) => r.json())) as DevicesView;
+    expect(during.devices.find((d) => d.kind === "widget")!.connected).toBe(true);
+  } finally {
+    face.close();
+  }
+});
+
 test("test_desktop_tools_are_minted_at_observe_scope", async () => {
   const minted = health.tools.filter((name) => name.startsWith("desktop_")).sort();
   expect(health.desktopScope).toBe("observe");
@@ -179,6 +228,18 @@ test("test_desktop_tools_are_minted_at_observe_scope", async () => {
   // strict subset — which is the failure the test exists to catch.
   expect(observeTools.length).toBeLessThan(everyTool.length);
   for (const name of minted) expect(everyTool).toContain(name);
+});
+
+test("the configuration agent is reachable by dispatch and its verbs are not the main agent's", () => {
+  // The desktop agent gets one new capability: it can hand work to another
+  // mind. That is the whole seam — "tell the configuration agent what to do"
+  // is a tool call, so a spoken request and a typed one arrive the same way.
+  expect(health.tools).toContain("subagent");
+
+  // And it gets no settings verbs of its own. The agent holding the desktop
+  // cannot change what it is allowed to hold: the tools are absent from it,
+  // exactly as the desktop tools are absent from the configuration agent.
+  expect(health.tools.filter((name) => name.startsWith("settings_"))).toEqual([]);
 });
 
 async function mintedAt(scope: string): Promise<string[]> {

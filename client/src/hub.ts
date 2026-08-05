@@ -14,6 +14,8 @@ import {
   THINKING_MODE,
 } from "./model-pack.ts";
 import { mountAllowedPlugins } from "./plugins.ts";
+import { createConfigSubagent } from "./settings/agent.ts";
+import type { SettingsGate } from "./settings/gate.ts";
 import { HANDS_OFF_TOOL_NAMES, hubWorkspace, listSessionTools } from "./toolbox.ts";
 
 /** The browser is one caller, so its turns share one session and one thread history. */
@@ -28,7 +30,20 @@ const BROWSER_RESOURCE_ID = "local-browser";
  * literal in the entry module is not cosmetic — the deployer's Babel plugin
  * only recognises a Mastra config when it finds that expression there.
  */
-export async function prepareHub(config: ClientConfig) {
+export interface PrepareHubOptions {
+  /**
+   * The settings door, when the caller has assembled one.
+   *
+   * Optional because the settings service needs a credential store, and the
+   * hub is prepared before that store exists — the entry module builds both and
+   * hands this back down. A hub prepared without it simply has no configuration
+   * agent: the tools are absent rather than present and refusing, which is the
+   * same rule the desktop tools follow.
+   */
+  settings?: SettingsGate;
+}
+
+export async function prepareHub(config: ClientConfig, options: PrepareHubOptions = {}) {
   // Before anything is constructed, because a pack that cannot be resolved is a
   // hub that would otherwise boot and think with somebody else's pick.
   const modelPack = resolveModelPack();
@@ -74,6 +89,19 @@ export async function prepareHub(config: ClientConfig) {
     // neither belongs to a session mounted at an observe-shaped scope.
     disableMcp: true,
     disableHooks: true,
+    // The configuration agent, and nothing else. The runtime's own subagent
+    // list defaults to empty, so this is the whole set: one mind that can
+    // change settings and cannot touch the desktop, beside one that holds the
+    // desktop and cannot change settings. See ./settings/agent.ts.
+    subagents: options.settings
+      ? [
+          createConfigSubagent({
+            gate: options.settings,
+            surface: "conversation",
+            modelId: modelForTier(modelPack, "standard"),
+          }),
+        ]
+      : [],
   });
 
   let pending: Promise<HubSession> | undefined;

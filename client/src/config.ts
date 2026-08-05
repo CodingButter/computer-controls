@@ -51,6 +51,18 @@ export type ClientConfig = {
    */
   platform: HubPlatform;
   /**
+   * The dashboard's built static export, served at "/". Injectable via
+   * COMCON_DASHBOARD_OUT so tests can point it at a fixture; the default finds
+   * the sibling dashboard package's out/ in the repo layout.
+   */
+  dashboardRoot: string;
+  /**
+   * Where curing writes its user-scope launcher overrides. Injectable via
+   * COMCON_APPLICATIONS_DIR because the alternative is a boot that edits the
+   * developer's own launchers every time the suite starts the hub for real.
+   */
+  applicationsDir: string;
+  /**
    * Which mouth the person picked, when they picked one. Absent means "the one
    * that is connected" — the behaviour a machine with a single voice account
    * already had, and the reason connecting an account is all it takes to get a
@@ -107,6 +119,12 @@ export function resolveClientConfig(env: NodeJS.ProcessEnv = process.env): Clien
     pluginAllowlist: [...DEFAULT_PLUGIN_ALLOWLIST, ...readAllowlist(env.COMCON_PLUGIN_ALLOWLIST)],
     uiRoot: path.join(packageRoot, "public"),
     platform: resolveHubPlatform(env),
+    dashboardRoot: env.COMCON_DASHBOARD_OUT
+      ? path.resolve(env.COMCON_DASHBOARD_OUT)
+      : path.resolve(packageRoot, "..", "dashboard", "out"),
+    applicationsDir: env.COMCON_APPLICATIONS_DIR
+      ? path.resolve(env.COMCON_APPLICATIONS_DIR)
+      : path.join(os.homedir(), ".local", "share", "applications"),
     ...(voiceProvider ? { voiceProvider } : {}),
   };
 }
