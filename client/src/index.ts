@@ -5,12 +5,12 @@ import { Mastra } from "@mastra/core/mastra";
 import { buildApp } from "./app.ts";
 import { createProviderAuth } from "./auth/index.ts";
 import { resolveClientConfig } from "./config.ts";
-import { ScriptedEventSource, attachEventSocket } from "./events/index.ts";
+import { attachEventSocket } from "./events/index.ts";
 import { prepareHub } from "./hub.ts";
 import { commandSpeaker, startMicrophone, type Microphone } from "./orb/audio-host.ts";
 import { pocEarChain } from "./orb/ear-poc.ts";
 import { diskClipStore, unwiredSpeaker } from "./orb/host.ts";
-import { mountOrb } from "./orb/index.ts";
+import { chooseFaceSource, mountOrb } from "./orb/index.ts";
 import { geminiLiveProvider } from "./orb/live-gemini.ts";
 import {
   createSessionVoice,
@@ -140,11 +140,10 @@ export const server = serve(
 /**
  * The hub's state, offered to whatever is drawing it.
  *
- * Scripted for now, and honestly so: the ear chain that will drive this for
- * real — the wake gate, the local ear, the realtime provider — is the orb's
- * prerequisite work and does not exist yet. What does exist is the seam, so a
- * face can be built and proved against it today and keep working unchanged the
- * day the ears land behind it.
+ * When the orb is live, the face pipe hears it: the adapter translates the orb's
+ * events into the face vocabulary and routes mute and dismiss to its gate. When
+ * the orb is refused — no provider, no ear, no credential — the scripted source
+ * stays, and a face sees idle, which is the truth.
  */
-export const eventSource = new ScriptedEventSource();
+export const eventSource = chooseFaceSource(orb);
 export const eventSocket = attachEventSocket(server, eventSource);
