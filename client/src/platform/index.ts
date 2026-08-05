@@ -4,6 +4,8 @@ import { macosPlatform, platformIdFor, windowsPlatform } from "./unimplemented.t
 
 export type {
   ApplicationIcon,
+  Autostart,
+  AutostartEntry,
   HubPaths,
   HubPlatform,
   IconSource,

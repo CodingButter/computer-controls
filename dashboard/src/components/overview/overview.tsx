@@ -134,16 +134,19 @@ function OrbCard(props: { orb: Fetched<OrbStatus> }) {
       />
     );
   }
+  // The pill counts client mouths: the microphones live on devices now, and
+  // open voice sessions on the lane are all the hub honestly knows about them.
+  const mouths = orb.data.mouths;
   return (
     <StatCard
       title="Orb"
       value={orb.data.state}
       pill={
-        orb.data.state === "idle"
-          ? { text: `gate: ${orb.data.gate}`, variant: "muted" }
-          : { text: `gate: ${orb.data.gate}`, variant: "success" }
+        mouths === 0
+          ? { text: "no open mouths", variant: "muted" }
+          : { text: `${mouths} ${mouths === 1 ? "mouth" : "mouths"} open`, variant: "success" }
       }
-      detail="live voice face"
+      detail="voice on client devices"
     />
   );
 }

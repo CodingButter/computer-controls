@@ -20,3 +20,4 @@ export * from "./accounts";
 export * from "./audit";
 export * from "./devices";
 export * from "./realtime";
+export * from "./autostart";

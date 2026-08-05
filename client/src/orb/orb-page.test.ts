@@ -17,26 +17,20 @@ describe("what the page will render", () => {
     expect(interpret({ type: "state" })).toBeNull();
   });
 
-  it("renders captions from either speaker", () => {
-    expect(interpret({ type: "caption", text: "hello", speaker: "user" })).toEqual({
+  it("renders an unattributed caption — the lane's word carries no speaker", () => {
+    expect(interpret({ type: "caption", text: "hello" })).toEqual({
       kind: "caption",
       text: "hello",
-      speaker: "user",
-    });
-    expect(interpret({ type: "caption", text: "hi", speaker: "assistant" })).toEqual({
-      kind: "caption",
-      text: "hi",
-      speaker: "assistant",
     });
   });
 
   it("drops an empty caption instead of clearing the line with nothing", () => {
-    expect(interpret({ type: "caption", text: "   ", speaker: "user" })).toBeNull();
-    expect(interpret({ type: "caption", speaker: "user" })).toBeNull();
+    expect(interpret({ type: "caption", text: "   " })).toBeNull();
+    expect(interpret({ type: "caption" })).toBeNull();
   });
 
-  it("drops a caption from a speaker that is neither of the two", () => {
-    expect(interpret({ type: "caption", text: "x", speaker: "system" })).toBeNull();
+  it("has no rendering for mood — sentiment never reaches the deaf hub", () => {
+    expect(interpret({ type: "mood", mood: "excited" })).toBeNull();
   });
 
   it("drops anything that is not an event at all", () => {
@@ -69,7 +63,14 @@ describe("what the page does when there is no credential", () => {
   });
 
   it("comes up in the state the hub reported", () => {
-    expect(availability({ enabled: true, state: "listening" })).toEqual({
+    expect(availability({ enabled: true, state: "idle" })).toEqual({
+      usable: true,
+      state: "idle",
+    });
+  });
+
+  it("renders the status route's coarse 'talking' as the listening state", () => {
+    expect(availability({ enabled: true, state: "talking", mouths: 1 })).toEqual({
       usable: true,
       state: "listening",
     });

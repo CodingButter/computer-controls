@@ -23,15 +23,15 @@ const HEALTH: Fetched<HubHealth> = {
 
 const ORB: Fetched<OrbStatus> = {
   kind: "ok",
-  data: { enabled: true, state: "listening", gate: "open", languages: [] },
+  data: { enabled: true, state: "talking", mouths: 1 },
 };
 
 test("the cards render the hub's real numbers", () => {
   const html = renderToStaticMarkup(<Overview health={HEALTH} orb={ORB} />);
 
   expect(html).toContain("Running"); // hub card
-  expect(html).toContain("listening"); // orb card carries the live state
-  expect(html).toContain("gate: open");
+  expect(html).toContain("talking"); // orb card carries the coarse live state
+  expect(html).toContain("1 mouth open"); // the lane's count, not a gate the hub no longer holds
   expect(html).toContain("computer-controls-anthropic"); // model pack by name
   expect(html).toContain("anthropic/claude-opus-4-6"); // tier models listed
   expect(html).toContain("2 admitted"); // plugin census
@@ -44,12 +44,12 @@ test("a refused orb states its reason instead of a fake state", () => {
     kind: "ok",
     data: {
       enabled: false,
-      reason: "The orb has no realtime voice provider on this machine yet. Typing still works.",
+      reason: "The orb needs a Google account. Typing still works.",
     },
   };
   const html = renderToStaticMarkup(<Overview health={HEALTH} orb={refused} />);
   expect(html).toContain("Typing still works");
-  expect(html).not.toContain("gate:");
+  expect(html).not.toContain("mouth");
 });
 
 test("an unreachable hub renders the honest fallback, never fake green", () => {

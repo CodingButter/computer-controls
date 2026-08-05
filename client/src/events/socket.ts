@@ -126,10 +126,37 @@ export type CredentialCheck = {
   verify(presented: string): Promise<boolean>;
 };
 
+/**
+ * What the hub is told about the conversation happening on this lane.
+ *
+ * Since the migration, the lane is the only place the hub learns anything
+ * about voice at all — there is no hub-side session to watch. The face
+ * events and the status route both derive from these notifications, so the
+ * seam carries facts, never content: how many mouths are open, that an ask
+ * is in flight, that an answer went out, and the caption text a session
+ * already chose to publish. Nothing here says *who*, and nothing here can
+ * carry audio.
+ */
+export type LaneObserver = {
+  /** The number of connections holding an open voice session, on every change. */
+  voiceCount?(count: number): void;
+  /** An `ask` was handed to the brain. */
+  askStarted?(): void;
+  /** The brain's answer went back to the asker. */
+  answerDelivered?(): void;
+  /** A caption crossed the lane. The socket relays it to faces itself. */
+  caption?(text: string): void;
+};
+
 export function attachEventSocket(
   server: UpgradableServer,
   source: EventSource,
-  options: { path?: string; brain?: LaneBrain; credentials?: CredentialCheck } = {},
+  options: {
+    path?: string;
+    brain?: LaneBrain;
+    credentials?: CredentialCheck;
+    observer?: LaneObserver;
+  } = {},
 ): EventSocket {
   const path = options.path ?? EVENTS_PATH;
   // `noServer` because the hub's HTTP app owns this server. Letting `ws` bind
@@ -166,12 +193,15 @@ export function attachEventSocket(
    */
   const leaveVoice = (ws: WebSocket) => {
     if (!voiceOwners.delete(ws)) return;
+    options.observer?.voiceCount?.(voiceOwners.size);
     if (voiceOwners.size === 0) broadcast({ type: "voice_closed" });
   };
 
   const joinVoice = (ws: WebSocket) => {
     const wasEmpty = voiceOwners.size === 0;
+    if (voiceOwners.has(ws)) return;
     voiceOwners.add(ws);
+    options.observer?.voiceCount?.(voiceOwners.size);
     if (wasEmpty) broadcast({ type: "voice_opened" });
   };
 
@@ -188,6 +218,7 @@ export function attachEventSocket(
     const brain = options.brain;
     if (!brain) return;
     const reply = (event: StateEvent) => deliverTo.get(ws)?.(event);
+    options.observer?.askStarted?.();
     void (async () => {
       let answer: string;
       try {
@@ -198,6 +229,7 @@ export function attachEventSocket(
         answer = ASK_FAILED;
       }
       reply({ type: "answer", id: ask.id, text: answer });
+      options.observer?.answerDelivered?.();
     })();
   };
 
@@ -331,8 +363,11 @@ export function attachEventSocket(
           return;
         case "caption":
           // Relayed to every face, the sender included — a mouth hearing its
-          // own caption back is confirmation, not an echo problem.
+          // own caption back is confirmation, not an echo problem. The
+          // observer is told separately because the SSE face is not on this
+          // socket, and a face is a face wherever it connects.
           broadcast({ type: "caption", text: gesture.text });
+          options.observer?.caption?.(gesture.text);
           return;
         case "ask":
           dispatchAsk(ws, gesture);

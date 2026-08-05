@@ -21,7 +21,16 @@ import type { HubPaths, HubPlatform, PlatformId } from "./ports.ts";
 const unimplemented = {
   scanInstalled: async () => [],
   icons: async () => undefined,
-  supports: { installedScan: false, icons: false, shortcutCuring: false },
+  autostart: {
+    // Nowhere: no file exists that this adapter would write, and `supports`
+    // says so out loud, which is why nothing ever draws this answer.
+    path: () => "",
+    read: async () => false,
+    write: async () => {
+      throw new Error("Start on boot is not supported on this platform yet.");
+    },
+  },
+  supports: { installedScan: false, icons: false, shortcutCuring: false, autostart: false },
 } satisfies Omit<HubPlatform, "id" | "paths">;
 
 /** `~/Library`, where Apple puts each of the three. */

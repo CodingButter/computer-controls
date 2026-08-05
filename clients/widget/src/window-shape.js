@@ -23,13 +23,16 @@ const MARGIN = 24;
 /**
  * Every permission this window will ever be granted.
  *
- * It is empty, and it is the whole list. Denying everything rather than the
- * microphone specifically is deliberate: a widget that blocked `media` and left
- * `geolocation` open would be one interesting feature away from a leak, and a
- * thing that draws has no legitimate use for any permission a browser can
- * grant. The empty list is the honest expression of that.
+ * One entry, and it is the whole list. The widget grew ears, so `media` is
+ * granted — audio only, only to the widget's own page, and only while the
+ * tray has not disabled it; `guardPermissions` in main.js is where those
+ * clauses are enforced. Everything else stays denied for the old reason: a
+ * widget that granted broadly would be one interesting feature away from a
+ * leak, and a thing that draws and listens needs exactly a microphone and
+ * nothing further. Display capture is refused permanently in every state —
+ * it is not on this list and never will be.
  */
-export const GRANTED_PERMISSIONS = Object.freeze([]);
+export const GRANTED_PERMISSIONS = Object.freeze(["media"]);
 
 /**
  * Where the orb sits when it has not been dragged.

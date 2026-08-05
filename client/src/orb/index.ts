@@ -1,69 +1,37 @@
 /**
- * The orb lane, assembled and mounted.
+ * The orb's hub side, assembled and mounted — and deaf by design.
  *
- * The lane is deliberately inert until three things are true: there is a Google
- * credential, an audio capture source exists, and a realtime provider has been
- * supplied. Any of them missing is a refusal with a reason, not a crash and not
- * a half-built orb — the page reads the reason and says it, and the typed chat
- * carries on working either way.
+ * Since the client migration, every microphone and every speaker lives on a
+ * client device: the orb page's tap-to-talk mouth, the widget's tray-resident
+ * ears. What the hub still owns is what only the hub can own — the token mint
+ * (the Google key never leaves this process), the realtime settings file, the
+ * status route, and the face events derived from the lane. There is no audio
+ * capture here, no playback, no wake gate, and no realtime session: a device
+ * that wants to talk mints a token and dials Google itself.
  *
- * `provider` and `capture` are injected rather than constructed here because
- * neither has a shipping implementation yet: `@mastra/voice-google-gemini-live-api`
- * is not on npm, and OS-level audio capture arrives with the widget work in
- * #107. Both are interfaces with tests against them, so the day either lands it
- * implements the seam and nothing above this file moves.
+ * The one refusal left is the one a person can fix: no Google credential
+ * means no orb, said in the same sentence the mint uses.
  */
 
 import { Hono } from "hono";
 
-import type { AgentTurn } from "../chat.ts";
-import { createHubBrain } from "./brain.ts";
+import type { StateEvent } from "../events/types.ts";
 import { isRefusal, resolveOrbCredential } from "./credentials.ts";
-import type { Classifier, LocalEar, VoiceActivityDetector, WakeWordDetector } from "./ear.ts";
-import { realtimeConfig, type RealtimeProvider } from "./live.ts";
-import { Mouth } from "./mouth.ts";
-import { Orb, type OrbEvent, type Speaker } from "./orb.ts";
-import { buildRealtimeSettingsApp, readRealtimeSettings } from "./realtime-settings.ts";
-import { buildOrbApp, ORB_BASE_PATH } from "./routes.ts";
-import { UtteranceBank, type ClipStore } from "./utterance-bank.ts";
+import { buildRealtimeSettingsApp } from "./realtime-settings.ts";
+import { buildTokenMintApp } from "./token-mint.ts";
+import { buildOrbApp } from "./routes.ts";
 
-export { ORB_BASE_PATH, GESTURES, parseGesture, buildOrbApp } from "./routes.ts";
+export { ORB_BASE_PATH, GESTURES, parseGesture, buildOrbApp, toPageEvent } from "./routes.ts";
 export { GOOGLE_PROVIDER_ID, resolveOrbCredential, orbAvailability } from "./credentials.ts";
-export { WakeGate, DEFAULT_QUIET_PERIOD_MS } from "./gate.ts";
-export { Orb } from "./orb.ts";
-export { Mouth } from "./mouth.ts";
-export { UtteranceBank, CLIP_TEXT, clipClassFor } from "./utterance-bank.ts";
-export { createWakeWordClassifier, isActionable, WAKE_WORDS } from "./ear.ts";
-export { HUB_FUNCTION_NAME, REALTIME_TOOLS, LIVE_MODEL, realtimeConfig } from "./live.ts";
 export { createHubBrain } from "./brain.ts";
-export { OrbFaceSource, chooseFaceSource, toStateEvent } from "./face-source.ts";
+export { createLaneFaceSource } from "./face-source.ts";
 
-export type { OrbEvent, OrbState, Speaker, HubBrain } from "./orb.ts";
-export type { OrbFaceDeps, LiveOrbMount } from "./face-source.ts";
-export type { AudioFrame, LocalEar, VoiceActivityDetector, WakeWordDetector, Classifier, IntentClass, Hearing } from "./ear.ts";
-export type { RealtimeProvider, RealtimeSession, FunctionCall } from "./live.ts";
-export type { Clip, ClipStore, ClipSynthesizer } from "./utterance-bank.ts";
-
-/** The parts of the ear chain a machine has to supply for the orb to run. */
-export type EarChain = {
-  vad: VoiceActivityDetector;
-  wakeWord: WakeWordDetector;
-  ear: LocalEar;
-  classifier: Classifier;
-};
+export type { OrbEvent, OrbState, OrbStatus } from "./routes.ts";
+export type { HubBrain } from "./brain.ts";
+export type { LaneFaceSource } from "./face-source.ts";
 
 export type OrbMountOptions = {
   credentials: Parameters<typeof resolveOrbCredential>[0];
-  turn: AgentTurn;
-  clips: ClipStore;
-  speaker: Speaker;
-  /** Absent on a machine with no realtime provider wired yet. */
-  provider?: RealtimeProvider;
-  /** Absent until OS-level capture lands with the widget work. */
-  earChain?: EarChain;
-  threadId?: () => string | undefined;
-  /** Overrides the gate's quiet period (how long it stays open after speech ends). */
-  quietPeriodMs?: number;
   /**
    * Path to the shared settings.json. When present, the realtime model and
    * voice settings route is mounted on the orb app — even when the orb itself
@@ -71,136 +39,59 @@ export type OrbMountOptions = {
    */
   settingsPath?: string;
   /**
-   * Told how many faces are watching, every time the number changes.
-   *
-   * This is the capture-lifecycle seam: a face arriving is what starts local
-   * microphone capture, and the last face leaving is what stops it. The gate
-   * itself is not opened here — that is the wake word's job. The caller wires
-   * the microphone; this lane only counts.
+   * The lane's view of the conversation: how many mouths are open, and the
+   * derived face events. Absent in tests that only exercise the routes'
+   * refusal arm.
    */
-  onFaceCount?: (count: number) => void;
+  faces?: {
+    mouths(): number;
+    subscribe(listener: (event: StateEvent) => void): () => void;
+  };
 };
 
 export type OrbMount = {
   app: Hono;
   /** Why the orb is off, when it is. Surfaced by health the way voice's is. */
   reason?: string;
-  orb?: Orb;
-  /**
-   * Watch the orb's event stream. Present only when the orb is live.
-   *
-   * Each subscription counts as a face for `onFaceCount` — the capture-lifecycle
-   * seam that opens and closes the microphone — so the face source proxies each
-   * face's subscribe through this rather than holding a permanent listener,
-   * which would keep the machine listening after the last face left.
-   */
-  subscribe?(listener: (event: OrbEvent) => void): () => void;
 };
 
-const NO_PROVIDER =
-  "The orb has no realtime voice provider on this machine yet. Typing still works.";
-const NO_EAR =
-  "The orb has no local ear on this machine yet, and it will not listen without one. Typing still works.";
-
 /**
- * Build the orb lane, or explain why there isn't one.
+ * Build the orb's hub side, or explain why there isn't one.
  *
- * The refusals are ordered cheapest-question-first: a missing credential is the
- * thing a person can actually fix, so it is the one they are told about.
+ * "Enabled" now means the mint and the lane are ready — nothing more. The
+ * credential is the only question left to ask at mount time; the provider and
+ * the ear chain were the devices' problems to solve, and they solved them.
  */
 export async function mountOrb(options: OrbMountOptions): Promise<OrbMount> {
-  // The settings route is mounted unconditionally — it works even when the orb
-  // is refused, because the settings are machine facts, not session state.
+  // The settings and mint routes are mounted unconditionally — they work even
+  // when the orb is refused. Settings are machine facts, not session state;
+  // and the mint resolves the credential per request, so a person can paste a
+  // key and wire a client without a hub restart. A hub with no credential
+  // still answers, with the one sentence that says what to fix.
   const composeSettings = (app: Hono): Hono => {
     if (options.settingsPath) app.route("/", buildRealtimeSettingsApp(options.settingsPath));
+    app.route(
+      "/",
+      buildTokenMintApp({
+        credentials: options.credentials,
+        ...(options.settingsPath !== undefined ? { settingsPath: options.settingsPath } : {}),
+      }),
+    );
     return app;
   };
 
   const credential = await resolveOrbCredential(options.credentials);
   if (isRefusal(credential)) {
-    return { app: composeSettings(buildOrbApp({ reason: credential.reason })), reason: credential.reason };
-  }
-  if (!options.provider) {
-    return { app: composeSettings(buildOrbApp({ reason: NO_PROVIDER })), reason: NO_PROVIDER };
-  }
-  if (!options.earChain) {
-    return { app: composeSettings(buildOrbApp({ reason: NO_EAR })), reason: NO_EAR };
-  }
-
-  const listeners = new Set<(event: OrbEvent) => void>();
-
-  // The realtime model and voice are read once at boot. The setup frame is
-  // built from the resulting config, and redial reuses it — so a change a
-  // person makes in the settings UI takes effect on the next conversation,
-  // not mid-socket. This is the reading the issue's UI copy asks for.
-  const settings = options.settingsPath
-    ? await readRealtimeSettings(options.settingsPath)
-    : {};
-
-  // The orb needs a session to be constructed, and the session needs callbacks
-  // that land on the orb — a genuine cycle. It is broken with an explicit box
-  // rather than by reading a `const` that is not initialised yet: an event
-  // arriving during `connect` would hit the temporal dead zone and throw, and
-  // "the provider probably will not do that" is not a guarantee worth taking.
-  // Before the orb exists, an early event is dropped, which is the correct
-  // reading of a frame that arrived before anything could be listening.
-  let attached: Orb | undefined;
-  let session;
-  try {
-    session = await options.provider.connect(
-      realtimeConfig({
-        apiKey: credential.key,
-        ...(settings.realtimeModel !== undefined ? { model: settings.realtimeModel } : {}),
-        ...(settings.realtimeVoice !== undefined ? { voice: settings.realtimeVoice } : {}),
-        events: {
-          onAudio: (chunk) => attached?.realtimeEvents.onAudio(chunk),
-          onTranscript: (text, speaker) => attached?.realtimeEvents.onTranscript(text, speaker),
-          onFunctionCall: (call) => attached?.realtimeEvents.onFunctionCall(call),
-          onBargeIn: () => attached?.realtimeEvents.onBargeIn(),
-          onReconnect: () => attached?.realtimeEvents.onReconnect(),
-          onRefusal: (reason) => attached?.realtimeEvents.onRefusal(reason),
-        },
-      }),
-    );
-  } catch (error) {
-    // A provider that will not connect is an orb that is off with a reason,
-    // not a hub that failed to boot: the typed chat owes nothing to Google.
-    const reason = `The realtime voice provider refused to connect: ${
-      error instanceof Error ? error.message : String(error)
-    }`;
-    return { app: composeSettings(buildOrbApp({ reason })), reason };
-  }
-
-  const orb = new Orb({
-    gate: {
-      ...options.earChain,
-      ...(options.quietPeriodMs !== undefined ? { quietPeriodMs: options.quietPeriodMs } : {}),
-    },
-    session,
-    bank: new UtteranceBank(options.clips),
-    mouth: new Mouth(),
-    speaker: options.speaker,
-    brain: createHubBrain({
-      turn: options.turn,
-      ...(options.threadId ? { threadId: options.threadId } : {}),
-    }),
-    onEvent: (event) => {
-      for (const listener of listeners) listener(event);
-    },
-  });
-  attached = orb;
-
-  const subscribe = (listener: (event: OrbEvent) => void) => {
-    listeners.add(listener);
-    options.onFaceCount?.(listeners.size);
-    return () => {
-      if (listeners.delete(listener)) options.onFaceCount?.(listeners.size);
+    return {
+      app: composeSettings(buildOrbApp({ reason: credential.reason })),
+      reason: credential.reason,
     };
-  };
+  }
 
+  const faces = options.faces ?? { mouths: () => 0, subscribe: () => () => {} };
   return {
-    app: composeSettings(buildOrbApp({ orb, subscribe })),
-    orb,
-    subscribe,
+    app: composeSettings(
+      buildOrbApp({ mouths: () => faces.mouths(), subscribe: (listener) => faces.subscribe(listener) }),
+    ),
   };
 }

@@ -32,12 +32,6 @@ client/.mastracode/device-credentials.json
 # The hub's own plugin registry: derived from the allowlist on every boot
 .mastracode-hub/
 
-# Filler clips synthesized on this machine's boot — re-derived, never shipped.
-# Both spellings on purpose: a pattern with an internal slash anchors to the
-# repo root, and the clips actually land under client/.
-.mastracode/orb-clips/
-client/.mastracode/orb-clips/
-
 # The dashboard's build artifacts: `next build` re-derives them at gate and
 # package time, and the gate order — build first, assert after — is what
 # satisfies "the artifact a browser fetches is the artifact under test".
@@ -49,3 +43,6 @@ dashboard/tsconfig.tsbuildinfo
 /PLAN-*.md
 .mastracode/*.md
 .playwright-mcp/
+
+# Widget ear assets (model weights + WASM) — reproduced by clients/widget/scripts/vendor-widget-ear.mjs
+clients/widget/src/vendor/ear/

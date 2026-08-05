@@ -51,9 +51,11 @@ export type AppDeps = {
   /**
    * The orb's routes and, when the orb is off, why. Same shape as voice because
    * it is the same promise: a face that cannot run says so, and the typed lane
-   * keeps working regardless.
+   * keeps working regardless. Since the hub went deaf there is no dynamic
+   * refusal arm — no session lives here to die mid-conversation — so the only
+   * reason left is the one resolved at mount: no Google credential.
    */
-  orb?: { app: Hono; reason?: string; orb?: { refusal?: string } };
+  orb?: { app: Hono; reason?: string };
   /**
    * The permissions page's routes. Optional the way auth is: tests that are
    * not about permissions boot without it, the entry module always supplies it.
@@ -74,6 +76,12 @@ export type AppDeps = {
    * always supplies it.
    */
   desktopConfig?: Hono;
+  /**
+   * The start-on-boot toggle: reflects and writes the widget's autostart entry
+   * through the platform port. Optional like the rest; the entry module always
+   * supplies it.
+   */
+  autostart?: Hono;
 };
 
 /**
@@ -101,9 +109,7 @@ export function buildApp(deps: AppDeps): Hono {
         ? {
             orb: deps.orb.reason
               ? { enabled: false, reason: deps.orb.reason }
-              : deps.orb.orb?.refusal
-                ? { enabled: false, reason: deps.orb.orb.refusal }
-                : { enabled: true },
+              : { enabled: true },
           }
         : {}),
     }),
@@ -132,6 +138,7 @@ export function buildApp(deps: AppDeps): Hono {
   if (deps.audit) app.route("/", deps.audit);
   if (deps.devices) app.route("/", deps.devices);
   if (deps.desktopConfig) app.route("/", deps.desktopConfig);
+  if (deps.autostart) app.route("/", deps.autostart);
 
   app.get("*", (c) => {
     // The hub's own static root answers first — chat, the orb, the vendored

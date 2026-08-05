@@ -36,9 +36,18 @@ const open: WebSocket[] = [];
 let asked: { request: string; onProgress?: (signal: string) => void }[];
 let answerWith: (request: string) => Promise<string>;
 
+/**
+ * The observer, recording every move the socket reports. This is the seam
+ * the hub's face source hangs off since the retirement — the only way the
+ * SSE face learns the conversation moved — so the pins below are what keep
+ * a deaf hub's faces honest.
+ */
+let observed: string[];
+
 beforeEach(async () => {
   source = new ScriptedEventSource();
   asked = [];
+  observed = [];
   answerWith = async () => "Done.";
   // A bare HTTP server standing in for the hub's: this module attaches to an
   // upgrade listener, and Hono is not part of that contract.
@@ -52,6 +61,12 @@ beforeEach(async () => {
         asked.push({ request, ...(onProgress ? { onProgress } : {}) });
         return answerWith(request);
       },
+    },
+    observer: {
+      voiceCount: (count) => observed.push(`voice:${count}`),
+      askStarted: () => observed.push("ask"),
+      answerDelivered: () => observed.push("answer"),
+      caption: (text) => observed.push(`caption:${text}`),
     },
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -632,5 +647,60 @@ describe("the door", () => {
       await bareSocket.close();
       await new Promise<void>((resolve) => bare.close(() => resolve()));
     }
+  });
+});
+
+describe("what the observer is told", () => {
+  test("every voice-set change is reported, not just the broadcast transitions", async () => {
+    const first = await connectFace();
+    const second = await connectFace();
+
+    first.send(JSON.stringify({ type: "voice_open" }));
+    await settle();
+    second.send(JSON.stringify({ type: "voice_open" }));
+    await settle();
+    first.send(JSON.stringify({ type: "voice_close" }));
+    await settle();
+    second.send(JSON.stringify({ type: "voice_close" }));
+    await settle();
+
+    // Faces only hear the set's edge transitions; the observer hears every
+    // membership change, because the status route's mouth count is exact.
+    expect(observed).toEqual(["voice:1", "voice:2", "voice:1", "voice:0"]);
+  });
+
+  test("a socket that dies without voice_close still counts down", async () => {
+    const face = await connectFace();
+    face.send(JSON.stringify({ type: "voice_open" }));
+    await settle();
+    expect(observed).toEqual(["voice:1"]);
+
+    face.terminate();
+    await settle();
+    expect(observed).toEqual(["voice:1", "voice:0"]);
+  });
+
+  test("an ask is reported when it starts and when its answer goes back", async () => {
+    let release: (answer: string) => void = () => {};
+    answerWith = () => new Promise((resolve) => (release = resolve));
+
+    const face = await connectFace();
+    face.send(JSON.stringify({ type: "ask", id: "a1", request: "what time is it" }));
+    await settle();
+    expect(observed).toEqual(["ask"]);
+
+    release("Late.");
+    await settle();
+    expect(observed).toEqual(["ask", "answer"]);
+  });
+
+  test("a caption crossing the lane reaches the observer once", async () => {
+    const face = await connectFace();
+    face.send(JSON.stringify({ type: "caption", text: "hello hub" }));
+    await settle();
+
+    // Once — the socket relays the caption to its own faces itself, and the
+    // observer exists for the faces that are not on this socket.
+    expect(observed).toEqual(["caption:hello hub"]);
   });
 });

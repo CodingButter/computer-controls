@@ -1,11 +1,12 @@
 // The orb page's browser half, served verbatim by `readUiAsset` and loaded by
 // `orb.html` as a module.
 //
-// This page is a face and nothing else. It holds no microphone: per issue #107
-// the ear chain — voice detection, the local Moonshine ear, the classifier —
-// lives in the hub process at the OS audio layer, so the privacy property is
-// enforced in one place and survives this tab being closed. What this file does
-// is render state as motion, show captions, and forward gestures.
+// This page is a face, and — since the voice moved to the client — on request
+// a mouth. The mouth is tap-to-talk only: the microphone opens on a press,
+// never on its own, and everything it captures dials Google directly with a
+// hub-minted single-use token (orb-mouth.js owns that lifecycle). With the
+// mouth closed this file is what it always was: render state as motion, show
+// captions, forward gestures.
 //
 // The seams above `init()` are exported and DOM-free so they can be tested
 // without a browser, the same way `app.js` splits its own decisions out.
@@ -21,22 +22,19 @@ export const ORB_STATES = ["idle", "listening", "thinking", "speaking"];
 export const GESTURES = ["toggle", "mute", "dismiss"];
 
 /**
- * Every mood the hub can report, and the only ones this page will wear (#106).
- *
- * Closed like the state list above it. An unrecognised mood renders as the
- * resting colour rather than as whatever the shader does with a word it has
- * never seen, because a face guessing at a label it does not know is a face
- * showing something the hub never said.
- */
-export const ORB_MOODS = ["neutral", "frustrated", "excited", "calm"];
-
-/**
  * Decide what an event from the hub means for the page.
  *
  * Returns an instruction rather than touching anything, so the whole event
  * vocabulary can be exercised in a test. An event the page does not recognise
  * produces `null` — a face that guessed at an unknown event would be a face
  * that renders something the hub never said.
+ *
+ * The vocabulary shrank with the hub's hearing: the deaf hub speaks states
+ * and captions, nothing else. Captions arrive unattributed — the lane's
+ * caption word deliberately carries no speaker, because which device was
+ * talking is arbitration state, not content a face renders. Mood is gone
+ * entirely: sentiment lives on the device that heard the voice now, and the
+ * hub never learns it, so there is nothing for this pipe to carry.
  */
 export function interpret(event) {
   if (!event || typeof event !== "object") return null;
@@ -45,11 +43,7 @@ export function interpret(event) {
   }
   if (event.type === "caption") {
     if (typeof event.text !== "string" || !event.text.trim()) return null;
-    const speaker = event.speaker === "user" || event.speaker === "assistant" ? event.speaker : null;
-    return speaker ? { kind: "caption", text: event.text, speaker } : null;
-  }
-  if (event.type === "mood") {
-    return ORB_MOODS.includes(event.mood) ? { kind: "mood", mood: event.mood } : null;
+    return { kind: "caption", text: event.text };
   }
   return null;
 }
@@ -59,6 +53,12 @@ export function interpret(event) {
  *
  * Ruling 5: no credential means no orb, and the page says why rather than
  * presenting a control that cannot work.
+ *
+ * The status route speaks its own coarse vocabulary — idle or talking — while
+ * this page renders the richer one. "Talking" maps to the listening render
+ * state: a conversation is live somewhere, and the stream will refine the
+ * picture the moment it says anything. Anything unrecognised is idle, which
+ * is the one state that is safe to be wrong about.
  */
 export function availability(status) {
   if (!status || status.enabled !== true) {
@@ -67,6 +67,7 @@ export function availability(status) {
       reason: status?.reason ?? "The orb is unavailable.",
     };
   }
+  if (status.state === "talking") return { usable: true, state: "listening" };
   return { usable: true, state: ORB_STATES.includes(status.state) ? status.state : "idle" };
 }
 
@@ -111,16 +112,10 @@ function init() {
       if (instruction.state === "idle") caption.textContent = "";
       return;
     }
-    if (instruction.kind === "mood") {
-      // The colour is the only place this label lands. It is not written to the
-      // drawer, not added to the caption, and not kept in a variable the page
-      // reads back — the shader tweens toward it and that is the whole of its
-      // life. A DOM-only face simply does not show a mood.
-      webglOrb?.setMood(instruction.mood);
-      return;
-    }
+    // A stream caption is unattributed — the lane's word carries no speaker —
+    // so it lands on the caption line only. The drawer log stays the record of
+    // turns this page can attribute: its own typing, and its own mouth.
     caption.textContent = instruction.text;
-    appendTurn(instruction.text, instruction.speaker === "user" ? "you" : "agent");
   };
 
   const gesture = async (name) => {
@@ -136,6 +131,66 @@ function init() {
   };
 
   orb.addEventListener("click", () => void gesture("toggle"));
+
+  // The talk toggle: this device's own mouth. Loaded on first press so a
+  // page that is only ever a face never fetches the mouth at all. The mouth
+  // module owns the whole lifecycle; this wiring owns only the button state
+  // and where the mouth's words land on the page.
+  //
+  // Deliberately NOT gated on availability(): that verdict describes the
+  // hub's own voice, and the mouth does not need one — it needs the token
+  // mint, whose refusal arrives as its own complete sentence and is shown
+  // here verbatim. Ruling 5's principle (say why, don't present a dead
+  // control) is honored by the mint's sentence, not by hiding the button.
+  const talk = document.getElementById("talk");
+  let mouth = null;
+  let opening = false;
+  const setLive = (live) => {
+    talk.setAttribute("data-live", String(live));
+    talk.setAttribute("aria-pressed", String(live));
+    talk.textContent = live ? "Stop" : "Talk";
+  };
+  talk.addEventListener("click", async () => {
+    if (opening) return;
+    if (mouth) {
+      const closing = mouth;
+      mouth = null;
+      setLive(false);
+      await closing.close();
+      return;
+    }
+    opening = true;
+    try {
+      const { openMouth } = await import("./orb-mouth.js");
+      reason.hidden = true;
+      mouth = await openMouth({
+        onCaption: (text, speaker) => {
+          caption.textContent = text;
+          appendTurn(text, speaker === "user" ? "you" : "agent");
+        },
+        onState: (state) => {
+          if (ORB_STATES.includes(state)) setState(state);
+          if (state === "idle" && mouth) {
+            mouth = null;
+            setLive(false);
+          }
+        },
+        onReason: (text) => {
+          reason.textContent = text;
+          reason.hidden = false;
+        },
+      });
+      setLive(true);
+    } catch (error) {
+      // A refused mic and a keyless hub land here the same way: as a
+      // sentence the page shows, while everything else keeps working.
+      reason.textContent = error?.message ?? "The mouth could not be opened.";
+      reason.hidden = false;
+      setLive(false);
+    } finally {
+      opening = false;
+    }
+  });
 
   // Feature-detect WebGL. If the browser supports it, mount the shader sphere
   // and hide the DOM button. If not — or if the dynamic import fails for any

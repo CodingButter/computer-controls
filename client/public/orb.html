@@ -147,6 +147,22 @@
       }
       #reason { max-width: 44ch; text-align: center; color: #ff9b9b; font-size: 14px; }
 
+      #talk {
+        margin-top: 6px;
+        padding: 10px 22px;
+        border-radius: 999px;
+        border: 1px solid #3a2d55;
+        background: #1b1526;
+        color: #d9c9f5;
+        font-size: 15px;
+        cursor: pointer;
+      }
+      #talk[data-live="true"] {
+        border-color: #7c3aed;
+        background: #2a1b45;
+        box-shadow: 0 0 18px rgba(147, 51, 234, 0.45);
+      }
+
       /* The chat log, demoted to a drawer. */
       #drawer {
         position: fixed;
@@ -205,6 +221,7 @@
         </svg>
       </div>
       <p id="caption" aria-live="polite"></p>
+      <button id="talk" type="button" data-live="false" aria-pressed="false">Talk</button>
       <p id="reason" hidden></p>
     </main>
 

@@ -65,14 +65,19 @@ describe("parseHealth", () => {
 
 describe("parseOrbStatus", () => {
   it("reads the enabled shape", () => {
-    const status = parseOrbStatus({ enabled: true, state: "idle", gate: "idle", languages: [] });
-    expect(status).toEqual({ enabled: true, state: "idle", gate: "idle", languages: [] });
+    const status = parseOrbStatus({ enabled: true, state: "talking", mouths: 2 });
+    expect(status).toEqual({ enabled: true, state: "talking", mouths: 2 });
+  });
+
+  it("defaults a missing mouth count to zero rather than guessing", () => {
+    const status = parseOrbStatus({ enabled: true, state: "idle" });
+    expect(status).toEqual({ enabled: true, state: "idle", mouths: 0 });
   });
 
   it("reads the refused shape with its reason", () => {
     const status = parseOrbStatus({
       enabled: false,
-      reason: "The orb has no realtime voice provider on this machine yet. Typing still works.",
+      reason: "The orb needs a Google account. Typing still works.",
     });
     expect(status.enabled).toBe(false);
     if (!status.enabled) {
