@@ -63,6 +63,15 @@ export type ClientConfig = {
    */
   applicationsDir: string;
   /**
+   * The skill commons this hub reads merged routes from, when there is one.
+   *
+   * Absent in a release, which is the ordinary case: the folder lives in the
+   * repository so its history is the provenance, and it is not packaged, so an
+   * installed hub carries none of it until curated skills are shipped
+   * deliberately. See ./skill-commons.ts.
+   */
+  commonsPath?: string;
+  /**
    * Which mouth the person picked, when they picked one. Absent means "the one
    * that is connected" — the behaviour a machine with a single voice account
    * already had, and the reason connecting an account is all it takes to get a
@@ -125,6 +134,13 @@ export function resolveClientConfig(env: NodeJS.ProcessEnv = process.env): Clien
     applicationsDir: env.COMCON_APPLICATIONS_DIR
       ? path.resolve(env.COMCON_APPLICATIONS_DIR)
       : path.join(os.homedir(), ".local", "share", "applications"),
+    // Beside the package rather than under the hub's state root: the commons is
+    // a folder in the checkout, and `root` is wherever this hub was told to keep
+    // its own files — which in a test is a temporary directory with nothing in
+    // it. Overridable so a test can mount a commons it built.
+    commonsPath: env.COMCON_SKILL_COMMONS
+      ? path.resolve(env.COMCON_SKILL_COMMONS)
+      : path.resolve(packageRoot, "..", "skills"),
     ...(voiceProvider ? { voiceProvider } : {}),
   };
 }
