@@ -138,7 +138,11 @@ export function geminiLiveProvider(
       const setup = {
         setup: {
           model: `models/${config.model}`,
-          generationConfig: { responseModalities: ["AUDIO"] },
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            // Named, so the voice cannot drift when the provider's default does.
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: config.voice } } },
+          },
           systemInstruction: { parts: [{ text: ORB_SYSTEM_INSTRUCTION }] },
           tools: [
             {

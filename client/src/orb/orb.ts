@@ -56,6 +56,13 @@ const PROGRESS_PREFIX =
 const PROGRESS_SUFFIX = '"';
 
 /**
+ * How long a signal holds the lane after it is sent, before the next one may
+ * speak. The provider takes a beat to start answering, and a mouth that is
+ * merely *about* to be busy still must not be interrupted.
+ */
+const SIGNAL_SETTLE_MS = 1_200;
+
+/**
  * What the faces watching this orb are told.
  *
  * `mood` is the one word here that is not a fact about the machine — it is a
@@ -86,6 +93,8 @@ export type OrbDeps = {
   speaker: Speaker;
   brain: HubBrain;
   onEvent?(event: OrbEvent): void;
+  /** Injectable timer, so a test can hold the signal lane open deliberately. */
+  wait?(ms: number): Promise<void>;
 };
 
 function clipUtterance(clip: Clip, speaker: Speaker): Utterance {
@@ -107,6 +116,9 @@ export class Orb {
   #state: OrbState = "idle";
   /** Text turns queued while the socket was down, flushed on reconnect. */
   #pendingAnnouncements: string[] = [];
+  /** The tail of the signal lane. One signal speaks at a time, in order. */
+  #announcing: Promise<void> = Promise.resolve();
+  readonly #wait: (ms: number) => Promise<void>;
   #closed = false;
 
   constructor(deps: OrbDeps) {
@@ -116,6 +128,7 @@ export class Orb {
     this.#speaker = deps.speaker;
     this.#brain = deps.brain;
     this.#onEvent = deps.onEvent ?? (() => {});
+    this.#wait = deps.wait ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
     this.#gate = new WakeGate({
       ...deps.gate,
@@ -196,6 +209,37 @@ export class Orb {
       this.#pendingAnnouncements.push(text);
       return;
     }
+    // Signals are serialised against each other as well as against the mouth:
+    // two progress updates landing a moment apart would otherwise both find a
+    // silent mouth and the second would cut the first's answer off.
+    const turn = this.#announcing.then(
+      () => this.#speakSignal(text),
+      () => this.#speakSignal(text),
+    );
+    this.#announcing = turn.then(
+      () => {},
+      () => {},
+    );
+    return turn;
+  }
+
+  /**
+   * Push one signal into the session, waiting for a quiet moment first.
+   *
+   * Text arriving at the provider mid-response is the same channel a human
+   * barge uses: the server marks what it was saying `interrupted` and the
+   * mouth drops it. A notification is not an interruption — the human is the
+   * only thing allowed to cut a sentence in half — so the signal waits until
+   * the orb has stopped talking, and then holds the lane long enough for the
+   * reply it provokes to arrive and be spoken.
+   */
+  async #speakSignal(text: string): Promise<void> {
+    await this.#mouth.whenIdle();
+    // The gap may have opened while this signal was waiting its turn.
+    if (!this.#session.connected) {
+      this.#pendingAnnouncements.push(text);
+      return;
+    }
     const wasMuted = this.#session.muted;
     if (wasMuted) this.#session.unmute();
     try {
@@ -205,6 +249,10 @@ export class Orb {
     } finally {
       if (wasMuted) this.#session.mute();
     }
+    // The provider does not answer instantly. Give the reply time to reach the
+    // mouth before the next signal is allowed to speak, then wait it out.
+    await this.#wait(SIGNAL_SETTLE_MS);
+    await this.#mouth.whenIdle();
   }
 
   /** Provider callbacks, wired by whoever builds the session. */

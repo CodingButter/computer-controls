@@ -104,6 +104,8 @@ export type RealtimeConfig = {
   tools: readonly [typeof HUB_FUNCTION_DECLARATION];
   /** Speak without waiting to be spoken to, where the provider supports it. */
   proactiveAudio: boolean;
+  /** Which prebuilt voice the provider speaks with. Named, never inherited. */
+  voice: string;
   events: RealtimeEvents;
 };
 
@@ -113,6 +115,17 @@ export interface RealtimeProvider {
 
 /** The Live model the orb runs. Pinned here for the same reason the speaker is. */
 export const LIVE_MODEL = "gemini-3.1-flash-live-preview";
+
+/**
+ * The voice the orb speaks with.
+ *
+ * Pinned because an unnamed voice is the provider's default, and a default is
+ * free to move underneath a running product — which is exactly what it did:
+ * the orb changed voice mid-project without a line of code changing. A voice
+ * is part of what this thing *is* to the person talking to it, so it is named
+ * here and overridable per session, never inherited.
+ */
+export const LIVE_VOICE = "Aoede";
 
 /**
  * The tool set handed to any realtime session this product opens.
@@ -134,12 +147,14 @@ export function realtimeConfig(input: {
   events: RealtimeEvents;
   model?: string;
   proactiveAudio?: boolean;
+  voice?: string;
 }): RealtimeConfig {
   return {
     apiKey: input.apiKey,
     model: input.model ?? LIVE_MODEL,
     tools: REALTIME_TOOLS,
     proactiveAudio: input.proactiveAudio ?? true,
+    voice: input.voice ?? LIVE_VOICE,
     events: input.events,
   };
 }
