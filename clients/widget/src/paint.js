@@ -65,13 +65,49 @@ export function wasDrag(origin, x, y) {
 }
 
 /**
+ * The scouts that belong on this screen, in this page's coordinates.
+ *
+ * Two jobs, and the second one is the point. The first is arithmetic: the hub
+ * reports rectangles in screen pixels and the page draws in pixels from its own
+ * top-left, so the stage origin comes off each one.
+ *
+ * The second is knowing when to say nothing. A desk with two monitors has
+ * exactly one of them under this window, and an element on the other screen has
+ * coordinates that are perfectly valid and completely elsewhere. Drawn anyway,
+ * it would land at some arbitrary place on the wrong display — an orb hovering
+ * over an innocent part of the screen, claiming the agent is working there. A
+ * box that is not on this stage is not drawn at a wrong position; it is not
+ * drawn. The face on the other monitor, if there is one, draws it correctly,
+ * and if there is no face there then the truth is that nobody saw it.
+ *
+ * @param {{ id: string, x: number, y: number, width: number, height: number }[]} scouts
+ * @param {{ x: number, y: number, width: number, height: number }} stage
+ * @returns {{ id: string, left: number, top: number, width: number, height: number }[]}
+ */
+export function scoutRects(scouts, stage) {
+  const rects = [];
+  for (const scout of scouts) {
+    const left = scout.x - stage.x;
+    const top = scout.y - stage.y;
+    // Overlap, not containment: a dialog straddling the edge of this display
+    // is genuinely half here, and the window clips the rest.
+    if (left + scout.width <= 0 || top + scout.height <= 0) continue;
+    if (left >= stage.width || top >= stage.height) continue;
+    rects.push({ id: scout.id, left, top, width: scout.width, height: scout.height });
+  }
+  return rects;
+}
+
+/**
  * Whether the pointer is over something the widget actually drew.
  *
- * The window is a rectangle; the face inside it is a circle with a caption
- * under it. Everything else in that rectangle is transparent, and a transparent
- * pixel that swallows a click is a window that has quietly stolen part of the
- * user's desk. The shell asks this question to decide whether the pointer
- * belongs to the widget or to whatever is behind it.
+ * The window is the whole display now; the face inside it is a circle with a
+ * caption under it. Everything else in that window is transparent, and a
+ * transparent pixel that swallows a click is a window that has quietly stolen
+ * part of the user's desk. The shell asks this question to decide whether the
+ * pointer belongs to the widget or to whatever is behind it. Scouts are never
+ * part of the answer: they are drawn over the user's own windows, which is
+ * exactly where a click must still land.
  *
  * @param {{ x: number, y: number }} point relative to the window's top-left
  * @param {{ cx: number, cy: number, radius: number }} orb

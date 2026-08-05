@@ -5,7 +5,7 @@ import { Mastra } from "@mastra/core/mastra";
 import { buildApp } from "./app.ts";
 import { createProviderAuth } from "./auth/index.ts";
 import { resolveClientConfig } from "./config.ts";
-import { attachEventSocket } from "./events/index.ts";
+import { attachEventSocket, combineEventSources, createTouchLane } from "./events/index.ts";
 import { prepareHub } from "./hub.ts";
 import { commandSpeaker, startMicrophone } from "./orb/audio-host.ts";
 import { createCaptureLifecycle } from "./orb/capture-lifecycle.ts";
@@ -22,7 +22,17 @@ import {
 import { buildVoiceApp } from "./voice/routes.ts";
 
 const config = resolveClientConfig();
-const hub = await prepareHub(config);
+
+/**
+ * Where the agent's hands are, watched from the moment the hub can think.
+ *
+ * Built before the hub because it is wired into the turn itself rather than
+ * into a request: every turn, typed or spoken, reports the desktop work it does
+ * through here, and a face draws a scout over each element while the operation
+ * on it is in flight.
+ */
+const touchLane = createTouchLane();
+const hub = await prepareHub(config, { observe: touchLane.observe });
 
 /**
  * The literal stays here, in the entry module, on purpose: the deployer's
@@ -135,6 +145,10 @@ export const server = serve(
  * events into the face vocabulary and routes mute and dismiss to its gate. When
  * the orb is refused — no provider, no ear, no credential — the scripted source
  * stays, and a face sees idle, which is the truth.
+ *
+ * The touch lane joins it on the same socket. A face opens one connection and
+ * hears one vocabulary; whether a given word came from the conversation or from
+ * the agent's hands is the hub's business, not the face's.
  */
-export const eventSource = chooseFaceSource(orb);
+export const eventSource = combineEventSources(chooseFaceSource(orb), touchLane);
 export const eventSocket = attachEventSocket(server, eventSource);

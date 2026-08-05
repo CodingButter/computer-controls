@@ -26,12 +26,14 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), "comcon-chat-"));
 
 let app: ReturnType<typeof buildApp>;
 let hubController: HubController;
+let hubSession: () => Promise<HubSession>;
 let received: { controller: HubController; session: HubSession; prompt?: string; thread?: unknown }[];
 
 beforeAll(async () => {
   const config = resolveClientConfig({ ...process.env, COMCON_CLIENT_ROOT: root });
   const hub = await prepareHub(config);
   hubController = hub.base.controller;
+  hubSession = hub.getSession;
   new Mastra(hub.mastraArgs);
   await hub.finalize();
 
@@ -96,6 +98,47 @@ test("a second turn continues the thread the first one opened", async () => {
   expect(received.at(-1)!.thread).toEqual({ id: "thread-1" });
   // Same session across turns: the browser is one caller with one history.
   expect(received.at(-1)!.session).toBe(received[0]!.session);
+});
+
+test("test_the_hub_sees_the_agent_work_on_a_turn_that_asked_for_nothing", async () => {
+  const events = [
+    { type: "tool_start", toolCallId: "call-1", toolName: "desktop_invoke_element", args: {} },
+    { type: "tool_end", toolCallId: "call-1", result: {}, isError: false },
+  ];
+
+  const observed: unknown[] = [];
+  const asked: unknown[] = [];
+  const turn = createAgentTurn({
+    controller: hubController,
+    getSession: hubSession,
+    model: "whichever",
+    observe: (event) => observed.push(event),
+    run: (() => {
+      const run = {
+        result: Promise.resolve({ status: "completed", text: "done", threadId: "t" }),
+        async *[Symbol.asyncIterator]() {
+          for (const event of events) yield event;
+        },
+      };
+      return run;
+    }) as never,
+  });
+
+  // No `onEvent`: this is the typed chat page, which never asks for progress.
+  // The hub is told anyway, because where the agent's hands are is the hub's
+  // fact and not the caller's.
+  await turn({ message: "click it" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(observed).toEqual(events);
+
+  // And when a caller does ask, the stream is drained once and fanned out —
+  // two loops over one async iterable would race for each event and each side
+  // would see half a turn.
+  observed.length = 0;
+  await turn({ message: "click it again", onEvent: (event) => asked.push(event) });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(observed).toEqual(events);
+  expect(asked).toEqual(events);
 });
 
 test("an empty message is refused before it reaches the agent", async () => {

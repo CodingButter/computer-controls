@@ -20,7 +20,28 @@ export type StateEvent =
   | { type: "caption"; text: string }
   | { type: "thinking" }
   | { type: "speaking" }
-  | { type: "idle" };
+  | { type: "idle" }
+  | { type: "touching"; id: string; x: number; y: number; width: number; height: number }
+  | { type: "released"; id: string };
+
+/*
+ * `touching` and `released` are the hub pointing at its own hands.
+ *
+ * One pair per in-flight operation: `touching` when the agent starts working on
+ * an element whose screen rectangle the daemon has actually reported, and
+ * `released` when that operation ends. The `id` is the operation's id, not the
+ * element's — a face has no use for an accessibility-tree reference and no way
+ * to spend one, and two operations on the same element are two separate hands.
+ *
+ * The rectangle is all that travels. No role, no name, no value: a caption is
+ * content the hub already decided to publish, and the label on a button in
+ * somebody's password manager is not. Geometry answers "where is the agent
+ * working", which is the only question this word exists to answer.
+ *
+ * An operation whose element has no reported geometry produces no word at all.
+ * Guessing a position would make the face a progress bar that lies, and silence
+ * is the honest degradation.
+ */
 
 /** What a person does to a face. Intent, never content. */
 export type Gesture =
@@ -44,6 +65,8 @@ export const STATE_EVENT_TYPES = [
   "thinking",
   "speaking",
   "idle",
+  "touching",
+  "released",
 ] as const satisfies readonly StateEventType[];
 
 export const GESTURE_TYPES = ["mute", "dismiss", "drag"] as const satisfies readonly GestureType[];
@@ -62,6 +85,8 @@ const STATE_EVENT_KEYS: Record<StateEventType, readonly string[]> = {
   thinking: ["type"],
   speaking: ["type"],
   idle: ["type"],
+  touching: ["type", "id", "x", "y", "width", "height"],
+  released: ["type", "id"],
 };
 
 const GESTURE_KEYS: Record<GestureType, readonly string[]> = {
@@ -98,6 +123,15 @@ export function isStateEvent(value: unknown): value is StateEvent {
   if (!(STATE_EVENT_TYPES as readonly string[]).includes(type)) return false;
   if (!hasExactKeys(value, STATE_EVENT_KEYS[type as StateEventType])) return false;
   if (type === "caption") return typeof value.text === "string";
+  if (type === "released") return typeof value.id === "string" && value.id !== "";
+  if (type === "touching") {
+    if (typeof value.id !== "string" || value.id === "") return false;
+    if (!isFiniteNumber(value.x) || !isFiniteNumber(value.y)) return false;
+    // A rectangle with no extent is not somewhere a scout can point. An
+    // element reported at zero size is off-screen or not laid out, and drawing
+    // over it would be inventing a place rather than repeating one.
+    return isFiniteNumber(value.width) && value.width > 0 && isFiniteNumber(value.height) && value.height > 0;
+  }
   return true;
 }
 

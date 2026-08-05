@@ -6,7 +6,7 @@ import WebSocket from "ws";
 import { ScriptedEventSource } from "../../../client/src/events/source.ts";
 import { attachEventSocket } from "../../../client/src/events/socket.ts";
 import { INITIAL_STATE, applyGesture, reduce } from "./state-machine.js";
-import { paintCaption } from "./paint.js";
+import { paintCaption, scoutRects } from "./paint.js";
 
 /**
  * A turn, from the hub's mouth to the widget's face.
@@ -123,6 +123,42 @@ test("a turn: the face arrives when spoken to, says what was said, and fades", a
   // lines appeared, in order, not how many events redrew them.
   const distinct = face.captions.filter((line, i) => line !== face.captions[i - 1]);
   expect(distinct.filter(Boolean)).toEqual([said, "I'll remind you at four."]);
+
+  face.ws.close();
+});
+
+test("a scout is drawn over the element the agent is actually touching", async () => {
+  const face = widget();
+  await face.opened;
+
+  // The face is on the right-hand monitor of a two-screen desk, which is the
+  // arrangement where a screen coordinate and a page coordinate are different
+  // numbers and a mistake is visible.
+  const stage = { x: 1920, y: 0, width: 2560, height: 1440 };
+
+  source.emit({ type: "wake_opened" });
+  await settle();
+  // Nothing is being touched yet: one orb, no scouts. This is the acceptance
+  // criterion's idle case, over the real socket.
+  expect(scoutRects(face.state.scouts, stage)).toEqual([]);
+
+  // The agent reaches for a button. The hub reports the rectangle the desktop
+  // gave it, in screen coordinates, and the face puts a scout on it.
+  source.emit({ type: "touching", id: "call-1", x: 2400, y: 512, width: 96, height: 28 });
+  // And a second operation on the far monitor, which this face cannot see.
+  source.emit({ type: "touching", id: "call-2", x: 200, y: 512, width: 96, height: 28 });
+  await settle();
+
+  expect(scoutRects(face.state.scouts, stage)).toEqual([
+    { id: "call-1", left: 480, top: 512, width: 96, height: 28 },
+  ]);
+
+  // The work finishes and the scout goes with it. A rectangle left glowing
+  // over a button nobody is pressing is the lie this feature is built against.
+  source.emit({ type: "released", id: "call-1" });
+  source.emit({ type: "released", id: "call-2" });
+  await settle();
+  expect(face.state.scouts).toEqual([]);
 
   face.ws.close();
 });

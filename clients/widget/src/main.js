@@ -19,20 +19,33 @@ import { fileURLToPath } from "node:url";
  * of what a thing that draws needs.
  */
 
-import { HEIGHT, WIDTH, placeWindow } from "./window-shape.js";
+import { stageFor } from "./window-shape.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * The flag the stage travels on, spelled the same way in the preload.
+ *
+ * Two files hold this string because they are two dialects — this one is a
+ * module and the preload is CommonJS by construction — and a test asserts they
+ * agree, so the duplication cannot become a disagreement that shows up as a
+ * page that quietly does not know where it is.
+ */
+const STAGE_ARGUMENT = "--comcon-stage=";
+
 function createWindow() {
-  const area = screen.getPrimaryDisplay().workAreaSize;
   const placement = process.env.COMCON_WIDGET_PLACEMENT ?? "corner";
-  const { x, y } = placeWindow(area, placement);
+  const stage = stageFor(screen.getPrimaryDisplay(), placement);
 
   const window = new BrowserWindow({
-    width: WIDTH,
-    height: HEIGHT,
-    x,
-    y,
+    // The window is the whole display. It is transparent and click-through, so
+    // what the user sees is still an orb in a corner — but the renderer can now
+    // draw at any screen position, which is the only way a face can point at
+    // something the agent is touching on the other side of the desk.
+    width: stage.width,
+    height: stage.height,
+    x: stage.x,
+    y: stage.y,
     // Frameless and transparent: the widget is an orb on the desk, not an
     // application window with a title bar and a close button.
     frame: false,
@@ -44,7 +57,9 @@ function createWindow() {
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
-    movable: true,
+    // Dragging the orb moves the orb, not the window: the window is the desk
+    // the orb is drawn on and it stays where the desk is.
+    movable: false,
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -62,6 +77,13 @@ function createWindow() {
       webviewTag: false,
       // No second window may be conjured to run with different rules.
       nativeWindowOpen: false,
+      // Where this window is on the desk, handed to the page at load.
+      //
+      // The renderer has to convert screen coordinates into its own, and a
+      // sandboxed page cannot ask which display it is on. An argument is the
+      // narrowest way to tell it: it is read once, at startup, and there is no
+      // channel here for the page to ask a second question through.
+      additionalArguments: [`${STAGE_ARGUMENT}${JSON.stringify(stage)}`],
     },
   });
 

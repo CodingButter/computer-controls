@@ -5,7 +5,7 @@ import { describe, expect, test } from "vitest";
 // The shell's manners, importable without starting Electron. `main.js` itself
 // is read as text below rather than imported, because importing it would mean
 // this suite could only run on a machine with a display.
-import { GRANTED_PERMISSIONS, placeWindow } from "./window-shape.js";
+import { GRANTED_PERMISSIONS, HEIGHT, placeOrb, stageFor } from "./window-shape.js";
 import { hubEventsUrl, nextRetryDelay } from "./connection.js";
 
 /**
@@ -203,19 +203,65 @@ describe("the shell", () => {
 
     // A face that appeared in the middle of the screen every time somebody
     // spoke would land on top of whatever they were reading.
-    const corner = placeWindow(area, "corner");
+    const corner = placeOrb(area, "corner");
     expect(corner.x).toBeGreaterThan(area.width / 2);
     expect(corner.y).toBeGreaterThan(area.height / 2);
 
-    const centre = placeWindow(area, "center");
+    const centre = placeOrb(area, "center");
     expect(centre.x).toBeLessThan(corner.x);
     expect(centre.y).toBeLessThan(corner.y);
 
-    // Both placements keep the whole window on the screen.
+    // Both placements keep the whole orb on the screen.
     for (const placement of [corner, centre]) {
       expect(placement.x).toBeGreaterThanOrEqual(0);
       expect(placement.y).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  test("covers one whole display and says where that display is", () => {
+    // A second monitor to the left, so the origin is not zero and a stage that
+    // quietly assumed it was would be caught here rather than by a scout drawn
+    // 1920 pixels from the thing it was pointing at.
+    // A panel at the top and a dock on the left, so the work area differs from
+    // the display on every axis: a stage that measured the wrong one would put
+    // the window somewhere the desktop is not, and every scout on it with it.
+    const display = {
+      bounds: { x: 1920, y: 0, width: 2560, height: 1440 },
+      workArea: { x: 1968, y: 32, width: 2512, height: 1408 },
+    };
+
+    const stage = stageFor(display, "corner");
+
+    // The window is the display. Anything smaller is a face that cannot point
+    // at the far side of the screen, which is the whole capability here.
+    expect({ x: stage.x, y: stage.y, width: stage.width, height: stage.height }).toEqual(
+      display.bounds,
+    );
+
+    // The orb still sits in the work area's corner, in screen coordinates —
+    // clear of a panel at the top and not at the window's own origin.
+    expect(stage.orb.x).toBeGreaterThan(display.bounds.x + display.bounds.width / 2);
+    expect(stage.orb.y).toBeGreaterThan(display.bounds.y + display.bounds.height / 2);
+    expect(stage.orb.y).toBeLessThanOrEqual(
+      display.workArea.y + display.workArea.height - HEIGHT,
+    );
+  });
+
+  test("the stage crosses to the page on one flag, spelled the same way twice", () => {
+    // The shell is a module and the preload is CommonJS by construction, so the
+    // flag's name is written in both files. A test compares them, because a
+    // rename in one place would otherwise ship a page that silently does not
+    // know where it is — and a page that does not know where it is draws no
+    // scouts at all.
+    const flag = "--comcon-stage=";
+    expect(read("main.js")).toContain(flag);
+    expect(read("preload.js")).toContain(flag);
+    expect(read("main.js")).toContain("additionalArguments");
+
+    // The stage is a measurement handed down, not a channel. The page reads it
+    // off its own arguments; there is no request it could make for more.
+    expect(read("preload.js")).toContain("process.argv");
+    expect(read("preload.js")).toContain("stage:");
   });
 });
 

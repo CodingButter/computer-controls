@@ -45,6 +45,16 @@ export type AgentTurnDeps = {
    * is this module's code, and only the model call belongs to the SDK.
    */
   run?: typeof runMC;
+  /**
+   * Told about every controller event of every turn, whether the caller asked
+   * for progress or not.
+   *
+   * `onEvent` above belongs to whoever started the turn; this belongs to the
+   * hub. What the agent is touching is a property of the hub rather than of the
+   * request that happened to start it — a face watching the desktop has to see
+   * the work whether it was typed into the chat page or spoken at the orb.
+   */
+  observe?: (event: AgentControllerEvent) => void;
 };
 
 export function createAgentTurn(deps: AgentTurnDeps): AgentTurn {
@@ -63,11 +73,17 @@ export function createAgentTurn(deps: AgentTurnDeps): AgentTurn {
     // Drain the event stream in the background so progress reaches the caller
     // while the run is still in flight. `result` resolves independently; both
     // paths read from the same run without interfering.
-    if (request.onEvent) {
-      const onEvent = request.onEvent;
+    //
+    // One drain, however many readers: the run is an async iterable, and
+    // iterating it twice would hand each event to whichever loop got there
+    // first. The hub's observer and the caller's are fanned out from here.
+    const onEvent = request.onEvent;
+    const observe = deps.observe;
+    if (onEvent || observe) {
       void (async () => {
         for await (const event of mcRun) {
-          onEvent(event);
+          observe?.(event);
+          onEvent?.(event);
         }
       })();
     }

@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import { prepareAgentControllerMount, wireSessionConcerns } from "@mastra/code-sdk";
+import type { AgentControllerEvent } from "@mastra/core/agent-controller";
 
 import type { ClientStatus } from "./app.ts";
 import { createAgentTurn } from "./chat.ts";
@@ -28,7 +29,19 @@ const BROWSER_RESOURCE_ID = "local-browser";
  * literal in the entry module is not cosmetic — the deployer's Babel plugin
  * only recognises a Mastra config when it finds that expression there.
  */
-export async function prepareHub(config: ClientConfig) {
+export type HubOptions = {
+  /**
+   * Told about every controller event of every turn.
+   *
+   * The touch lane is what this exists for: a face draws where the agent's
+   * hands are, and the hands belong to the hub rather than to whichever surface
+   * started the turn. Optional, and a hub without one behaves exactly as it did
+   * before — which is what every test that does not care about faces boots.
+   */
+  observe?: (event: AgentControllerEvent) => void;
+};
+
+export async function prepareHub(config: ClientConfig, options: HubOptions = {}) {
   // Before anything is constructed, because a pack that cannot be resolved is a
   // hub that would otherwise boot and think with somebody else's pick.
   const modelPack = resolveModelPack();
@@ -106,6 +119,7 @@ export async function prepareHub(config: ClientConfig) {
     getSession,
     mode: THINKING_MODE,
     model: thinkingModel,
+    ...(options.observe ? { observe: options.observe } : {}),
   });
 
   /**
