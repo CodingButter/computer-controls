@@ -79,6 +79,28 @@ def severity_of(classes) -> dict:
     return {"rank": rank, "irreversible": irreversible}
 
 
+def implied_classes(classes) -> frozenset[str]:
+    """These classes and everything the highest of them already contains.
+
+    OPERATION_CLASSES is a severity ladder rather than a bag of independent
+    flags — the same ladder `severity_of` reads a rank off. Permission to
+    activate a control that did not carry permission to read it would describe
+    a client clicking blind, which is not a thing anybody means to grant; a
+    user who ticks "interact" has already said "view" and should not have to
+    say it twice.
+
+    Applied where the answer is read, never where it is written. The file keeps
+    the word the user chose, so a configuration that says `activate` still says
+    `activate` after a round trip through a permissions page, and the day the
+    ladder gains a rung the old files mean the new thing without being
+    rewritten.
+    """
+    held = [c for c in OPERATION_CLASSES if c in classes]
+    if not held:
+        return frozenset()
+    return frozenset(OPERATION_CLASSES[: OPERATION_CLASSES.index(held[-1]) + 1])
+
+
 def breadth_of(grant: "Grant", ceiling: "Ceiling") -> dict:
     """How wide a net this grant casts.
 
@@ -138,6 +160,20 @@ class Ceiling:
     #: is the whole answer: empty permits nothing.
     applications: frozenset[str] = frozenset()
     blocked_applications: frozenset[str] = frozenset()
+    #: What is permitted *inside a particular application*, where the answer is
+    #: not the same everywhere. The allow-list above decides whether an
+    #: application is reachable at all; this decides how far a client may go
+    #: once it is in one — view-only here, interact there — which is a
+    #: distinction a single list of names cannot make.
+    #:
+    #: An entry replaces `classes` for calls against that application, the same
+    #: narrow-answer-wins rule a grant's `per_application` follows, capped by
+    #: `classes` because a per-application line is a narrowing device and never
+    #: a side door. Unlike a grant, naming one application says nothing about
+    #: the others: an application with no entry is governed by `classes`, so a
+    #: file that pins one application to view-only leaves the rest exactly as
+    #: they were.
+    application_classes: dict[str, frozenset[str]] = field(default_factory=dict)
     #: Which reading the empty list gets. See PERMISSIONS_MODES.
     permissions_mode: str = OPEN_MODE
     idle_expiry_seconds: float = DEFAULT_IDLE_EXPIRY_SECONDS
@@ -201,12 +237,78 @@ class Ceiling:
             classes=allowed,
             applications=frozenset(_normalise(config.get("applications", ()))),
             blocked_applications=frozenset(_normalise(config.get("blockedApplications", ()))),
+            application_classes=cls._application_classes(config.get("applicationClasses"), allowed),
             permissions_mode=mode,
             idle_expiry_seconds=float(config.get("idleExpirySeconds", DEFAULT_IDLE_EXPIRY_SECONDS)),
             confirm_classes=frozenset(_normalise(config.get("confirmClasses", CONFIRM_BY_DEFAULT))),
             config_path=path,
             config_exists=bool(config) if exists is None else exists,
         )
+
+    @staticmethod
+    def _application_classes(config, allowed: frozenset[str]) -> dict[str, frozenset[str]]:
+        """Read the per-application map, refusing anything it cannot mean.
+
+        Loud, like an unknown operation class anywhere else in this file. A
+        misspelled class name silently dropped would leave a line the user
+        believes is a restriction and the service reads as nothing, and a class
+        named here that the ceiling does not permit at all is a file
+        contradicting itself — the honest answer to both is the error that
+        names the application and the word, not a quiet repair.
+        """
+        if not config:
+            return {}
+        if not isinstance(config, dict):
+            raise ValueError(
+                "applicationClasses in configuration must be a map of application "
+                f"name to operation classes, not {type(config).__name__}"
+            )
+        parsed: dict[str, frozenset[str]] = {}
+        for name, app_classes in config.items():
+            key = str(name).strip().casefold()
+            if not key:
+                continue
+            named = frozenset(_normalise(app_classes))
+            unknown = named - set(OPERATION_CLASSES)
+            if unknown:
+                raise ValueError(
+                    f"unknown operation class for {key!r} in applicationClasses: {sorted(unknown)}"
+                )
+            above = named - allowed
+            if above:
+                raise ValueError(
+                    f"applicationClasses gives {key!r} more than operationClasses allows "
+                    f"anywhere: {sorted(above)}"
+                )
+            parsed[key] = named
+        return parsed
+
+    def classes_for(self, application: str) -> frozenset[str] | None:
+        """What this configuration permits inside `application`, ladder included.
+
+        `None` means the file said nothing about this application and the
+        ceiling's general answer stands. That is the opposite of what `None`
+        means from a grant's `hand_in`, and deliberately so: a grant that names
+        applications individually has described its whole extent, while this
+        map sits behind an allow-list that already decides who is in and who is
+        out. Reading an absent entry as a refusal would quietly turn every file
+        that pins one application to view-only into a file that shut down every
+        other application on the desktop.
+
+        A named entry answers with the ladder filled in — `activate` admits the
+        `observe` and `edit` reads an interaction is made of — and then capped
+        by `classes`, so the implication can never hand out a class the ceiling
+        withholds everywhere. An entry naming nothing at all permits nothing:
+        an empty list is a thing the user typed, and the only honest reading of
+        it is that they meant it.
+        """
+        if not application or not self.application_classes:
+            return None
+        name = application.strip().casefold()
+        for pattern, named in self.application_classes.items():
+            if pattern in name:
+                return implied_classes(named) & self.classes
+        return None
 
     def permits_application(self, application: str) -> bool:
         name = application.strip().casefold()
@@ -614,6 +716,29 @@ class Consent:
                 granted=tuple(sorted(self._ceiling.classes)),
                 remedy=self._ceiling.how_to_raise,
             )
+        # A per-application entry asks about one application by name, so the
+        # file's answer about that application is available here and the
+        # refusal belongs here too: a grant issued saying `activate` in an
+        # application the configuration holds at view-only is a grant that
+        # refuses everything it appears to cover, which is a grant somebody
+        # debugs for an hour. The general classes are not held to this — they
+        # apply everywhere, and the file narrowing one application is the
+        # narrowing working, not a contradiction. Anchors are caught in
+        # `decide`, where the target's own application is known.
+        for app, app_classes in scoped.items():
+            permitted_there = self._ceiling.classes_for(app)
+            if permitted_there is None:
+                continue
+            above_there = frozenset(app_classes) - permitted_there
+            if above_there:
+                raise ScopeError(
+                    "That is more than this desktop's configuration allows in "
+                    f"{app}: {', '.join(sorted(above_there))} is above the ceiling there.",
+                    method="grantScope",
+                    required=", ".join(sorted(above_there)),
+                    granted=tuple(sorted(permitted_there)),
+                    remedy=self._ceiling.how_to_raise,
+                )
         apps = frozenset(_normalise(applications)) | frozenset(scoped)
         # An anchor that names an application faces the same door as any other
         # way of naming one. An anchor onto an id cannot be checked here — the
@@ -830,6 +955,18 @@ class Consent:
                 ),
             )
 
+        # The configuration's answer for this application, checked separately
+        # from the grant's so that the refusal can say which of the two
+        # refused. A client told it "holds observe" when the file is what
+        # pinned the application to view-only would go and ask for a wider
+        # grant, be given one, and be refused again in exactly the same place.
+        permitted_here = self._ceiling.classes_for(application)
+        if permitted_here is not None and operation_class not in permitted_here:
+            return deny(
+                f"{method} is a {operation_class!r} operation and this desktop's "
+                f"configuration permits {', '.join(sorted(permitted_here)) or 'nothing'} "
+                f"in {application!r}."
+            )
         if operation_class not in held:
             where = f" in {application!r}" if application and grant and grant.per_application else ""
             return deny(
