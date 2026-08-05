@@ -49,9 +49,17 @@ export function defaultConfigPath(env: NodeJS.ProcessEnv = process.env): string 
 }
 
 /**
- * The complete operation vocabulary, frozen in the protocol and mirrored into
- * `security.OPERATION_CLASSES`. Both `operationClasses` and `confirmClasses`
- * are checked against it.
+ * The complete operation vocabulary, frozen in `protocol/schema.json` and
+ * mirrored into `security.OPERATION_CLASSES`. Both `operationClasses` and
+ * `confirmClasses` are checked against it.
+ *
+ * A hand copy, because the generated bindings live in the plugin package and
+ * this one does not reach across that boundary. Hand copies drift, so
+ * `config-file.test.ts` reads the schema and asserts this list against it — the
+ * same guard `plugin/src/protocol.test.ts` puts on the generated copy. Drift
+ * here fails closed (a newly frozen class would be refused rather than let
+ * through), and the test turns "fails closed, quietly, for a release" into a
+ * red build.
  */
 export const OPERATION_CLASSES = ["observe", "edit", "activate", "submit", "destructive"] as const;
 
@@ -195,11 +203,16 @@ export function mergeSettings(existing: ConfigObject, edits: ConfigObject): Merg
     const parent = key.slice(0, dot);
     const leaf = key.slice(dot + 1);
     const branch = next[parent];
-    const carried =
-      branch !== null && typeof branch === "object" && !Array.isArray(branch)
-        ? (branch as ConfigObject)
-        : {};
-    next[parent] = { ...carried, [leaf]: checked.value };
+    if (branch !== undefined && (branch === null || typeof branch !== "object" || Array.isArray(branch))) {
+      // Replacing it with a fresh object would be the silent overwrite wearing
+      // a different hat: the daemon cannot read this file either, so the person
+      // is mid-repair on it, and the repair is theirs to finish.
+      return {
+        ok: false,
+        reason: `${parent} in this configuration is not an object, so ${key} cannot be set without discarding it. Nothing was written.`,
+      };
+    }
+    next[parent] = { ...((branch as ConfigObject | undefined) ?? {}), [leaf]: checked.value };
   }
   return { ok: true, config: next };
 }

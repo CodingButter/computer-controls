@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { open, mkdtemp, readFile, rm, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -104,6 +105,16 @@ describe("owning only what it edits", () => {
     expect(SETTINGS_KEYS).not.toContain("scopes.blockedApplications");
   });
 
+  it("refuses to set a nested key when the branch holding it is not an object", () => {
+    // Someone is mid-repair on a file the daemon cannot read either. Quietly
+    // replacing the broken branch with a fresh object would finish the repair
+    // by deleting the evidence.
+    const merged = mergeSettings({ scopes: "observe" }, { "scopes.idleExpirySeconds": 60 });
+    expect(merged.ok).toBe(false);
+    if (merged.ok) return;
+    expect(merged.reason).toMatch(/is not an object/);
+  });
+
   it("creates the branch when writing a nested setting into an empty config", () => {
     const merged = mergeSettings({}, { "scopes.operationClasses": ["observe", "edit"] });
     expect(merged.ok).toBe(true);
@@ -134,14 +145,30 @@ describe("never writing a file the daemon would refuse", () => {
     expect(merged.reason).toMatch(/unknown operation class/);
   });
 
-  it("holds the same vocabulary the protocol froze", () => {
-    expect([...OPERATION_CLASSES]).toEqual([
-      "observe",
-      "edit",
-      "activate",
-      "submit",
-      "destructive",
-    ]);
+  it("holds the same vocabulary the protocol froze, read from the schema itself", () => {
+    // The copy in config-file.ts is written by hand: the generated bindings
+    // live in the plugin package, which this one does not reach into. So the
+    // schema is the assertion rather than a second hand-written list, and a
+    // class added at the next freeze turns this red instead of being silently
+    // refused by a settings page nobody thought to update.
+    const schema = JSON.parse(
+      readFileSync(path.join(import.meta.dirname, "..", "..", "..", "protocol", "schema.json"), "utf8"),
+    );
+    const frozen = schema.$defs.scopeAnchor.properties.operationClasses.items.enum;
+    expect([...OPERATION_CLASSES]).toEqual(frozen);
+  });
+
+  it("holds the permissions modes security.py accepts", () => {
+    const security = readFileSync(
+      path.join(import.meta.dirname, "..", "..", "..", "service", "desktop_service", "security.py"),
+      "utf8",
+    );
+    // PERMISSIONS_MODES is built from these two constants; a mode renamed on
+    // the daemon side becomes a mode this page would save and the daemon would
+    // then refuse to start on.
+    for (const mode of PERMISSIONS_MODES) {
+      expect(security).toContain(`"${mode}"`);
+    }
     expect([...PERMISSIONS_MODES]).toEqual(["open", "per-application"]);
   });
 
