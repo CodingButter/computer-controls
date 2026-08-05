@@ -18,3 +18,4 @@ export * from "./health";
 export * from "./permissions";
 export * from "./accounts";
 export * from "./audit";
+export * from "./devices";
