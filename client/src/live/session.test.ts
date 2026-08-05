@@ -5,8 +5,12 @@ import {
   ORB_SYSTEM_INSTRUCTION,
   geminiLiveProvider,
   type SocketLike,
-} from "./live-gemini.ts";
+} from "./session.ts";
 import { HUB_FUNCTION_NAME, LIVE_VOICE, realtimeConfig, type RealtimeEvents } from "./live.ts";
+
+// Everything below this import block moved verbatim from live-gemini.test.ts;
+// the one addition (adversarial review, segment 03) is the malformed-base64
+// test near the end, pinning that a bad audio blob is dropped, never thrown.
 
 // A socket the tests own completely: every frame sent is recorded, and the
 // test plays the server by emitting message events.
@@ -209,6 +213,23 @@ describe("what the server sends back", () => {
     });
     expect(heard).toHaveLength(1);
     expect(Buffer.from(heard[0])).toEqual(Buffer.from([9, 9]));
+  });
+
+  it("drops a malformed base64 audio blob instead of throwing (added in segment 03)", async () => {
+    // atob rejects what Buffer.from tolerated; a frame that does not decode
+    // is a frame we never saw — one bad blob must not take down the session.
+    const heard: Uint8Array[] = [];
+    const { socket } = await connected(events({ onAudio: (chunk) => heard.push(chunk) }));
+    expect(() =>
+      socket.serverSays({
+        serverContent: {
+          modelTurn: {
+            parts: [{ inlineData: { mimeType: "audio/pcm;rate=24000", data: "!!!not base64!!!" } }],
+          },
+        },
+      }),
+    ).not.toThrow();
+    expect(heard).toHaveLength(0);
   });
 
   it("attributes transcriptions to their speakers", async () => {
