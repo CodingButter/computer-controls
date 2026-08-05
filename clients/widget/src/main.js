@@ -1,22 +1,23 @@
 import { BrowserWindow, app, ipcMain, screen, session, shell } from "electron";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 /**
- * The shell: a window that draws, and a window that is refused everything else.
+ * The shell: a window that draws and listens, and is refused everything else.
  *
- * The issue's first ruling is that the widget is a face and never an ear, and
- * this file is where that stops being a promise. Two things enforce it. The
- * renderer runs with no Node integration and a context-isolated bridge that
- * exposes nothing, so the page has no filesystem, no child process, and no way
- * to reach the daemon. And every permission request from this window is denied
- * — not the microphone specifically, all of them.
+ * The widget grew ears, and this file is where the boundary of that stops
+ * being a promise. The permission surface is a scalpel, not a door: exactly
+ * one permission — `media`, audio only — for exactly one document, the
+ * widget's own page, and only while the tray has not disabled the widget.
+ * Everything else on the list is denied the way it always was, and display
+ * capture is refused in every handler permanently, because a transparent
+ * always-on-top window that could see the screen would be a keylogger with
+ * a nice animation.
  *
- * Denying the whole list rather than the microphone is deliberate. A widget
- * that blocked `media` and left `geolocation` open would be one interesting
- * feature away from a leak, and this process has no legitimate use for any
- * permission a browser can grant. The empty allowlist is the honest expression
- * of what a thing that draws needs.
+ * Denying by default and carving one named hole is deliberate. A widget that
+ * granted `media` broadly would hand its microphone to any document that
+ * ever rendered in this session; naming the page makes the grant an identity
+ * check, not a category.
  */
 
 import {
@@ -25,12 +26,17 @@ import {
   stageFor,
 } from "./window-shape.js";
 import { readPlacement, writePlacement } from "./placement-store.js";
+import { readTrayState, writeTrayState } from "./tray-state.js";
+import { createTray } from "./tray.js";
 import { dashboardUrl } from "./dashboard.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Where the drag is written down, beside whatever else this app stores. */
 const placementFile = () => path.join(app.getPath("userData"), "placement.json");
+
+/** Where the tray's choices are written down, beside the placement. */
+const trayStateFile = () => path.join(app.getPath("userData"), "tray-state.json");
 
 /** The hub's port, read from the environment exactly as the bridge reads it. */
 const hubPort = () => Number(process.env.COMCON_CLIENT_PORT ?? 4111);
@@ -66,7 +72,7 @@ function openingStage() {
   return stageFor(display, stored ?? process.env.COMCON_WIDGET_PLACEMENT ?? "corner");
 }
 
-function createWindow() {
+function createWindow({ startHidden = false } = {}) {
   const stage = openingStage();
 
   const window = new BrowserWindow({
@@ -130,7 +136,11 @@ function createWindow() {
   window.setIgnoreMouseEvents(true, { forward: true });
 
   window.loadFile(path.join(here, "index.html"));
-  window.once("ready-to-show", () => window.showInactive());
+  // A widget the user disabled last run comes back disabled: loaded and
+  // wired, so enabling it later is instant, but never shown.
+  window.once("ready-to-show", () => {
+    if (!startHidden) window.showInactive();
+  });
 
   // The stage travels out with the window because the drag handler needs the
   // same origin the page was given. Two readings of the display could disagree
@@ -139,20 +149,49 @@ function createWindow() {
   return { window, stage };
 }
 
-function refuseEverything() {
+/** The one document the microphone may be granted to: the widget's own page. */
+const widgetPageUrl = () => pathToFileURL(path.join(here, "index.html")).href;
+
+/**
+ * Deny everything, then carve exactly one hole.
+ *
+ * @param {() => boolean} isDisabled — the tray's word on whether the ears are
+ *   allowed to exist right now. Read at decision time, not captured at setup,
+ *   so flipping the tray switch changes the answer without a restart.
+ */
+function guardPermissions(isDisabled) {
   const widgetSession = session.defaultSession;
 
-  // Asked politely: denied.
-  widgetSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  // Checked ahead of asking: also denied, so a feature-detect cannot find an
-  // open door that the request handler would have closed.
-  widgetSession.setPermissionCheckHandler(() => false);
-  // Asked for a specific microphone or camera by a page that got that far:
-  // there is nothing to hand back.
+  // The carve-out, applied identically to the ask and the feature-detect: the
+  // microphone (audio only, never video), for the widget's own page, while
+  // the widget is enabled. Anything that misses any clause is denied.
+  const micForOwnPage = (permission, requestingUrl, mediaTypes) => {
+    if (isDisabled()) return false;
+    if (permission !== "media") return false;
+    if (requestingUrl !== widgetPageUrl()) return false;
+    // Audio and nothing else. A request that also wants video is refused
+    // whole rather than trimmed: a caller asking for more than the design
+    // grants is a caller this handler does not negotiate with.
+    return mediaTypes.length > 0 && mediaTypes.every((type) => type === "audio");
+  };
+
+  // Asked politely: the one carve-out, else denied.
+  widgetSession.setPermissionRequestHandler((_contents, permission, callback, details) => {
+    callback(micForOwnPage(permission, details.requestingUrl, details.mediaTypes ?? []));
+  });
+  // Checked ahead of asking: the same answer, so a feature-detect can never
+  // find a door the request handler would have closed — or miss the one it
+  // would have opened.
+  widgetSession.setPermissionCheckHandler((_contents, permission, _origin, details) =>
+    micForOwnPage(permission, details.requestingUrl, details.mediaType ? [details.mediaType] : []),
+  );
+  // Asked for a specific device by id: there is still nothing to hand back.
+  // getUserMedia with the carve-out above reaches the default microphone;
+  // enumerating and claiming particular hardware is not a thing a face does.
   widgetSession.setDevicePermissionHandler(() => false);
   if (typeof widgetSession.setDisplayMediaRequestHandler === "function") {
-    // Screen capture is a permission too, and a transparent always-on-top
-    // window asking for it would be a keylogger with a nice animation.
+    // Screen capture is refused permanently, in every state, disabled or not.
+    // The ears carve-out changes nothing here and never will.
     widgetSession.setDisplayMediaRequestHandler((_request, callback) =>
       callback({ video: undefined, audio: undefined }),
     );
@@ -160,8 +199,67 @@ function refuseEverything() {
 }
 
 app.whenReady().then(() => {
-  refuseEverything();
-  const { window, stage } = createWindow();
+  // How the user left things, restored before anything is drawn: a widget
+  // disabled last run starts disabled, not visible-for-a-frame.
+  let trayState = readTrayState(trayStateFile());
+
+  guardPermissions(() => trayState.disabled);
+
+  const { window, stage } = createWindow({ startHidden: trayState.disabled });
+
+  // The one page this process opens, shared by the tray menu and the face's
+  // own context menu. The address is built here, in the main process, from a
+  // constant host and the environment's port — never taken from a page or a
+  // menu item.
+  const openDashboard = () => {
+    const url = dashboardUrl(hubPort());
+    if (url) shell.openExternal(url);
+  };
+
+  /**
+   * A tray choice landed: remember it, redraw the icon, and apply it.
+   *
+   * Written on every change — a choice that only persisted on clean exit
+   * would be lost to every crash — and told to the renderer, which owns the
+   * auto-hide timer because it is the process that sees the lane's events.
+   * The renderer is told, never asked: tray control stays on this side of
+   * the bridge, because a page that could disable its own indicator would
+   * defeat the indicator.
+   *
+   * @param {import("./tray-state.js").TrayState} next
+   */
+  const applyTrayState = (next) => {
+    const wasDisabled = trayState.disabled;
+    trayState = next;
+    writeTrayState(trayStateFile(), trayState);
+    trayControls.refresh(trayState);
+    if (window.isDestroyed()) return;
+    if (trayState.disabled !== wasDisabled) {
+      // Disable is the honest off: the whole face leaves, and the tray icon
+      // is what says so. Enable brings it back without stealing focus.
+      if (trayState.disabled) window.hide();
+      else window.showInactive();
+    }
+    window.webContents.send("widget:tray-state", {
+      autoHide: trayState.autoHide,
+      disabled: trayState.disabled,
+    });
+  };
+
+  const trayControls = createTray(trayState, {
+    toggleAutoHide: () => applyTrayState({ ...trayState, autoHide: !trayState.autoHide }),
+    toggleDisabled: () => applyTrayState({ ...trayState, disabled: !trayState.disabled }),
+    openDashboard,
+    quit: () => app.quit(),
+  });
+
+  // The renderer hears the current choices once it is ready to hear anything.
+  window.webContents.on("did-finish-load", () => {
+    window.webContents.send("widget:tray-state", {
+      autoHide: trayState.autoHide,
+      disabled: trayState.disabled,
+    });
+  });
 
   // The renderer knows what shape it painted; the shell owns the window. While
   // the pointer is over the orb the window takes clicks, and the moment it
@@ -228,9 +326,34 @@ app.whenReady().then(() => {
   // The dashboard opens in the user's browser, not in this process. A widget
   // that rendered a settings page would have become a second application, and
   // this one is a face.
-  ipcMain.on("widget:open-dashboard", () => {
-    const url = dashboardUrl(hubPort());
-    if (url) shell.openExternal(url);
+  ipcMain.on("widget:open-dashboard", openDashboard);
+
+  /*
+   * The token mint rides main: the renderer never learns the hub's port twice.
+   *
+   * The page already reaches the hub once, through the bridge's hubPort and
+   * the lane; giving it an HTTP client aimed at the same address would be a
+   * second copy of the same knowledge, and the copy is where drift starts.
+   * Main asks the mint and hands back exactly the fields the page needs — the
+   * hub's refusal sentences travel verbatim, because they are page states,
+   * not errors. Nothing here is logged: a token in a log file is a token.
+   */
+  ipcMain.handle("widget:mint-token", async () => {
+    if (trayState.disabled) {
+      return { error: "The widget is disabled, so no token was requested." };
+    }
+    try {
+      const response = await fetch(`http://127.0.0.1:${hubPort()}/api/orb/token`, {
+        method: "POST",
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return { error: body.error ?? `The token mint refused with status ${response.status}.` };
+      }
+      return { token: body.token, model: body.model, expiresAt: body.expiresAt };
+    } catch {
+      return { error: "The hub could not be reached, so no token was minted." };
+    }
   });
 
   // A face the user asked to leave leaves. The process closes its own windows
@@ -238,8 +361,10 @@ app.whenReady().then(() => {
   ipcMain.on("widget:quit", () => app.quit());
 });
 
-// No windows left means no face left, and a face is all this process is.
-app.on("window-all-closed", () => app.quit());
+// A closed window is not a closed application any more: the tray owns the
+// lifetime, and quit lives in its menu. This listener existing is what stops
+// Electron's default exit — deliberately empty, not forgotten.
+app.on("window-all-closed", () => {});
 
 // Nothing here opens a second window or navigates anywhere. A widget that
 // followed a link would have stopped being a widget.

@@ -50,6 +50,42 @@ export type IconSource = (applicationId: string) => Promise<ApplicationIcon | un
 export type ScanInstalled = () => Promise<InstalledApplication[]>;
 
 /**
+ * One start-on-login entry, described by the side that wants it.
+ *
+ * The caller says what should start and what a person sees in their session's
+ * startup list; the adapter decides what that means on disk — an XDG autostart
+ * `.desktop` file here, a LaunchAgent plist or a Run key when those waves come.
+ * The split keeps product names out of the adapter and file formats out of the
+ * core, the same bargain `InstalledApplication.id` strikes in the other
+ * direction.
+ */
+export type AutostartEntry = {
+  /** Basename for the entry file. The adapter picks the directory and suffix. */
+  id: string;
+  /** What a person sees in their session's startup list. */
+  name: string;
+  /** The command the session runs at login. */
+  exec: string;
+};
+
+/**
+ * Whether something starts when this person signs in.
+ *
+ * `read` answers from disk every time rather than from memory, because the
+ * file is the person's own and they may edit or delete it behind the hub's
+ * back — a cached answer would be the hub disagreeing with the desktop about
+ * what the desktop will do. `write` with `enabled: false` removes the entry,
+ * and removing what is already absent is a success: the caller asked for a
+ * state, not an action.
+ */
+export type Autostart = {
+  /** The file the entry lives in (or would), so a settings page can name what it edits. */
+  path: (id: string) => string;
+  read: (id: string) => Promise<boolean>;
+  write: (entry: AutostartEntry, enabled: boolean) => Promise<void>;
+};
+
+/**
  * Where the hub is allowed to write, by this OS's conventions.
  *
  * Two directories rather than one because the OSes that separate them care, and
@@ -81,6 +117,13 @@ export type PlatformSupport = {
    * is no.
    */
   shortcutCuring: boolean;
+  /**
+   * Whether a start-on-login entry can be written here. XDG autostart is
+   * freedesktop-only by definition, exactly like `shortcutCuring` above; the
+   * other families have their own mechanisms, and until an adapter implements
+   * one the honest answer is no.
+   */
+  autostart: boolean;
 };
 
 /** The whole OS-facing surface the hub composes at boot. */
@@ -89,5 +132,6 @@ export type HubPlatform = {
   paths: HubPaths;
   scanInstalled: ScanInstalled;
   icons: IconSource;
+  autostart: Autostart;
   supports: PlatformSupport;
 };

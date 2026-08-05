@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type { HubPaths, HubPlatform } from "../ports.ts";
+import { freedesktopAutostart } from "./autostart.ts";
 import { applicationDirs, findDesktopEntry, scanDesktopEntries } from "./entries.ts";
 import { buildIconIndex, iconDirs, readThemeIcon, type IconIndex } from "./icons.ts";
 
@@ -50,12 +51,14 @@ export function freedesktopPlatform(env: NodeJS.ProcessEnv = process.env): HubPl
       index ??= buildIconIndex(themeDirs);
       return readThemeIcon(entry.icon, await index);
     },
+    autostart: freedesktopAutostart(env),
     supports: {
       installedScan: true,
       icons: true,
       // The `.desktop` override mechanics are real on this platform; the
       // curing itself lands with #115 and flips this on.
       shortcutCuring: false,
+      autostart: true,
     },
   };
 }

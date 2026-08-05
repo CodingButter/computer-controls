@@ -4,19 +4,21 @@ import { describe, expect, test } from "vitest";
 // typed twin of it. If this ever resolves to something the shell would not
 // load, these tests stop being about the widget that runs.
 import {
+  AUTO_HIDE_MS,
   INITIAL_STATE,
   OFFERED_GESTURES,
   UNDERSTOOD_EVENTS,
   applyGesture,
+  fade,
   reduce,
 } from "./state-machine.js";
 import { GESTURE_TYPES, STATE_EVENT_TYPES } from "../../../client/src/events/types.ts";
 
 /** Play a whole conversation through the reducer. */
-const run = (events: { type: string; text?: string }[], from = INITIAL_STATE) =>
+const run = (events: { type: string; [field: string]: unknown }[], from = INITIAL_STATE) =>
   events.reduce(reduce, from);
 
-test("test_the_widget_appears_on_wake_and_fades_on_idle", () => {
+test("test_the_widget_appears_on_wake_and_fades_after_idle", () => {
   // Before anything is said there is nothing to look at. A widget that drew
   // itself on an empty desk would be a taskbar, not a presence.
   expect(INITIAL_STATE.presence).toBe("hidden");
@@ -34,14 +36,56 @@ test("test_the_widget_appears_on_wake_and_fades_on_idle", () => {
   const speaking = reduce(thinking, { type: "speaking" });
   expect(speaking).toMatchObject({ presence: "visible", activity: "speaking" });
 
-  // The turn ends and the face goes away again, taking the caption with it.
+  // The turn ends and the face rests — still there, still readable. Leaving
+  // the desk is the auto-hide timer's call, not the conversation's: a person
+  // is still reading the answer when the hub goes idle.
   const idle = reduce(speaking, { type: "idle" });
-  expect(idle.presence).toBe("hidden");
-  expect(idle.caption).toBe("");
+  expect(idle.presence).toBe("visible");
+  expect(idle.activity).toBe("listening");
+
+  // The timer fires and, with auto-hide on, the face fades and takes the
+  // words with it.
+  const faded = fade(idle, true);
+  expect(faded.presence).toBe("hidden");
+  expect(faded.caption).toBe("");
 
   // And the next wake brings it back, so this is a rhythm rather than a
   // one-time appearance.
-  expect(reduce(idle, { type: "wake_opened" }).presence).toBe("visible");
+  expect(reduce(faded, { type: "wake_opened" }).presence).toBe("visible");
+});
+
+describe("auto-hide", () => {
+  const resting = run([
+    { type: "wake_opened" },
+    { type: "caption", text: "the answer" },
+    { type: "idle" },
+  ]);
+
+  test("hides the face only when auto-hide is on", () => {
+    // The same timer fires either way; the setting decides whether it means
+    // anything. A user who turned auto-hide off asked for a face that stays.
+    expect(fade(resting, true).presence).toBe("hidden");
+    expect(fade(resting, false)).toBe(resting);
+  });
+
+  test("takes the words and the scouts with the face, keeps the user's settings", () => {
+    let state = applyGesture(resting, { type: "mute" });
+    state = applyGesture(state, { type: "drag", x: 300, y: 40 });
+    const faded = fade(state, true);
+
+    expect(faded.caption).toBe("");
+    expect(faded.scouts).toEqual([]);
+    expect(faded.muted).toBe(true);
+    expect(faded.position).toEqual({ x: 300, y: 40 });
+  });
+
+  test("waits a readable while", () => {
+    // The exact number is a product choice; that it is tens of seconds rather
+    // than milliseconds or minutes is the property worth pinning. A face that
+    // vanished before the answer was read would make auto-hide a bug.
+    expect(AUTO_HIDE_MS).toBeGreaterThanOrEqual(5_000);
+    expect(AUTO_HIDE_MS).toBeLessThanOrEqual(60_000);
+  });
 });
 
 describe("presence", () => {
@@ -135,6 +179,10 @@ test("every word the hub can say has a case in the reducer", () => {
     idle: {},
     touching: { id: "op-1", x: 10, y: 20, width: 30, height: 40 },
     released: { id: "op-1" },
+    progress: { id: "ask-1", text: "Reading your calendar." },
+    answer: { id: "ask-1", text: "Nothing before noon." },
+    voice_opened: {},
+    voice_closed: {},
   };
   const woken = reduce(INITIAL_STATE, { type: "wake_opened" });
   const busy = reduce(woken, { type: "touching", ...spoken.touching });
@@ -144,6 +192,55 @@ test("every word the hub can say has a case in the reducer", () => {
     const next = reduce(busy, { type, ...spoken[type] });
     expect(next, `no case for "${type}"`).not.toBe(busy);
   }
+});
+
+describe("the mouth-era words", () => {
+  // These arrived when the lane learned to carry a conversation: a client
+  // mouth asks, the hub replies with progress and an answer, and voice
+  // sessions opening and closing are broadcast so every face knows a
+  // conversation is happening.
+
+  test("progress is the agent thinking out loud", () => {
+    const state = reduce(INITIAL_STATE, { type: "progress", id: "ask-1", text: "Searching." });
+    expect(state).toMatchObject({
+      presence: "visible",
+      activity: "thinking",
+      caption: "Searching.",
+    });
+  });
+
+  test("an answer is spoken, and shown being spoken", () => {
+    const state = reduce(INITIAL_STATE, { type: "answer", id: "ask-1", text: "Found it." });
+    expect(state).toMatchObject({
+      presence: "visible",
+      activity: "speaking",
+      caption: "Found it.",
+    });
+  });
+
+  test("a voice session opening is the same news as a wake", () => {
+    const stale = run([{ type: "caption", text: "last turn's words" }]);
+    const opened = reduce(stale, { type: "voice_opened" });
+    expect(opened.presence).toBe("visible");
+    expect(opened.activity).toBe("listening");
+    // A new conversation is starting; the old words are not its caption.
+    expect(opened.caption).toBe("");
+  });
+
+  test("the last voice session closing rests the face like idle does", () => {
+    const busy = run([
+      { type: "voice_opened" },
+      { type: "thinking" },
+      { type: "touching", id: "op-1", x: 10, y: 20, width: 30, height: 40 },
+    ]);
+    const closed = reduce(busy, { type: "voice_closed" });
+    // Still on the desk — leaving is auto-hide's decision — but no longer
+    // busy, and pointing at nothing: the agent behind the conversation
+    // stopped when the conversation did.
+    expect(closed.presence).toBe("visible");
+    expect(closed.activity).toBe("listening");
+    expect(closed.scouts).toEqual([]);
+  });
 });
 
 describe("pointing at what is being touched", () => {

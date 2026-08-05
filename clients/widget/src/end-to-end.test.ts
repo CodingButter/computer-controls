@@ -5,7 +5,7 @@ import WebSocket from "ws";
 
 import { ScriptedEventSource } from "../../../client/src/events/source.ts";
 import { attachEventSocket } from "../../../client/src/events/socket.ts";
-import { INITIAL_STATE, applyGesture, reduce } from "./state-machine.js";
+import { INITIAL_STATE, applyGesture, fade, reduce } from "./state-machine.js";
 import { paintCaption, scoutRects } from "./paint.js";
 
 /**
@@ -108,11 +108,18 @@ test("a turn: the face arrives when spoken to, says what was said, and fades", a
   expect(face.state.activity).toBe("speaking");
   expect(face.onScreen).toBe("I'll remind you at four.");
 
-  // The turn ends: the face fades and takes the words with it.
+  // The turn ends: the face rests, with the answer still readable under it.
   source.emit({ type: "idle" });
   await settle();
-  expect(face.state.presence).toBe("hidden");
-  expect(face.onScreen).toBe("");
+  expect(face.state.presence).toBe("visible");
+  expect(face.onScreen).toBe("I'll remind you at four.");
+
+  // Then the auto-hide timer fires — the shell's transition, not a hub word,
+  // which is why it is applied here rather than emitted — and the face fades
+  // and takes the words with it.
+  const faded = fade(face.state, true);
+  expect(faded.presence).toBe("hidden");
+  expect(faded.caption).toBe("");
 
   // Every caption that reached the screen was one the hub sent, unaltered.
   //

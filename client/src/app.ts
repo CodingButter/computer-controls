@@ -74,6 +74,12 @@ export type AppDeps = {
    * always supplies it.
    */
   desktopConfig?: Hono;
+  /**
+   * The start-on-boot toggle: reflects and writes the widget's autostart entry
+   * through the platform port. Optional like the rest; the entry module always
+   * supplies it.
+   */
+  autostart?: Hono;
 };
 
 /**
@@ -132,6 +138,7 @@ export function buildApp(deps: AppDeps): Hono {
   if (deps.audit) app.route("/", deps.audit);
   if (deps.devices) app.route("/", deps.devices);
   if (deps.desktopConfig) app.route("/", deps.desktopConfig);
+  if (deps.autostart) app.route("/", deps.autostart);
 
   app.get("*", (c) => {
     // The hub's own static root answers first — chat, the orb, the vendored
