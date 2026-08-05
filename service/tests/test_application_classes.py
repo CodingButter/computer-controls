@@ -263,3 +263,22 @@ def test_a_per_application_entry_within_the_file_is_issued():
         reason="test",
     )
     assert issued.per_application["discord"] == frozenset({"edit"})
+
+
+def test_two_patterns_naming_one_application_agree_on_the_narrower():
+    # Patterns match on substrings, so a file can name the same application
+    # twice without meaning to. Whichever way round the answer resolved, it
+    # would be an answer that changes when the file is reordered — and the one
+    # of the two readings that can be defended is the narrow one, because the
+    # user wrote both lines and only one of them can be honoured.
+    wide_first = ceiling(applicationClasses={"disc": ["activate"], "discord": ["observe"]})
+    narrow_first = ceiling(applicationClasses={"discord": ["observe"], "disc": ["activate"]})
+    assert wide_first.classes_for("discord") == frozenset({"observe"})
+    assert narrow_first.classes_for("discord") == wide_first.classes_for("discord")
+
+
+def test_a_pattern_that_names_a_different_application_does_not_narrow_this_one():
+    # The intersection is over the patterns that actually matched. A rule about
+    # the chat app must not follow the editor around.
+    subject = ceiling(applicationClasses={"discord": ["observe"], "gedit": ["activate"]})
+    assert subject.classes_for("gedit") == frozenset({"observe", "edit", "activate"})

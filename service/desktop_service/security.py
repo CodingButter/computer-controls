@@ -301,14 +301,26 @@ class Ceiling:
         withholds everywhere. An entry naming nothing at all permits nothing:
         an empty list is a thing the user typed, and the only honest reading of
         it is that they meant it.
+
+        Patterns match on substrings, so two of them can name the same running
+        application, and every one that does gets a vote. The answer is their
+        intersection — the narrowest thing all of them agree to — because the
+        alternative is an answer that depends on which line the user happened
+        to type first. Somebody who writes both `disc` and `discord` is
+        describing one desktop either way, and a permission that changes when
+        the file is reordered is a permission nobody can reason about.
         """
         if not application or not self.application_classes:
             return None
         name = application.strip().casefold()
-        for pattern, named in self.application_classes.items():
-            if pattern in name:
-                return implied_classes(named) & self.classes
-        return None
+        matched = [
+            implied_classes(named)
+            for pattern, named in self.application_classes.items()
+            if pattern in name
+        ]
+        if not matched:
+            return None
+        return frozenset.intersection(*matched) & self.classes
 
     def permits_application(self, application: str) -> bool:
         name = application.strip().casefold()
