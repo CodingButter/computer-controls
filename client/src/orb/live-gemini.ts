@@ -160,11 +160,8 @@ export function geminiLiveProvider(
           model: `models/${config.model}`,
           generationConfig: {
             responseModalities: ["AUDIO"],
-            // A prebuilt voice, only when one was chosen. Omitted means the
-            // provider's default — the behaviour the orb had before #129.
-            ...(config.voice
-              ? { speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: config.voice } } } }
-              : {}),
+            // Named, so the voice cannot drift when the provider's default does.
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: config.voice } } },
           },
           systemInstruction: { parts: [{ text: ORB_SYSTEM_INSTRUCTION }] },
           tools: [

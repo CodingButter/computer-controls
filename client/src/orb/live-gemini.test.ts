@@ -6,7 +6,7 @@ import {
   geminiLiveProvider,
   type SocketLike,
 } from "./live-gemini.ts";
-import { HUB_FUNCTION_NAME, realtimeConfig, type RealtimeEvents } from "./live.ts";
+import { HUB_FUNCTION_NAME, LIVE_VOICE, realtimeConfig, type RealtimeEvents } from "./live.ts";
 
 // A socket the tests own completely: every frame sent is recorded, and the
 // test plays the server by emitting message events.
@@ -94,10 +94,12 @@ describe("connecting to Gemini Live", () => {
     expect(first.setup.systemInstruction.parts[0].text).toBe(ORB_SYSTEM_INSTRUCTION);
   });
 
-  it("omits speechConfig when no voice is chosen — provider default applies", async () => {
+  it("names the voice in setup, so the provider's default cannot move underneath it", async () => {
     const { socket } = await connected();
     const first = JSON.parse(socket.sent[0]);
-    expect(first.setup.generationConfig.speechConfig).toBeUndefined();
+    expect(first.setup.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe(
+      LIVE_VOICE,
+    );
   });
 
   it("sends the chosen prebuilt voice in speechConfig", async () => {

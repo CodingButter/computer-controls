@@ -45,8 +45,9 @@ export const REALTIME_MODELS: readonly CatalogEntry[] = Object.freeze([
 /**
  * The prebuilt voices the Gemini Live setup frame accepts.
  *
- * The provider default is what speaks when none is chosen — the same behaviour
- * the orb had before #129. Picking one here overrides it.
+ * `LIVE_VOICE` is what speaks when none is chosen — pinned in source precisely
+ * so the provider's own default cannot move underneath a running product.
+ * Picking one here overrides that pin for the next conversation.
  */
 export const REALTIME_VOICES: readonly CatalogEntry[] = Object.freeze([
   { name: "Puck", source: "curated" },

@@ -70,7 +70,7 @@ function bankHolding(clips: Clip[]): UtteranceBank {
   return new UtteranceBank(store, () => 0);
 }
 
-function build(options: { transcript?: string; answer?: string } = {}) {
+function build(options: { transcript?: string; answer?: string; mouth?: Mouth } = {}) {
   const vad = controllableVad();
   const ear: LocalEar = {
     languages: ["en"],
@@ -92,10 +92,13 @@ function build(options: { transcript?: string; answer?: string } = {}) {
       { id: "acknowledge-0", class: "acknowledge", audio: new TextEncoder().encode("on it"), durationMs: 400 },
       { id: "thinking-0", class: "thinking", audio: new TextEncoder().encode("let me check"), durationMs: 500 },
     ]),
-    mouth: new Mouth(),
+    mouth: options.mouth ?? new Mouth(),
     speaker,
     brain: { ask },
     onEvent: (event) => events.push(event),
+    // Tests do not wait out the settle window in real time; the ordering they
+    // pin is the mouth's, not the clock's.
+    wait: async () => {},
   });
   return { orb, session, vad, played, ask, events };
 }
@@ -317,6 +320,103 @@ describe("test_a_signal_injected_as_text_is_spoken_by_the_orb", () => {
     await orb.announce("By the way, the build finished.");
 
     expect(session.muted).toBe(false);
+  });
+});
+
+describe("test_a_signal_never_cuts_off_a_sentence_in_progress", () => {
+  it("waits for the mouth to finish before pushing the signal into the session", async () => {
+    const mouth = new Mouth();
+    const { orb, session } = build({ mouth });
+
+    // The orb is mid-sentence: an utterance is playing and will not finish
+    // until this test says so.
+    let finish = () => {};
+    const playing = mouth.speak({
+      id: "speech-in-progress",
+      kind: "speech",
+      play: () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    });
+
+    const announced = orb.announce("Progress update.");
+    await tick();
+
+    // Nothing was sent: text arriving now is what makes the provider abandon
+    // the sentence it is speaking.
+    expect(session.texts).toHaveLength(0);
+
+    finish();
+    await playing;
+    await announced;
+
+    expect(session.texts).toEqual(["Progress update."]);
+  });
+
+  it("keeps the lane open when one signal cannot be sent", async () => {
+    const { orb, session } = build();
+    const failing = vi
+      .fn<(text: string) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("socket wrote nothing"));
+    const original = session.sendText;
+    session.sendText = async (text: string) => {
+      if (failing.mock.calls.length === 0) {
+        await failing(text);
+        return;
+      }
+      await original(text);
+    };
+
+    // The first signal fails. It must not take the process down, and it must
+    // not poison the signal behind it.
+    await orb.announce("This one breaks.");
+    await orb.announce("This one still gets said.");
+
+    expect(session.texts).toEqual(["This one still gets said."]);
+  });
+
+  it("speaks two signals in order rather than letting the second cut the first", async () => {
+    const mouth = new Mouth();
+    const session = fakeSession();
+    const holds: (() => void)[] = [];
+    const release = () => {
+      const held = holds.splice(0, holds.length);
+      for (const resolve of held) resolve();
+    };
+    const orb = new Orb({
+      gate: {
+        vad: controllableVad(),
+        wakeWord: alwaysWakeWord,
+        ear: { languages: ["en"], transcribe: async () => "" },
+        classifier: createWakeWordClassifier(),
+      },
+      session,
+      bank: bankHolding([]),
+      mouth,
+      speaker: { play: async () => {} },
+      brain: { ask: async () => "done" },
+      // The settle window is held open, standing in for the beat the provider
+      // takes to start answering the first signal.
+      wait: () =>
+        new Promise<void>((resolve) => {
+          holds.push(resolve);
+        }),
+    });
+
+    const first = orb.announce("First.");
+    const second = orb.announce("Second.");
+    await tick();
+
+    expect(session.texts).toEqual(["First."]);
+
+    release();
+    await first;
+    await tick();
+    release();
+    await second;
+
+    expect(session.texts).toEqual(["First.", "Second."]);
   });
 });
 
