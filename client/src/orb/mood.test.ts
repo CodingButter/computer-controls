@@ -227,7 +227,7 @@ describe("test_sentiment_is_never_persisted_or_sent_off_the_machine", () => {
     });
     await new Promise((r) => setTimeout(r, 0));
 
-    expect(ask).toHaveBeenCalledWith("open the browser");
+    expect(ask).toHaveBeenCalledWith("open the browser", expect.any(Function));
     for (const call of ask.mock.calls) {
       for (const sentiment of SENTIMENTS) {
         expect(call[0].toLowerCase()).not.toContain(sentiment);

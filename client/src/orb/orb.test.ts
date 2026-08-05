@@ -129,7 +129,7 @@ describe("test_idle_mode_sends_no_audio_off_the_machine", () => {
 });
 
 describe("test_actionable_requests_route_to_the_pack_brain_as_one_function_call", () => {
-  it("hands the request to the hub agent and returns the answer to the provider", async () => {
+  it("returns an immediate acknowledgment so the provider keeps its voice, then dispatches", async () => {
     const { orb, session, ask } = build();
 
     orb.realtimeEvents.onFunctionCall({
@@ -139,20 +139,22 @@ describe("test_actionable_requests_route_to_the_pack_brain_as_one_function_call"
     });
     await tick();
 
+    // The brain was called with the user's request (onProgress is always passed).
     expect(ask).toHaveBeenCalledTimes(1);
-    expect(ask).toHaveBeenCalledWith("open the browser");
-    expect(session.results).toEqual([{ id: "call-1", result: "did: open the browser" }]);
+    expect(ask).toHaveBeenCalledWith("open the browser", expect.any(Function));
+    // The provider received an immediate acknowledgment — not silence while the
+    // hub works.
+    expect(session.results).toEqual([{ id: "call-1", result: expect.stringMatching(/acknowledged/i) }]);
   });
 
-  it("speaks the answer through the provider rather than out of a second mouth", async () => {
+  it("injects the resolved answer as a spoken text signal, not out of a second mouth", async () => {
     const { orb, session, played } = build();
 
     orb.realtimeEvents.onFunctionCall({ id: "c", name: "ask_the_hub", args: { request: "x" } });
     await tick();
 
-    // The answer went back down the socket; nothing was synthesized locally, so
-    // the response comes out in the same voice as the rest of the conversation.
-    expect(session.results).toHaveLength(1);
+    // The answer arrived as a text turn the provider speaks, not as a local synth.
+    expect(session.texts.some((t) => t.includes("did: x"))).toBe(true);
     expect(played).not.toContain("did: x");
   });
 
@@ -178,9 +180,11 @@ describe("test_actionable_requests_route_to_the_pack_brain_as_one_function_call"
     failing.realtimeEvents.onFunctionCall({ id: "c", name: "ask_the_hub", args: { request: "x" } });
     await tick();
 
-    expect(session.results[0]?.result).toMatch(/did not work/i);
-    // And the failure never becomes a claim that something happened.
-    expect(session.results[0]?.result).toMatch(/nothing was changed/i);
+    // The failure is spoken as a text signal, and never becomes a claim that
+    // something happened.
+    const spoken = session.texts.join(" ");
+    expect(spoken).toMatch(/did not work/i);
+    expect(spoken).toMatch(/nothing was changed/i);
   });
 
   it("refuses an empty request instead of waking the brain for nothing", async () => {
@@ -191,6 +195,81 @@ describe("test_actionable_requests_route_to_the_pack_brain_as_one_function_call"
 
     expect(ask).not.toHaveBeenCalled();
     expect(session.results[0]?.result).toMatch(/no request/i);
+  });
+
+  it("returns the acknowledgment before the brain has been asked", async () => {
+    const { orb, session, ask } = build();
+
+    orb.realtimeEvents.onFunctionCall({ id: "c", name: "ask_the_hub", args: { request: "x" } });
+
+    // Synchronously after the call returns, the ack is already on the socket
+    // and the brain has not been asked yet — #dispatch runs only after the
+    // await in #onFunctionCall resumes.
+    expect(session.results).toHaveLength(1);
+    expect(ask).not.toHaveBeenCalled();
+
+    await tick();
+    expect(ask).toHaveBeenCalledTimes(1);
+  });
+
+  it("attributes overlapping dispatches to their own answers", async () => {
+    const { orb, session } = build();
+
+    orb.realtimeEvents.onFunctionCall({ id: "a", name: "ask_the_hub", args: { request: "alpha" } });
+    orb.realtimeEvents.onFunctionCall({ id: "b", name: "ask_the_hub", args: { request: "beta" } });
+    await tick();
+
+    const spoken = session.texts.join("\n");
+    expect(spoken).toContain("did: alpha");
+    expect(spoken).toContain("did: beta");
+  });
+
+  it("never mentions agents, hub, dispatch, or worker in any spoken text", async () => {
+    const { orb, session } = build();
+
+    orb.realtimeEvents.onFunctionCall({ id: "c", name: "ask_the_hub", args: { request: "x" } });
+    await tick();
+
+    const forbidden = /\b(agent|hub|dispatch|worker|delegate|sub-?agent)\b/i;
+    // Function results (session.results) are model instructions, not spoken
+    // text — the ack deliberately tells the model *not* to mention these words.
+    // Only session.texts (the announce path) reaches the user's ears.
+    for (const text of session.texts) {
+      expect(text).not.toMatch(forbidden);
+    }
+  });
+});
+
+describe("an answer that arrives during a reconnect gap survives the redial", () => {
+  it("queues the answer and speaks it when the socket returns", async () => {
+    const session = fakeSession();
+    const orb = new Orb({
+      gate: {
+        vad: controllableVad(),
+        ear: { languages: ["en"], transcribe: async () => "" },
+        classifier: createWakeWordClassifier(),
+      },
+      session,
+      bank: bankHolding([]),
+      mouth: new Mouth(),
+      speaker: { play: async () => {} },
+      brain: { ask: async () => "done" },
+    });
+
+    // The socket drops while the dispatch is in flight.
+    session.connected = false;
+    orb.realtimeEvents.onFunctionCall({ id: "c", name: "ask_the_hub", args: { request: "x" } });
+    await tick();
+
+    // The answer was queued, not spoken into the void.
+    expect(session.texts).toHaveLength(0);
+
+    // The socket returns; the queued answer is flushed.
+    session.connected = true;
+    orb.realtimeEvents.onReconnect();
+    await tick();
+
+    expect(session.texts.some((t) => t.includes("done"))).toBe(true);
   });
 });
 
