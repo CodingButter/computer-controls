@@ -16,15 +16,23 @@ import { buildIconIndex, iconDirs, readThemeIcon, type IconIndex } from "./icons
  * into the core.
  */
 
-/** XDG base directories, with the spec's own defaults. */
+/**
+ * XDG base directories, with the spec's own defaults.
+ *
+ * Empty counts as unset, which the spec says in as many words and the daemon
+ * says in Python's `or` (`config.py:default_path`, `audit.py:default_path`).
+ * Reading an empty variable as a set one would leave the hub pointed at a
+ * relative directory while the daemon writes under the home directory, and the
+ * two processes would each be certain they were reading the same file.
+ */
 export function freedesktopPaths(
   env: NodeJS.ProcessEnv = process.env,
   app = "mastracode-desktop",
 ): HubPaths {
-  const home = env.HOME ?? os.homedir();
+  const home = env.HOME || os.homedir();
   return {
-    config: path.join(env.XDG_CONFIG_HOME ?? path.join(home, ".config"), app),
-    state: path.join(env.XDG_STATE_HOME ?? path.join(home, ".local", "state"), app),
+    config: path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), app),
+    state: path.join(env.XDG_STATE_HOME || path.join(home, ".local", "state"), app),
   };
 }
 

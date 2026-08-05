@@ -150,6 +150,16 @@ test("XDG base directories decide where the hub may write", () => {
   expect(paths.config).toBe(path.join(home, ".config", "mastracode-desktop"));
 });
 
+test("an empty XDG variable is an unset one, as it is to the daemon", () => {
+  // Python reads these with `or`, so "" falls through to the home directory.
+  // Reading "" as a set value would point the hub at a relative path while the
+  // daemon wrote under $HOME, and neither process would notice the divorce.
+  const paths = freedesktopPlatform({ ...env, XDG_CONFIG_HOME: "", XDG_STATE_HOME: "" }).paths;
+
+  expect(paths.config).toBe(path.join(home, ".config", "mastracode-desktop"));
+  expect(paths.state).toBe(path.join(home, ".local", "state", "mastracode-desktop"));
+});
+
 test("each OS is named, and everything unrecognised follows freedesktop", () => {
   expect(platformIdFor("darwin")).toBe("macos");
   expect(platformIdFor("win32")).toBe("windows");

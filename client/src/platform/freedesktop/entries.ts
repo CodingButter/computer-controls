@@ -30,9 +30,9 @@ export type DesktopEntry = InstalledApplication & {
  * without touching anything root owns.
  */
 export function applicationDirs(env: NodeJS.ProcessEnv = process.env): string[] {
-  const home = env.HOME ?? os.homedir();
-  const dataHome = env.XDG_DATA_HOME ?? path.join(home, ".local", "share");
-  const dataDirs = (env.XDG_DATA_DIRS ?? "/usr/local/share:/usr/share")
+  const home = env.HOME || os.homedir();
+  const dataHome = env.XDG_DATA_HOME || path.join(home, ".local", "share");
+  const dataDirs = (env.XDG_DATA_DIRS || "/usr/local/share:/usr/share")
     .split(":")
     .filter((dir) => dir.length > 0);
   return [dataHome, ...dataDirs].map((dir) => path.join(dir, "applications"));
