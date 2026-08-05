@@ -9,13 +9,14 @@ here weakens it.
 
 ## The ruling in one paragraph
 
-We ship one Debian package. It installs three things: the desktop daemon as a
-systemd user service, a headless Mastra Code runtime, and a local web hub that
-is both the dashboard and the first client. The hub serves the same origin to
-the desktop browser and to a phone paired by QR code. There is no Electron
-shell, no bundled Chromium, and no cloud account required to function. Think
-Plex: the software lives on your machine, our servers may later help a phone
-find it, and the bytes are yours.
+We ship one Debian package. It installs four things: the desktop daemon as a
+systemd user service, a headless Mastra Code runtime, a local web hub that
+is both the dashboard and the first client, and the widget — "Mastra CC", the
+resident tray client that carries the wake word and the always-ready ears.
+The hub serves the same origin to the desktop browser and to a phone paired
+by QR code. There is no bundled Chromium wrapping the daemon, and no cloud
+account required to function. Think Plex: the software lives on your machine,
+our servers may later help a phone find it, and the bytes are yours.
 
 ## The three layers
 
@@ -56,6 +57,20 @@ The recorded escape hatch: if a real shell is ever needed (a native global
 hotkey is the only case a browser cannot cover), the answer is Tauri, and it
 wraps the hub rather than replacing it.
 
+**Amendment (2026-08-05, the client migration).** The widget is an Electron
+process, and this ruling stands anyway, because the argument above was never
+"no Electron" — it was "no Electron *carrying the daemon*". The widget
+carries a face: a frameless always-on-top orb, a tray icon, a microphone
+whose gate opens on the wake word, and one WebSocket to the hub. Close it
+and the daemon, the runtime, and the hub notice nothing — the systemd unit
+still owns the service lifetime, and windows are still just views. What the
+widget needed that a browser tab cannot give is exactly the resident-client
+list: a tray that outlives every window, an always-on-top transparent stage,
+and ears that are ready before any page is open. It grants itself nothing:
+every permission is refused except audio capture for its own page, display
+capture is refused permanently, and it holds no credential — it asks the hub
+to mint one, like every other client.
+
 ## The package
 
 One `.deb`, installable with `apt`. It carries:
@@ -63,8 +78,13 @@ One `.deb`, installable with `apt`. It carries:
 - the daemon and its Python environment
 - the headless runtime and the desktop plugin
 - the hub and its built assets
+- the widget, autostarted as the resident tray client (the dashboard's
+  start-on-boot toggle writes the XDG autostart entry through the hub)
 - the systemd user units and an installer that enables them for the installing
   user's graphical session
+
+The packaging tooling itself remains future work; this document fixes what
+the package contains, not how it is built.
 
 First run opens the hub, which walks setup: sign in to your own model
 accounts (the Factory way: paste-code for Anthropic, device code for OpenAI;
@@ -153,12 +173,17 @@ redaction: the agent logs in as you without ever possessing your password.
 
 ## Voice
 
-Voice is a first-class feature of the hub, not an accessory. The path is
-Mastra's own: the realtime speech package for the conversation loop and the
-non-realtime package for transcripts and read-back, with the user's own OpenAI
-account as the mouth and ears and the pack's model as the brain (#83). The
-browser side requires a secure context, which is why doc 06 puts TLS on day
-one rather than on the roadmap.
+Voice is a first-class feature, and since the client migration the mouths
+and ears live on client devices, not on the hub. A device that wants to talk
+— the orb page tap-to-talk, the widget on its wake word — asks the hub to
+mint a short-lived, constrained token and dials the realtime provider
+directly; the provider key never leaves the hub, and no audio ever crosses
+the hub's process. The hub keeps the brain: an `ask` crossing the one
+`/events` lane lands in the same agent loop, the same thread, and the same
+consent ceiling as a typed message. When any client opens a voice session,
+the lane says so and the widget plugs its ears — two microphones never fight
+over one conversation. The browser side requires a secure context, which is
+why doc 06 puts TLS on day one rather than on the roadmap.
 
 ## What this means for the daemon
 

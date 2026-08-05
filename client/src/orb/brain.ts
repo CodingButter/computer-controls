@@ -14,7 +14,16 @@
 
 import type { AgentControllerEvent } from "@mastra/core/agent-controller";
 import type { AgentTurn } from "../chat.ts";
-import type { HubBrain } from "./orb.ts";
+
+/**
+ * The whole dispatch seam: one method, callable with nothing but a request.
+ * It lived on the hub-side orb before the retirement; the lane's `LaneBrain`
+ * is structurally identical on purpose, and deliberately not imported —
+ * see events/socket.ts for why the lane refuses to depend on this module.
+ */
+export type HubBrain = {
+  ask(request: string, onProgress?: (signal: string) => void): Promise<string>;
+};
 
 /**
  * Map a controller event to an outcome-shaped progress fact — what surface is

@@ -23,9 +23,16 @@ export type HubHealth = {
   orb?: CapabilityStatus;
 };
 
-/** /api/orb/status — the refused shape carries the reason a person should see. */
+/**
+ * /api/orb/status — the refused shape carries the reason a person should see.
+ *
+ * Since the hub went deaf the enabled shape is deliberately coarse: idle or
+ * talking, and how many client mouths hold an open voice session. The gate
+ * and the ear languages the old shape reported live on the devices now, so a
+ * hub that claimed to know them would be lying.
+ */
 export type OrbStatus =
-  | { enabled: true; state: string; gate: string; languages: readonly string[] }
+  | { enabled: true; state: string; mouths: number }
   | { enabled: false; reason: string };
 
 /**
@@ -88,8 +95,7 @@ export function parseOrbStatus(body: unknown): OrbStatus {
     return {
       enabled: true,
       state: typeof raw.state === "string" ? raw.state : "unknown",
-      gate: typeof raw.gate === "string" ? raw.gate : "unknown",
-      languages: asStringArray(raw.languages),
+      mouths: typeof raw.mouths === "number" ? raw.mouths : 0,
     };
   }
   return { enabled: false, reason: typeof raw.reason === "string" ? raw.reason : "disabled" };

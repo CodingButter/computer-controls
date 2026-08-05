@@ -292,7 +292,7 @@ function stopEars() {
  *
  * Both halves are needed and neither is sufficient. Drawing it locally is what
  * makes the widget feel like it responded; telling the hub is what makes it
- * true, because the hub owns the ears and this process owns nothing.
+ * shared truth — the hub is where every other face learns what this one did.
  *
  * @param {{ type: string, x?: number, y?: number }} gesture
  */

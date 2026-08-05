@@ -29,12 +29,7 @@ import { SYSTEM_APPLICATIONS_DIR, scanDesktopEntries } from "./permissions/deskt
 import { createIconSource, defaultIconDirs } from "./permissions/icons.ts";
 import { createPermissionRegistry } from "./permissions/registry.ts";
 import { buildPermissionsApp } from "./permissions/routes.ts";
-import { commandSpeaker, startMicrophone } from "./orb/audio-host.ts";
-import { createCaptureLifecycle } from "./orb/capture-lifecycle.ts";
-import { pocEarChain } from "./orb/ear-poc.ts";
-import { diskClipStore, unwiredSpeaker } from "./orb/host.ts";
-import { chooseFaceSource, createHubBrain, mountOrb } from "./orb/index.ts";
-import { geminiLiveProvider } from "./orb/live-gemini.ts";
+import { createHubBrain, createLaneFaceSource, mountOrb } from "./orb/index.ts";
 import { FileSettingsAudit } from "./settings/audit.ts";
 import { SettingsGate } from "./settings/gate.ts";
 import { FilePreferenceStore } from "./settings/preferences.ts";
@@ -158,49 +153,26 @@ const voice = {
 };
 
 /**
- * The orb, mounted from the same store and the same agent.
+ * What the hub knows about voice, all of it derived from the lane.
  *
- * It comes up refused on a machine that has no realtime provider or no OS audio
- * capture wired — both are seams awaiting the work in #107 — and the reason
- * travels to the page through /api/health and /api/orb/status, exactly as the
- * voice lane's does. The page then explains itself instead of offering a control
- * that cannot work, and the typed chat is unaffected either way.
+ * There is no microphone, no speaker, and no realtime session in this process
+ * any more — the devices own those, and the lane below tells this source what
+ * they are doing. Built before the orb mounts because the status route reads
+ * its mouth count, and before the socket attaches because the socket feeds it.
  */
-/**
- * The live lane is opt-in scaffolding: COMCON_ORB_LIVE wires the real Gemini
- * socket, the machine's microphone and speaker, and the wake-word gate. A face
- * arriving starts local capture but does NOT open the gate — the wake word
- * does. Off — the default, and what every test boots — the orb mounts exactly
- * as before: refused with a reason, no socket opened, no process spawned. The
- * flag comes off when #107's widget work makes the capture path permanent.
- */
-const orbLive = process.env.COMCON_ORB_LIVE === "1";
-let orbFaceCount: ((count: number) => void) | undefined;
+const faces = createLaneFaceSource();
 
+/**
+ * The orb's hub side: the token mint, the realtime settings, the status route,
+ * and the SSE face — deaf by design. It comes up refused only when there is
+ * no Google credential, and the reason travels to the page through
+ * /api/health and /api/orb/status, exactly as the voice lane's does.
+ */
 const orb = await mountOrb({
   credentials: storage,
-  turn: chat,
-  clips: diskClipStore(config.root),
   settingsPath: path.join(config.root, config.configDir, "settings.json"),
-  ...(orbLive
-    ? {
-        speaker: commandSpeaker(),
-        provider: geminiLiveProvider(),
-        earChain: pocEarChain(),
-        onFaceCount: (count: number) => orbFaceCount?.(count),
-      }
-    : { speaker: unwiredSpeaker }),
+  faces: { mouths: faces.mouths, subscribe: faces.subscribeFace },
 });
-
-if (orbLive && orb.orb) {
-  const livingOrb = orb.orb;
-  // A face arriving starts local capture but does not open the gate — the
-  // wake word does. The last face leaving closes the gate and stops capture.
-  orbFaceCount = createCaptureLifecycle({
-    startCapture: () => startMicrophone({ onFrame: (frame) => void livingOrb.push(frame) }),
-    closeGate: () => livingOrb.closeGate(),
-  });
-}
 
 /**
  * The device list reads the live socket rather than a snapshot.
@@ -276,27 +248,29 @@ export const server = serve(
 /**
  * The hub's state, offered to whatever is drawing it.
  *
- * When the orb is live, the face pipe hears it: the adapter translates the orb's
- * events into the face vocabulary and routes mute and dismiss to its gate. When
- * the orb is refused — no provider, no ear, no credential — the scripted source
- * stays, and a face sees idle, which is the truth.
+ * The face pipe carries what the hub actually knows: the states derived from
+ * the lane's conversation (a mouth opened somewhere, an ask is in flight, an
+ * answer went out) and the touch lane's scouts. Captions are deliberately not
+ * in the derived source — the socket relays them to its faces itself, and a
+ * word said twice is noise.
  *
- * The touch lane joins it on the same socket. A face opens one connection and
- * hears one vocabulary; whether a given word came from the conversation or from
- * the agent's hands is the hub's business, not the face's.
+ * A face opens one connection and hears one vocabulary; whether a given word
+ * came from the conversation or from the agent's hands is the hub's business,
+ * not the face's.
  */
-export const eventSource = combineEventSources(chooseFaceSource(orb), touchLane);
+export const eventSource = combineEventSources(faces.source, touchLane);
 
 /**
- * The lane's brain rides the same wrapped turn as the orb's and the typed
- * route's — an `ask` that arrives over the socket is indistinguishable
- * downstream from one that was typed or spoken. Built here rather than
- * borrowed from the orb because the orb may be refused on this machine, and a
- * mouth on another device still deserves an answer: the dispatch seam depends
- * on the agent, never on a hub-side realtime session.
+ * The lane's brain rides the same wrapped turn as the typed route's — an
+ * `ask` that arrives over the socket is indistinguishable downstream from one
+ * that was typed. The dispatch seam depends on the agent, never on a realtime
+ * session: those live on the devices now, and this brain is what they call.
+ * The observer closes the loop — the socket tells the face source what the
+ * conversation is doing, and every face draws from that.
  */
 export const eventSocket = attachEventSocket(server, eventSource, {
   brain: createHubBrain({ turn: chat }),
+  observer: faces.observer,
   // The store is empty until QR pairing (#35) mints into it; loopback still
   // walks in. Wired now so the door checks the same file pairing will write.
   credentials: createDeviceCredentialStore(

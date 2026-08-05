@@ -1,222 +1,171 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { createWakeWordClassifier, type LocalEar, type VoiceActivityDetector } from "./ear.ts";
-import { alwaysWakeWord } from "./ear-poc.ts";
-import type { RealtimeSession } from "./live.ts";
-import { Mouth } from "./mouth.ts";
-import { Orb, type OrbEvent } from "./orb.ts";
-import { GESTURES, ORB_BASE_PATH, buildOrbApp, parseGesture } from "./routes.ts";
-import { UtteranceBank, type ClipStore } from "./utterance-bank.ts";
+import type { StateEvent } from "../events/types.ts";
+import { GESTURES, buildOrbApp, parseGesture, toPageEvent } from "./routes.ts";
 
-function silentVad(): VoiceActivityDetector {
-  return { isSpeech: () => false, reset: () => {} };
-}
+/**
+ * The routes survive the hub going deaf under their old names — a face
+ * depends on them — so these tests pin what the hub can still honestly say
+ * through them: a coarse status derived from the lane's mouth count, an SSE
+ * stream of derived states and captions, and a gesture vocabulary that is
+ * accepted and truthfully changes nothing.
+ */
 
-function fakeSession(): RealtimeSession {
-  let muted = false;
+type Listener = (event: StateEvent) => void;
+
+function liveMount(mouths = 0) {
+  const listeners = new Set<Listener>();
+  const state = { mouths };
   return {
-    sendAudio: () => {},
-    sendText: async () => {},
-    sendFunctionResult: async () => {},
-    mute: () => {
-      muted = true;
+    mount: {
+      mouths: () => state.mouths,
+      subscribe(listener: Listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
     },
-    unmute: () => {
-      muted = false;
+    emit: (event: StateEvent) => {
+      for (const listener of [...listeners]) listener(event);
     },
-    get muted() {
-      return muted;
-    },
-    connected: true,
-    close: async () => {},
+    listeners,
+    state,
   };
 }
 
-function emptyBank(): UtteranceBank {
-  const store: ClipStore = { read: async () => undefined, write: async () => {}, list: async () => [] };
-  return new UtteranceBank(store, () => 0);
-}
+describe("the status a poll can trust", () => {
+  it("no open mouths is idle", async () => {
+    const { mount } = liveMount(0);
+    const res = await buildOrbApp(mount).request("/api/orb/status");
 
-function buildMount() {
-  const ear: LocalEar = { languages: ["en"], transcribe: async () => "" };
-  const listeners = new Set<(event: OrbEvent) => void>();
-  const orb = new Orb({
-    gate: { vad: silentVad(), wakeWord: alwaysWakeWord, ear, classifier: createWakeWordClassifier() },
-    session: fakeSession(),
-    bank: emptyBank(),
-    mouth: new Mouth(),
-    speaker: { play: async () => {} },
-    brain: { ask: async () => "" },
-    onEvent: (event) => {
-      for (const listener of listeners) listener(event);
-    },
-  });
-  const mount = {
-    orb,
-    subscribe: (listener: (event: OrbEvent) => void) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-  };
-  return { app: buildOrbApp(mount), orb };
-}
-
-describe("the socket a face rides", () => {
-  it("reports the orb's state and the ear's licensed languages", async () => {
-    const { app } = buildMount();
-
-    const response = await app.request(`${ORB_BASE_PATH}/status`);
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      enabled: true,
-      state: "idle",
-      gate: "idle",
-      languages: ["en"],
-    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ enabled: true, state: "idle", mouths: 0 });
   });
 
-  it("says why the orb is off instead of failing silently", async () => {
-    const app = buildOrbApp({ reason: "The orb needs a Google account." });
+  it("any open mouth is talking, and the count says how many", async () => {
+    const { mount } = liveMount(2);
+    const res = await buildOrbApp(mount).request("/api/orb/status");
 
-    const status = await app.request(`${ORB_BASE_PATH}/status`);
+    expect(await res.json()).toEqual({ enabled: true, state: "talking", mouths: 2 });
+  });
 
-    await expect(status.json()).resolves.toEqual({
+  it("a refused orb answers with the reason, not a fake green", async () => {
+    const res = await buildOrbApp({ reason: "The orb needs a Google account." }).request(
+      "/api/orb/status",
+    );
+
+    expect(await res.json()).toEqual({
       enabled: false,
       reason: "The orb needs a Google account.",
     });
   });
+});
 
-  it("refuses gestures when the orb is off, with the same reason", async () => {
-    const app = buildOrbApp({ reason: "no key" });
-
-    const response = await app.request(`${ORB_BASE_PATH}/gesture`, {
-      method: "POST",
-      body: JSON.stringify({ gesture: "toggle" }),
-      headers: { "content-type": "application/json" },
-    });
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: "no key" });
+describe("the gesture vocabulary, still closed", () => {
+  it("names exactly the three words a face may send", () => {
+    expect(GESTURES).toEqual(["toggle", "mute", "dismiss"]);
+    expect(parseGesture("toggle")).toBe("toggle");
+    expect(parseGesture("explode")).toBeUndefined();
+    expect(parseGesture(42)).toBeUndefined();
   });
 
-  it("accepts a tap and toggles the gate", async () => {
-    const { app, orb } = buildMount();
-
-    const response = await app.request(`${ORB_BASE_PATH}/gesture`, {
+  it("accepts a known gesture and answers the same truth status tells", async () => {
+    const { mount } = liveMount(1);
+    const res = await buildOrbApp(mount).request("/api/orb/gesture", {
       method: "POST",
-      body: JSON.stringify({ gesture: "toggle" }),
       headers: { "content-type": "application/json" },
+      body: JSON.stringify({ gesture: "mute" }),
     });
 
-    expect(response.status).toBe(200);
-    expect(orb.gateState).toBe("open");
-    await expect(response.json()).resolves.toEqual({ state: "listening", gate: "open" });
+    // The gate these words used to pull lives on the devices now. The route
+    // answers — a face depends on that — and changes nothing.
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ state: "talking" });
   });
 
-  it("treats mute as stop listening, never as start", async () => {
-    const { app, orb } = buildMount();
-    orb.toggle();
-    expect(orb.gateState).toBe("open");
+  it("refuses an unknown gesture by name", async () => {
+    const { mount } = liveMount(0);
+    const res = await buildOrbApp(mount).request("/api/orb/gesture", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ gesture: "restart" }),
+    });
 
-    const post = (gesture: string) =>
-      app.request(`${ORB_BASE_PATH}/gesture`, {
-        method: "POST",
-        body: JSON.stringify({ gesture }),
-        headers: { "content-type": "application/json" },
-      });
-
-    await post("mute");
-    expect(orb.gateState).toBe("idle");
-
-    // Muting twice must not turn into unmuting.
-    await post("mute");
-    expect(orb.gateState).toBe("idle");
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe(
+      "Unknown gesture. This hub accepts: toggle, mute, dismiss.",
+    );
   });
 });
 
-describe("test_the_event_socket_carries_state_out_and_gestures_in_and_nothing_else", () => {
-  it("names the gestures it accepts and refuses everything else", async () => {
-    const { app, orb } = buildMount();
+describe("what a face event means for the page", () => {
+  it("translates the words the page can draw", () => {
+    expect(toPageEvent({ type: "wake_opened" })).toEqual({ type: "state", state: "listening" });
+    expect(toPageEvent({ type: "thinking" })).toEqual({ type: "state", state: "thinking" });
+    expect(toPageEvent({ type: "speaking" })).toEqual({ type: "state", state: "speaking" });
+    expect(toPageEvent({ type: "idle" })).toEqual({ type: "state", state: "idle" });
+    expect(toPageEvent({ type: "caption", text: "hi" })).toEqual({ type: "caption", text: "hi" });
+  });
 
-    for (const attempt of ["execute", "speak", "listen", "read_file", "", "toggle "]) {
-      const response = await app.request(`${ORB_BASE_PATH}/gesture`, {
-        method: "POST",
-        body: JSON.stringify({ gesture: attempt }),
-        headers: { "content-type": "application/json" },
-      });
-      expect(response.status).toBe(400);
+  it("stays silent for words the page has no rendering for", () => {
+    expect(toPageEvent({ type: "voice_opened" })).toBeUndefined();
+    expect(toPageEvent({ type: "voice_closed" })).toBeUndefined();
+    expect(toPageEvent({ type: "progress", id: "a", text: "…" })).toBeUndefined();
+    expect(toPageEvent({ type: "answer", id: "a", text: "done" })).toBeUndefined();
+  });
+});
+
+describe("the stream a page actually reads", () => {
+  async function frames(res: Response, expected: number): Promise<unknown[]> {
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    while ((text.match(/\n\n/g) ?? []).length < expected) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value);
     }
+    await reader.cancel();
+    return text
+      .split("\n\n")
+      .filter((chunk) => chunk.startsWith("data: "))
+      .map((chunk) => JSON.parse(chunk.slice("data: ".length)));
+  }
 
-    expect(orb.gateState).toBe("idle");
+  it("opens with the current truth and then carries the conversation", async () => {
+    const live = liveMount(0);
+    const app = buildOrbApp(live.mount);
+
+    const res = await app.request("/api/orb/events");
+    expect(res.headers.get("content-type")).toBe("text/event-stream");
+
+    live.state.mouths = 1;
+    live.emit({ type: "wake_opened" });
+    live.emit({ type: "caption", text: "hello there" });
+    // A lane word the page cannot draw crosses the subscription silently.
+    live.emit({ type: "voice_opened" });
+    live.emit({ type: "idle" });
+
+    expect(await frames(res, 4)).toEqual([
+      { type: "state", state: "idle" },
+      { type: "state", state: "listening" },
+      { type: "caption", text: "hello there" },
+      { type: "state", state: "idle" },
+    ]);
   });
 
-  it("keeps the vocabulary closed at the parser, not at the handler", () => {
-    expect(GESTURES).toEqual(["toggle", "mute", "dismiss"]);
-    expect(parseGesture("toggle")).toBe("toggle");
-    expect(parseGesture("sendAudio")).toBeUndefined();
-    expect(parseGesture({ gesture: "toggle" })).toBeUndefined();
-    expect(parseGesture(undefined)).toBeUndefined();
+  it("a page joining a live conversation does not sit on idle", async () => {
+    const live = liveMount(1);
+    const res = await buildOrbApp(live.mount).request("/api/orb/events");
+
+    expect(await frames(res, 1)).toEqual([{ type: "state", state: "listening" }]);
   });
 
-  it("refuses a malformed body rather than guessing at it", async () => {
-    const { app } = buildMount();
+  it("a refused orb refuses the stream with the reason", async () => {
+    const res = await buildOrbApp({ reason: "The orb needs a Google account." }).request(
+      "/api/orb/events",
+    );
 
-    const response = await app.request(`${ORB_BASE_PATH}/gesture`, {
-      method: "POST",
-      body: "not json",
-      headers: { "content-type": "application/json" },
-    });
-
-    expect(response.status).toBe(400);
-  });
-
-  it("streams state out as events, starting with where the orb is now", async () => {
-    const { app, orb } = buildMount();
-    const controller = new AbortController();
-
-    const response = await app.request(`${ORB_BASE_PATH}/events`, { signal: controller.signal });
-    expect(response.headers.get("content-type")).toBe("text/event-stream");
-
-    const reader = response.body!.getReader();
-    const first = await reader.read();
-    expect(new TextDecoder().decode(first.value)).toContain('"state":"idle"');
-
-    orb.toggle();
-    const second = await reader.read();
-    expect(new TextDecoder().decode(second.value)).toContain('"state":"listening"');
-
-    controller.abort();
-  });
-
-  it("stops sending to a face that has gone away", async () => {
-    const listeners = new Set<(event: OrbEvent) => void>();
-    const subscribe = vi.fn((listener: (event: OrbEvent) => void) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    });
-    const ear: LocalEar = { languages: ["en"], transcribe: async () => "" };
-    const orb = new Orb({
-      gate: { vad: silentVad(), wakeWord: alwaysWakeWord, ear, classifier: createWakeWordClassifier() },
-      session: fakeSession(),
-      bank: emptyBank(),
-      mouth: new Mouth(),
-      speaker: { play: async () => {} },
-      brain: { ask: async () => "" },
-      onEvent: (event) => {
-        for (const listener of listeners) listener(event);
-      },
-    });
-    const app = buildOrbApp({ orb, subscribe });
-    const controller = new AbortController();
-
-    const response = await app.request(`${ORB_BASE_PATH}/events`, { signal: controller.signal });
-    await response.body!.getReader().read();
-    expect(listeners.size).toBe(1);
-
-    controller.abort();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(listeners.size).toBe(0);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("The orb needs a Google account.");
   });
 });
