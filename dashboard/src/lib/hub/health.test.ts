@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseHealth, parseOrbStatus } from "./hub";
+import { parseHealth, parseOrbStatus } from "./health";
 
 // The fixture mirrors the live hub's answer, captured 2026-08-04 against
 // /api/health on bigbeast — the shapes the fetch layer promises to hold.
