@@ -35,8 +35,10 @@ export { UtteranceBank, CLIP_TEXT, clipClassFor } from "./utterance-bank.ts";
 export { createWakeWordClassifier, isActionable, WAKE_WORDS } from "./ear.ts";
 export { HUB_FUNCTION_NAME, REALTIME_TOOLS, LIVE_MODEL, realtimeConfig } from "./live.ts";
 export { createHubBrain } from "./brain.ts";
+export { OrbFaceSource, chooseFaceSource, toStateEvent } from "./face-source.ts";
 
 export type { OrbEvent, OrbState, Speaker, HubBrain } from "./orb.ts";
+export type { OrbFaceDeps, LiveOrbMount } from "./face-source.ts";
 export type { AudioFrame, LocalEar, VoiceActivityDetector, Classifier, IntentClass, Hearing } from "./ear.ts";
 export type { RealtimeProvider, RealtimeSession, FunctionCall } from "./live.ts";
 export type { Clip, ClipStore, ClipSynthesizer } from "./utterance-bank.ts";
@@ -75,6 +77,15 @@ export type OrbMount = {
   /** Why the orb is off, when it is. Surfaced by health the way voice's is. */
   reason?: string;
   orb?: Orb;
+  /**
+   * Watch the orb's event stream. Present only when the orb is live.
+   *
+   * Each subscription counts as a face for `onFaceCount` — the consent seam
+   * that opens and closes the microphone — so the face source proxies each
+   * face's subscribe through this rather than holding a permanent listener,
+   * which would keep the machine listening after the last face left.
+   */
+  subscribe?(listener: (event: OrbEvent) => void): () => void;
 };
 
 const NO_PROVIDER =
@@ -151,17 +162,17 @@ export async function mountOrb(options: OrbMountOptions): Promise<OrbMount> {
   });
   attached = orb;
 
+  const subscribe = (listener: (event: OrbEvent) => void) => {
+    listeners.add(listener);
+    options.onFaceCount?.(listeners.size);
+    return () => {
+      if (listeners.delete(listener)) options.onFaceCount?.(listeners.size);
+    };
+  };
+
   return {
-    app: buildOrbApp({
-      orb,
-      subscribe: (listener) => {
-        listeners.add(listener);
-        options.onFaceCount?.(listeners.size);
-        return () => {
-          if (listeners.delete(listener)) options.onFaceCount?.(listeners.size);
-        };
-      },
-    }),
+    app: buildOrbApp({ orb, subscribe }),
     orb,
+    subscribe,
   };
 }
