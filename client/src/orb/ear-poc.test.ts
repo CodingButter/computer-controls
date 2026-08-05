@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createAmplitudeVad, deafEar, pocEarChain } from "./ear-poc.ts";
+import { createAmplitudeVad, deafEar, deafWakeWord, pocEarChain } from "./ear-poc.ts";
 
 function frame(...samples: number[]) {
   return { samples: new Int16Array(samples), sampleRate: 16_000 };
@@ -20,9 +20,16 @@ describe("the proof-of-concept ear chain", () => {
     expect(deafEar.languages).toEqual([]);
   });
 
+  it("has a wake-word detector that never hears the name, so speech stays home", () => {
+    // A false negative costs a repeated sentence; a false positive costs audio
+    // leaving the machine. So the safe placeholder always answers no.
+    expect(deafWakeWord.heard(frame(1, 2, 3))).toBe(false);
+  });
+
   it("assembles a whole chain", () => {
     const chain = pocEarChain();
     expect(chain.vad.isSpeech(frame(9_000))).toBe(true);
+    expect(chain.wakeWord).toBe(deafWakeWord);
     expect(chain.classifier.classify("nothing addressed to us").addressed).toBe(false);
   });
 });

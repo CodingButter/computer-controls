@@ -19,7 +19,8 @@ import { SYSTEM_APPLICATIONS_DIR, scanDesktopEntries } from "./permissions/deskt
 import { createIconSource, defaultIconDirs } from "./permissions/icons.ts";
 import { createPermissionRegistry } from "./permissions/registry.ts";
 import { buildPermissionsApp } from "./permissions/routes.ts";
-import { commandSpeaker, startMicrophone, type Microphone } from "./orb/audio-host.ts";
+import { commandSpeaker, startMicrophone } from "./orb/audio-host.ts";
+import { createCaptureLifecycle } from "./orb/capture-lifecycle.ts";
 import { pocEarChain } from "./orb/ear-poc.ts";
 import { diskClipStore, unwiredSpeaker } from "./orb/host.ts";
 import { chooseFaceSource, mountOrb } from "./orb/index.ts";
@@ -118,9 +119,10 @@ const voice = {
  */
 /**
  * The live lane is opt-in scaffolding: COMCON_ORB_LIVE wires the real Gemini
- * socket, the machine's microphone and speaker, and the visit-is-consent gate.
- * Off — the default, and what every test boots — the orb mounts exactly as
- * before: refused with a reason, no socket opened, no process spawned. The
+ * socket, the machine's microphone and speaker, and the wake-word gate. A face
+ * arriving starts local capture but does NOT open the gate — the wake word
+ * does. Off — the default, and what every test boots — the orb mounts exactly
+ * as before: refused with a reason, no socket opened, no process spawned. The
  * flag comes off when #107's widget work makes the capture path permanent.
  */
 const orbLive = process.env.COMCON_ORB_LIVE === "1";
@@ -135,8 +137,6 @@ const orb = await mountOrb({
         speaker: commandSpeaker(),
         provider: geminiLiveProvider(),
         earChain: pocEarChain(),
-        // Visiting the page is the consent; the gate holds for the sitting.
-        quietPeriodMs: 24 * 60 * 60 * 1000,
         onFaceCount: (count: number) => orbFaceCount?.(count),
       }
     : { speaker: unwiredSpeaker }),
@@ -144,21 +144,12 @@ const orb = await mountOrb({
 
 if (orbLive && orb.orb) {
   const livingOrb = orb.orb;
-  let microphone: Microphone | undefined;
-  orbFaceCount = (count) => {
-    if (count > 0 && !microphone) {
-      // A face arrived: the deliberate act. The mic opens and the gate with it.
-      microphone = startMicrophone({ onFrame: (frame) => void livingOrb.push(frame) });
-      if (livingOrb.gateState !== "open") livingOrb.toggle();
-      return;
-    }
-    if (count === 0 && microphone) {
-      // The last face left: the machine goes quiet, process and gate both.
-      livingOrb.closeGate();
-      microphone.stop();
-      microphone = undefined;
-    }
-  };
+  // A face arriving starts local capture but does not open the gate — the
+  // wake word does. The last face leaving closes the gate and stops capture.
+  orbFaceCount = createCaptureLifecycle({
+    startCapture: () => startMicrophone({ onFrame: (frame) => void livingOrb.push(frame) }),
+    closeGate: () => livingOrb.closeGate(),
+  });
 }
 
 const app = buildApp({

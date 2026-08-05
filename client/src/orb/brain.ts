@@ -12,8 +12,29 @@
  * works if both faces write into one history.
  */
 
+import type { AgentControllerEvent } from "@mastra/core/agent-controller";
 import type { AgentTurn } from "../chat.ts";
 import type { HubBrain } from "./orb.ts";
+
+/**
+ * Map a controller event to an outcome-shaped progress fact — what surface is
+ * being touched, not what was found there. Content never appears in a progress
+ * signal; it appears only in the final spoken answer.
+ */
+function progressFromEvent(event: AgentControllerEvent): string | undefined {
+  switch (event.type) {
+    case "tool_start": {
+      const name = event.toolName.replace(/[_-]/g, " ").trim();
+      return name ? `You are now working on: ${name}.` : undefined;
+    }
+    case "subagent_start": {
+      const task = event.task?.trim();
+      return task ? `You are now: ${task}.` : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
 
 export function createHubBrain(deps: {
   turn: AgentTurn;
@@ -21,11 +42,19 @@ export function createHubBrain(deps: {
   threadId?: () => string | undefined;
 }): HubBrain {
   return {
-    async ask(request: string): Promise<string> {
+    async ask(request: string, onProgress?: (signal: string) => void): Promise<string> {
       const threadId = deps.threadId?.();
       const reply = await deps.turn({
         message: request,
         ...(threadId ? { threadId } : {}),
+        ...(onProgress
+          ? {
+              onEvent: (event: AgentControllerEvent) => {
+                const signal = progressFromEvent(event);
+                if (signal) onProgress(signal);
+              },
+            }
+          : {}),
       });
       // The provider speaks this, so an empty answer would be silence in the
       // middle of a conversation. Saying that nothing came back is worse to

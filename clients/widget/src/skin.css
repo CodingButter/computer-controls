@@ -76,6 +76,28 @@ body {
   box-shadow: none;
 }
 
+/*
+ * When the shader mounts, the CSS orb steps aside. Its gradient and its motion
+ * are the fallback; the shader draws both. The canvas fills the #orb box at the
+ * size the skin set, and is hidden entirely until the renderer confirms WebGL
+ * and adds the class — so a no-WebGL machine never shows an empty rectangle.
+ */
+#orb-canvas {
+  display: none;
+}
+
+#orb.webgl {
+  background: transparent;
+  box-shadow: none;
+  animation: none;
+}
+
+#orb.webgl #orb-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 @keyframes breathe {
   0%,
   100% {
@@ -132,4 +154,38 @@ body {
 
 #caption:empty {
   display: none;
+}
+
+#menu {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: rgba(15, 23, 42, 0.95);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  z-index: 10;
+}
+
+#menu[hidden] {
+  display: none;
+}
+
+#menu button {
+  padding: 6px 16px;
+  border: none;
+  background: transparent;
+  color: #f4f7ff;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+#menu button:hover,
+#menu button:focus-visible {
+  background: rgba(74, 125, 255, 0.3);
+  outline: none;
 }

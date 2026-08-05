@@ -112,6 +112,10 @@ app.whenReady().then(() => {
     if (window.isDestroyed()) return;
     window.setIgnoreMouseEvents(!over, { forward: true });
   });
+
+  // A face the user asked to leave leaves. The process closes its own windows
+  // and exits — never a kill from outside, always a semantic close.
+  ipcMain.on("widget:quit", () => app.quit());
 });
 
 // No windows left means no face left, and a face is all this process is.

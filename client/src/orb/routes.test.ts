@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createWakeWordClassifier, type LocalEar, type VoiceActivityDetector } from "./ear.ts";
+import { alwaysWakeWord } from "./ear-poc.ts";
 import type { RealtimeSession } from "./live.ts";
 import { Mouth } from "./mouth.ts";
 import { Orb, type OrbEvent } from "./orb.ts";
@@ -40,7 +41,7 @@ function buildMount() {
   const ear: LocalEar = { languages: ["en"], transcribe: async () => "" };
   const listeners = new Set<(event: OrbEvent) => void>();
   const orb = new Orb({
-    gate: { vad: silentVad(), ear, classifier: createWakeWordClassifier() },
+    gate: { vad: silentVad(), wakeWord: alwaysWakeWord, ear, classifier: createWakeWordClassifier() },
     session: fakeSession(),
     bank: emptyBank(),
     mouth: new Mouth(),
@@ -196,7 +197,7 @@ describe("test_the_event_socket_carries_state_out_and_gestures_in_and_nothing_el
     });
     const ear: LocalEar = { languages: ["en"], transcribe: async () => "" };
     const orb = new Orb({
-      gate: { vad: silentVad(), ear, classifier: createWakeWordClassifier() },
+      gate: { vad: silentVad(), wakeWord: alwaysWakeWord, ear, classifier: createWakeWordClassifier() },
       session: fakeSession(),
       bank: emptyBank(),
       mouth: new Mouth(),

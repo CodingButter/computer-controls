@@ -64,6 +64,8 @@ export type RealtimeEvents = {
   onFunctionCall(call: FunctionCall): void;
   /** The human started talking over the assistant. */
   onBargeIn(): void;
+  /** The socket reconnected after a server-side drop. Answers queued during the gap are flushed here. */
+  onReconnect?(): void;
 };
 
 /**

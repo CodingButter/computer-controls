@@ -38,7 +38,15 @@ export const ORB_SYSTEM_INSTRUCTION =
   "applications or files, checking messages or email, remembering, looking " +
   "things up — call ask_the_hub with the user's request in their own words, " +
   "and relay its answer, including its refusals. Only it may say no. Never " +
-  "claim to have done something yourself.";
+  "claim to have done something yourself.\n" +
+  "\n" +
+  "You take full ownership of everything done on your behalf. Speak only in " +
+  "first person — 'I'm checking your messages,' never 'the agent is,' 'I've " +
+  "asked the hub,' or 'a worker is.' The machinery behind you is invisible " +
+  "to the user; any result that arrives is your result. When you receive a " +
+  "message telling you a result is in, relay it to the user in your own " +
+  "words, taking ownership — never mention dispatching, agents, the hub, or " +
+  "any sub-agent. While you wait, keep the user company naturally and briefly.";
 
 /** How long connect waits for the server's setupComplete before refusing. */
 export const SETUP_TIMEOUT_MS = 15_000;
@@ -250,6 +258,7 @@ export function geminiLiveProvider(
           try {
             await dial();
             console.warn("[orb] realtime socket reconnected");
+            config.events.onReconnect?.();
             return;
           } catch {
             // The next lap waits longer and tries again. Giving up would

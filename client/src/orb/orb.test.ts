@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createHubBrain } from "./brain.ts";
 import { createWakeWordClassifier, type AudioFrame, type LocalEar, type VoiceActivityDetector } from "./ear.ts";
+import { alwaysWakeWord } from "./ear-poc.ts";
 import type { RealtimeSession } from "./live.ts";
 import { Mouth } from "./mouth.ts";
 import { Orb, type OrbEvent, type Speaker } from "./orb.ts";
@@ -73,7 +74,7 @@ function build(options: { transcript?: string; answer?: string } = {}) {
   const vad = controllableVad();
   const ear: LocalEar = {
     languages: ["en"],
-    transcribe: async () => options.transcript ?? "computer open the browser",
+    transcribe: async () => options.transcript ?? "mastra open the browser",
   };
   const session = fakeSession();
   const played: string[] = [];
@@ -85,7 +86,7 @@ function build(options: { transcript?: string; answer?: string } = {}) {
   const ask = vi.fn(async (request: string) => options.answer ?? `did: ${request}`);
   const events: OrbEvent[] = [];
   const orb = new Orb({
-    gate: { vad, ear, classifier: createWakeWordClassifier() },
+    gate: { vad, ear, classifier: createWakeWordClassifier(), wakeWord: alwaysWakeWord },
     session,
     bank: bankHolding([
       { id: "acknowledge-0", class: "acknowledge", audio: new TextEncoder().encode("on it"), durationMs: 400 },
@@ -129,7 +130,7 @@ describe("test_idle_mode_sends_no_audio_off_the_machine", () => {
 });
 
 describe("test_actionable_requests_route_to_the_pack_brain_as_one_function_call", () => {
-  it("hands the request to the hub agent and returns the answer to the provider", async () => {
+  it("returns an immediate acknowledgment so the provider keeps its voice, then dispatches", async () => {
     const { orb, session, ask } = build();
 
     orb.realtimeEvents.onFunctionCall({
@@ -139,20 +140,22 @@ describe("test_actionable_requests_route_to_the_pack_brain_as_one_function_call"
     });
     await tick();
 
+    // The brain was called with the user's request (onProgress is always passed).
     expect(ask).toHaveBeenCalledTimes(1);
-    expect(ask).toHaveBeenCalledWith("open the browser");
-    expect(session.results).toEqual([{ id: "call-1", result: "did: open the browser" }]);
+    expect(ask).toHaveBeenCalledWith("open the browser", expect.any(Function));
+    // The provider received an immediate acknowledgment — not silence while the
+    // hub works.
+    expect(session.results).toEqual([{ id: "call-1", result: expect.stringMatching(/acknowledged/i) }]);
   });
 
-  it("speaks the answer through the provider rather than out of a second mouth", async () => {
+  it("injects the resolved answer as a spoken text signal, not out of a second mouth", async () => {
     const { orb, session, played } = build();
 
     orb.realtimeEvents.onFunctionCall({ id: "c", name: "ask_the_hub", args: { request: "x" } });
     await tick();
 
-    // The answer went back down the socket; nothing was synthesized locally, so
-    // the response comes out in the same voice as the rest of the conversation.
-    expect(session.results).toHaveLength(1);
+    // The answer arrived as a text turn the provider speaks, not as a local synth.
+    expect(session.texts.some((t) => t.includes("did: x"))).toBe(true);
     expect(played).not.toContain("did: x");
   });
 
@@ -161,6 +164,7 @@ describe("test_actionable_requests_route_to_the_pack_brain_as_one_function_call"
     const failing = new Orb({
       gate: {
         vad: controllableVad(),
+        wakeWord: alwaysWakeWord,
         ear: { languages: ["en"], transcribe: async () => "" },
         classifier: createWakeWordClassifier(),
       },
@@ -178,9 +182,11 @@ describe("test_actionable_requests_route_to_the_pack_brain_as_one_function_call"
     failing.realtimeEvents.onFunctionCall({ id: "c", name: "ask_the_hub", args: { request: "x" } });
     await tick();
 
-    expect(session.results[0]?.result).toMatch(/did not work/i);
-    // And the failure never becomes a claim that something happened.
-    expect(session.results[0]?.result).toMatch(/nothing was changed/i);
+    // The failure is spoken as a text signal, and never becomes a claim that
+    // something happened.
+    const spoken = session.texts.join(" ");
+    expect(spoken).toMatch(/did not work/i);
+    expect(spoken).toMatch(/nothing was changed/i);
   });
 
   it("refuses an empty request instead of waking the brain for nothing", async () => {
@@ -191,6 +197,81 @@ describe("test_actionable_requests_route_to_the_pack_brain_as_one_function_call"
 
     expect(ask).not.toHaveBeenCalled();
     expect(session.results[0]?.result).toMatch(/no request/i);
+  });
+
+  it("returns the acknowledgment before the brain has been asked", async () => {
+    const { orb, session, ask } = build();
+
+    orb.realtimeEvents.onFunctionCall({ id: "c", name: "ask_the_hub", args: { request: "x" } });
+
+    // Synchronously after the call returns, the ack is already on the socket
+    // and the brain has not been asked yet — #dispatch runs only after the
+    // await in #onFunctionCall resumes.
+    expect(session.results).toHaveLength(1);
+    expect(ask).not.toHaveBeenCalled();
+
+    await tick();
+    expect(ask).toHaveBeenCalledTimes(1);
+  });
+
+  it("attributes overlapping dispatches to their own answers", async () => {
+    const { orb, session } = build();
+
+    orb.realtimeEvents.onFunctionCall({ id: "a", name: "ask_the_hub", args: { request: "alpha" } });
+    orb.realtimeEvents.onFunctionCall({ id: "b", name: "ask_the_hub", args: { request: "beta" } });
+    await tick();
+
+    const spoken = session.texts.join("\n");
+    expect(spoken).toContain("did: alpha");
+    expect(spoken).toContain("did: beta");
+  });
+
+  it("never mentions agents, hub, dispatch, or worker in any spoken text", async () => {
+    const { orb, session } = build();
+
+    orb.realtimeEvents.onFunctionCall({ id: "c", name: "ask_the_hub", args: { request: "x" } });
+    await tick();
+
+    const forbidden = /\b(agent|hub|dispatch|worker|delegate|sub-?agent)\b/i;
+    // Function results (session.results) are model instructions, not spoken
+    // text — the ack deliberately tells the model *not* to mention these words.
+    // Only session.texts (the announce path) reaches the user's ears.
+    for (const text of session.texts) {
+      expect(text).not.toMatch(forbidden);
+    }
+  });
+});
+
+describe("an answer that arrives during a reconnect gap survives the redial", () => {
+  it("queues the answer and speaks it when the socket returns", async () => {
+    const session = fakeSession();
+    const orb = new Orb({
+      gate: {
+        vad: controllableVad(),
+        ear: { languages: ["en"], transcribe: async () => "" },
+        classifier: createWakeWordClassifier(),
+      },
+      session,
+      bank: bankHolding([]),
+      mouth: new Mouth(),
+      speaker: { play: async () => {} },
+      brain: { ask: async () => "done" },
+    });
+
+    // The socket drops while the dispatch is in flight.
+    session.connected = false;
+    orb.realtimeEvents.onFunctionCall({ id: "c", name: "ask_the_hub", args: { request: "x" } });
+    await tick();
+
+    // The answer was queued, not spoken into the void.
+    expect(session.texts).toHaveLength(0);
+
+    // The socket returns; the queued answer is flushed.
+    session.connected = true;
+    orb.realtimeEvents.onReconnect();
+    await tick();
+
+    expect(session.texts.some((t) => t.includes("done"))).toBe(true);
   });
 });
 
@@ -240,7 +321,7 @@ describe("test_a_signal_injected_as_text_is_spoken_by_the_orb", () => {
 
 describe("test_a_filler_clip_plays_from_cache_and_never_from_a_live_synth_call", () => {
   it("plays the acknowledgement while the request is still in flight", async () => {
-    const { orb, vad, played } = build({ transcript: "computer open the browser" });
+    const { orb, vad, played } = build({ transcript: "mastra open the browser" });
 
     await say(orb, vad);
     await tick();
@@ -249,7 +330,7 @@ describe("test_a_filler_clip_plays_from_cache_and_never_from_a_live_synth_call",
   });
 
   it("says nothing at all before small talk", async () => {
-    const { orb, vad, played } = build({ transcript: "computer nice to see you" });
+    const { orb, vad, played } = build({ transcript: "mastra nice to see you" });
 
     await say(orb, vad);
     await tick();
@@ -258,7 +339,7 @@ describe("test_a_filler_clip_plays_from_cache_and_never_from_a_live_synth_call",
   });
 
   it("covers a reconnect gap with a thinking clip instead of dead air", async () => {
-    const { orb, session, vad, played } = build({ transcript: "computer open the browser" });
+    const { orb, session, vad, played } = build({ transcript: "mastra open the browser" });
     session.connected = false;
 
     await say(orb, vad);
@@ -284,13 +365,13 @@ describe("the orb's own state, as the faces see it", () => {
   });
 
   it("captions the user's own words from the local transcript", async () => {
-    const { orb, vad, events } = build({ transcript: "computer open the browser" });
+    const { orb, vad, events } = build({ transcript: "mastra open the browser" });
 
     await say(orb, vad);
 
     expect(events).toContainEqual({
       type: "caption",
-      text: "computer open the browser",
+      text: "mastra open the browser",
       speaker: "user",
     });
   });
@@ -301,6 +382,7 @@ describe("the orb's own state, as the faces see it", () => {
     const orb = new Orb({
       gate: {
         vad: controllableVad(),
+        wakeWord: alwaysWakeWord,
         ear: { languages: ["en"], transcribe: async () => "" },
         classifier: createWakeWordClassifier(),
       },

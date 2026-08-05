@@ -28,6 +28,7 @@ import {
   type Sentiment,
   type VoiceActivityDetector,
 } from "./ear.ts";
+import { alwaysWakeWord } from "./ear-poc.ts";
 import type { RealtimeSession } from "./live.ts";
 import { Mouth } from "./mouth.ts";
 import { Orb, type OrbEvent, type Speaker } from "./orb.ts";
@@ -92,7 +93,7 @@ function build(transcript: string) {
   const ask = vi.fn(async (request: string) => `did: ${request}`);
   const events: OrbEvent[] = [];
   const orb = new Orb({
-    gate: { vad, ear, classifier: createWakeWordClassifier() },
+    gate: { vad, ear, classifier: createWakeWordClassifier(), wakeWord: alwaysWakeWord },
     session,
     bank: new UtteranceBank(store, () => 0),
     mouth: new Mouth(),
@@ -119,14 +120,14 @@ describe("test_the_orb_color_follows_the_sentiment_label", () => {
   it("reads frustration, excitement and calm from what was said after the wake word", () => {
     const classify = createWakeWordClassifier().classify;
 
-    expect(classify("computer it's still not working").sentiment).toBe("frustrated");
-    expect(classify("computer that worked, amazing").sentiment).toBe("excited");
-    expect(classify("computer no rush, what's the weather").sentiment).toBe("calm");
-    expect(classify("computer open the browser").sentiment).toBe("neutral");
+    expect(classify("mastra it's still not working").sentiment).toBe("frustrated");
+    expect(classify("mastra that worked, amazing").sentiment).toBe("excited");
+    expect(classify("mastra no rush, what's the weather").sentiment).toBe("calm");
+    expect(classify("mastra open the browser").sentiment).toBe("neutral");
   });
 
   it("carries the label from the utterance to a mood event on the way out", async () => {
-    const { orb, vad, events } = build("computer this is still broken");
+    const { orb, vad, events } = build("mastra this is still broken");
 
     await say(orb, vad);
 
@@ -159,7 +160,7 @@ describe("test_the_orb_color_follows_the_sentiment_label", () => {
   });
 
   it("returns to the resting color when the conversation goes quiet", async () => {
-    const { orb, vad, events } = build("computer this is broken again");
+    const { orb, vad, events } = build("mastra this is broken again");
 
     await say(orb, vad);
     expect(moods(events)).toContain("frustrated");
@@ -198,7 +199,7 @@ describe("test_the_orb_color_follows_the_sentiment_label", () => {
 
 describe("test_sentiment_is_never_persisted_or_sent_off_the_machine", () => {
   it("sends no sentiment label to the realtime provider", async () => {
-    const { orb, session, vad } = build("computer this is still broken, seriously");
+    const { orb, session, vad } = build("mastra this is still broken, seriously");
 
     await say(orb, vad);
     orb.realtimeEvents.onFunctionCall({
@@ -217,7 +218,7 @@ describe("test_sentiment_is_never_persisted_or_sent_off_the_machine", () => {
   });
 
   it("sends no sentiment label to the agent, whose thread is written to disk", async () => {
-    const { orb, vad, ask } = build("computer this is broken again, seriously");
+    const { orb, vad, ask } = build("mastra this is broken again, seriously");
 
     await say(orb, vad);
     orb.realtimeEvents.onFunctionCall({
@@ -227,7 +228,7 @@ describe("test_sentiment_is_never_persisted_or_sent_off_the_machine", () => {
     });
     await new Promise((r) => setTimeout(r, 0));
 
-    expect(ask).toHaveBeenCalledWith("open the browser");
+    expect(ask).toHaveBeenCalledWith("open the browser", expect.any(Function));
     for (const call of ask.mock.calls) {
       for (const sentiment of SENTIMENTS) {
         expect(call[0].toLowerCase()).not.toContain(sentiment);
@@ -236,7 +237,7 @@ describe("test_sentiment_is_never_persisted_or_sent_off_the_machine", () => {
   });
 
   it("keeps no mood on the orb, so there is nothing to read back or replay", async () => {
-    const { orb, vad } = build("computer this is still broken");
+    const { orb, vad } = build("mastra this is still broken");
 
     await say(orb, vad);
 
@@ -272,12 +273,12 @@ describe("test_sentiment_is_never_persisted_or_sent_off_the_machine", () => {
   });
 
   it("writes no mood into the captions or the drawer the page keeps", async () => {
-    const { orb, vad, events } = build("computer this is still broken");
+    const { orb, vad, events } = build("mastra this is still broken");
 
     await say(orb, vad);
 
     const captions = events.flatMap((e) => (e.type === "caption" ? [e.text] : []));
-    expect(captions).toEqual(["computer this is still broken"]);
+    expect(captions).toEqual(["mastra this is still broken"]);
     // The transcript is the person's own words and is theirs to see. Our
     // reading of their tone is not in it.
     for (const caption of captions) {
