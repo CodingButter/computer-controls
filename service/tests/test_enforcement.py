@@ -620,3 +620,51 @@ def test_the_active_window_is_not_named_when_it_is_withheld(walled, monkeypatch)
     result = server._method_get_desktop_state({})
     assert result["windows"] == []
     assert result["activeWindowId"] == ""
+
+
+def test_a_view_only_application_is_resolved_even_with_no_list_in_force(monkeypatch):
+    # The application is looked up lazily, and until now only a list asked for
+    # it. A file that says "read Discord, do not type in it" without also
+    # naming which applications exist would have parsed, saved, and enforced
+    # nothing: every call would arrive with no application to check the cap
+    # against. This is that gap, asked at the seam a real call goes through.
+    ceiling = security.Ceiling(
+        classes=frozenset({"observe", "edit", "activate", "submit"}),
+        application_classes={"discord": frozenset({"observe"})},
+    )
+    server._consent = security.Consent(ceiling)
+    server._consent.grant("agent", classes=["edit", "activate", "submit"])
+    monkeypatch.setattr(server, "_application_of", lambda params: (
+        "discord" if params.get("windowId") == "win-chat" else "some-editor"
+    ))
+
+    guarded = server._guarded("focusWindow", lambda params: {"ok": True})
+    with pytest.raises(PermissionDenied):
+        guarded({"clientId": "agent", "windowId": "win-chat"})
+    assert guarded({"clientId": "agent", "windowId": "win-doc"})["ok"] is True
+
+
+def test_a_batch_step_cannot_exceed_a_view_only_application(monkeypatch):
+    # Same exploit the blocklist closed, against the cap instead of the wall:
+    # the batch's own parameters name no target, so a cap checked only there
+    # would wave through the step that reaches into the capped application.
+    ceiling = security.Ceiling(
+        classes=frozenset({"observe", "activate", "submit"}),
+        application_classes={"discord": frozenset({"observe"})},
+    )
+    server._consent = security.Consent(ceiling)
+    server._consent.grant("agent", classes=["activate", "submit"])
+    monkeypatch.setattr(server, "_application_of", lambda params: (
+        "discord" if params.get("windowId") == "win-chat" else "some-editor"
+    ))
+    ran: list[str] = []
+    monkeypatch.setitem(server._BATCH_METHODS, "focusWindow", lambda params: ran.append("focus"))
+
+    guarded = server._guarded("performActions", server._method_perform_actions)
+    with pytest.raises(PermissionDenied):
+        guarded({
+            "clientId": "agent",
+            "confirm": True,
+            "actions": [{"method": "focusWindow", "params": {"windowId": "win-chat"}}],
+        })
+    assert ran == [], "the batch must be refused before any step of it happens"

@@ -54,6 +54,12 @@ EXAMPLE = {
         "operationClasses": ["observe", "edit", "activate"],
         "applications": [],
         "blockedApplications": ["bitwarden", "keepassxc"],
+        # How far a client may go inside one application, where the answer is
+        # not the same everywhere. An application listed here is capped at
+        # what it names; one that is not listed is governed by
+        # operationClasses. The highest class named carries the ones below it,
+        # so "activate" is the interact setting and "observe" is view-only.
+        "applicationClasses": {"discord": ["observe"]},
         "confirmClasses": ["submit", "destructive"],
         "idleExpirySeconds": 1800,
     },

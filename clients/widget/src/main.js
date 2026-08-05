@@ -1,4 +1,4 @@
-import { BrowserWindow, app, ipcMain, screen, session } from "electron";
+import { BrowserWindow, app, ipcMain, screen, session, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,14 +19,45 @@ import { fileURLToPath } from "node:url";
  * of what a thing that draws needs.
  */
 
-import { HEIGHT, WIDTH, placeWindow } from "./window-shape.js";
+import {
+  HEIGHT,
+  WIDTH,
+  dragPlacement,
+  placeWindow,
+  readDragRequest,
+  restorePlacement,
+} from "./window-shape.js";
+import { readPlacement, writePlacement } from "./placement-store.js";
+import { dashboardUrl } from "./dashboard.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-function createWindow() {
+/** Where the drag is written down, beside whatever else this app stores. */
+const placementFile = () => path.join(app.getPath("userData"), "placement.json");
+
+/** The hub's port, read from the environment exactly as the bridge reads it. */
+const hubPort = () => Number(process.env.COMCON_CLIENT_PORT ?? 4111);
+
+/**
+ * Where the face opens: where it was left, or where it has never been.
+ *
+ * A stored placement is resolved against the display it was left on, so a
+ * remembered corner is still a corner after the screen changed size and a
+ * remembered spot on a monitor that is no longer there is pulled back onto one
+ * that is.
+ */
+function openingPlacement() {
+  const stored = readPlacement(placementFile());
+  if (stored) {
+    const display = screen.getDisplayNearestPoint({ x: stored.x, y: stored.y });
+    return restorePlacement(display.workArea, stored);
+  }
   const area = screen.getPrimaryDisplay().workAreaSize;
-  const placement = process.env.COMCON_WIDGET_PLACEMENT ?? "corner";
-  const { x, y } = placeWindow(area, placement);
+  return placeWindow(area, process.env.COMCON_WIDGET_PLACEMENT ?? "corner");
+}
+
+function createWindow() {
+  const { x, y } = openingPlacement();
 
   const window = new BrowserWindow({
     width: WIDTH,
@@ -111,6 +142,50 @@ app.whenReady().then(() => {
   ipcMain.on("widget:pointer-over-shape", (_event, over) => {
     if (window.isDestroyed()) return;
     window.setIgnoreMouseEvents(!over, { forward: true });
+  });
+
+  /*
+   * Dragging moves the window, and the shell is the half that can.
+   *
+   * The page reports the distance the pointer has travelled since the press;
+   * everything else happens here, where the window's position and the shape of
+   * the desk are actually known. The origin is taken once, at the press, so a
+   * long drag accumulates no rounding error and a snap that pulls the window
+   * to an edge does not drag the cursor's frame of reference with it.
+   *
+   * The write happens on release only. A face persisted on every mousemove
+   * would be a JSON file rewritten sixty times a second.
+   */
+  let dragOrigin = null;
+  ipcMain.on("widget:drag", (_event, request) => {
+    if (window.isDestroyed()) return;
+    const drag = readDragRequest(request);
+    if (!drag) return;
+
+    if (drag.phase === "begin") {
+      const [x, y] = window.getPosition();
+      dragOrigin = { x, y };
+      return;
+    }
+    if (!dragOrigin) return;
+
+    const wanted = { x: dragOrigin.x + drag.dx, y: dragOrigin.y + drag.dy };
+    const display = screen.getDisplayNearestPoint(wanted);
+    const placement = dragPlacement(display.workArea, wanted, drag.snap);
+    window.setPosition(placement.x, placement.y);
+
+    if (drag.phase === "end") {
+      dragOrigin = null;
+      writePlacement(placementFile(), placement);
+    }
+  });
+
+  // The dashboard opens in the user's browser, not in this process. A widget
+  // that rendered a settings page would have become a second application, and
+  // this one is a face.
+  ipcMain.on("widget:open-dashboard", () => {
+    const url = dashboardUrl(hubPort());
+    if (url) shell.openExternal(url);
   });
 
   // A face the user asked to leave leaves. The process closes its own windows

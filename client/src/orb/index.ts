@@ -23,6 +23,7 @@ import type { Classifier, LocalEar, VoiceActivityDetector, WakeWordDetector } fr
 import { realtimeConfig, type RealtimeProvider } from "./live.ts";
 import { Mouth } from "./mouth.ts";
 import { Orb, type OrbEvent, type Speaker } from "./orb.ts";
+import { buildRealtimeSettingsApp, readRealtimeSettings } from "./realtime-settings.ts";
 import { buildOrbApp, ORB_BASE_PATH } from "./routes.ts";
 import { UtteranceBank, type ClipStore } from "./utterance-bank.ts";
 
@@ -64,6 +65,12 @@ export type OrbMountOptions = {
   /** Overrides the gate's quiet period (how long it stays open after speech ends). */
   quietPeriodMs?: number;
   /**
+   * Path to the shared settings.json. When present, the realtime model and
+   * voice settings route is mounted on the orb app — even when the orb itself
+   * is refused, because the settings are machine facts, not session state.
+   */
+  settingsPath?: string;
+  /**
    * Told how many faces are watching, every time the number changes.
    *
    * This is the capture-lifecycle seam: a face arriving is what starts local
@@ -102,18 +109,33 @@ const NO_EAR =
  * thing a person can actually fix, so it is the one they are told about.
  */
 export async function mountOrb(options: OrbMountOptions): Promise<OrbMount> {
+  // The settings route is mounted unconditionally — it works even when the orb
+  // is refused, because the settings are machine facts, not session state.
+  const composeSettings = (app: Hono): Hono => {
+    if (options.settingsPath) app.route("/", buildRealtimeSettingsApp(options.settingsPath));
+    return app;
+  };
+
   const credential = await resolveOrbCredential(options.credentials);
   if (isRefusal(credential)) {
-    return { app: buildOrbApp({ reason: credential.reason }), reason: credential.reason };
+    return { app: composeSettings(buildOrbApp({ reason: credential.reason })), reason: credential.reason };
   }
   if (!options.provider) {
-    return { app: buildOrbApp({ reason: NO_PROVIDER }), reason: NO_PROVIDER };
+    return { app: composeSettings(buildOrbApp({ reason: NO_PROVIDER })), reason: NO_PROVIDER };
   }
   if (!options.earChain) {
-    return { app: buildOrbApp({ reason: NO_EAR }), reason: NO_EAR };
+    return { app: composeSettings(buildOrbApp({ reason: NO_EAR })), reason: NO_EAR };
   }
 
   const listeners = new Set<(event: OrbEvent) => void>();
+
+  // The realtime model and voice are read once at boot. The setup frame is
+  // built from the resulting config, and redial reuses it — so a change a
+  // person makes in the settings UI takes effect on the next conversation,
+  // not mid-socket. This is the reading the issue's UI copy asks for.
+  const settings = options.settingsPath
+    ? await readRealtimeSettings(options.settingsPath)
+    : {};
 
   // The orb needs a session to be constructed, and the session needs callbacks
   // that land on the orb — a genuine cycle. It is broken with an explicit box
@@ -128,11 +150,15 @@ export async function mountOrb(options: OrbMountOptions): Promise<OrbMount> {
     session = await options.provider.connect(
       realtimeConfig({
         apiKey: credential.key,
+        ...(settings.realtimeModel !== undefined ? { model: settings.realtimeModel } : {}),
+        ...(settings.realtimeVoice !== undefined ? { voice: settings.realtimeVoice } : {}),
         events: {
           onAudio: (chunk) => attached?.realtimeEvents.onAudio(chunk),
           onTranscript: (text, speaker) => attached?.realtimeEvents.onTranscript(text, speaker),
           onFunctionCall: (call) => attached?.realtimeEvents.onFunctionCall(call),
           onBargeIn: () => attached?.realtimeEvents.onBargeIn(),
+          onReconnect: () => attached?.realtimeEvents.onReconnect(),
+          onRefusal: (reason) => attached?.realtimeEvents.onRefusal(reason),
         },
       }),
     );
@@ -142,7 +168,7 @@ export async function mountOrb(options: OrbMountOptions): Promise<OrbMount> {
     const reason = `The realtime voice provider refused to connect: ${
       error instanceof Error ? error.message : String(error)
     }`;
-    return { app: buildOrbApp({ reason }), reason };
+    return { app: composeSettings(buildOrbApp({ reason })), reason };
   }
 
   const orb = new Orb({
@@ -173,7 +199,7 @@ export async function mountOrb(options: OrbMountOptions): Promise<OrbMount> {
   };
 
   return {
-    app: buildOrbApp({ orb, subscribe }),
+    app: composeSettings(buildOrbApp({ orb, subscribe })),
     orb,
     subscribe,
   };

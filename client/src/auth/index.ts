@@ -19,6 +19,7 @@ import {
   type CredentialStore,
 } from "./credentials.ts";
 import { sdkLoginFlows, type ProviderLoginFlows } from "./flows.ts";
+import type { ApiKeyVerifier } from "./key-verification.ts";
 import { InMemoryLoginSessionStore, type LoginSessionStore } from "./login-sessions.ts";
 import { PROVIDER_AUTH_BASE_PATH, createProviderAuthApp } from "./routes.ts";
 import { renderSettingsPage } from "./settings-page.ts";
@@ -29,7 +30,14 @@ export { AuthStorageCredentialStore } from "./credentials.ts";
 export { InMemoryLoginSessionStore, DEFAULT_LOGIN_SESSION_TTL_MS } from "./login-sessions.ts";
 export { ProviderLoginService, LoginRequestError, toSessionView } from "./service.ts";
 export { sdkLoginFlows } from "./flows.ts";
-export { PROVIDERS, PROVIDER_IDS, getAuthProviderId, parseProviderId } from "./providers.ts";
+export {
+  PROVIDERS,
+  PROVIDER_IDS,
+  describeProvider,
+  getAuthProviderId,
+  parseProviderId,
+} from "./providers.ts";
+export { createApiKeyVerifier } from "./key-verification.ts";
 export { renderSettingsPage } from "./settings-page.ts";
 
 export type { CredentialStore, CredentialBackingStore, ProviderConnection } from "./credentials.ts";
@@ -42,6 +50,7 @@ export type {
 } from "./login-sessions.ts";
 export type { LoginSessionView, ProviderFlowView } from "./service.ts";
 export type { ProviderDescriptor, ProviderId, LoginKind } from "./providers.ts";
+export type { ApiKeyVerifier, KeyVerification } from "./key-verification.ts";
 
 /** Where the settings section is served. */
 export const PROVIDER_AUTH_SETTINGS_PATH = "/settings/accounts";
@@ -51,6 +60,8 @@ export interface ProviderAuthOptions {
   storage: CredentialBackingStore;
   /** Override for tests; defaults to the SDK's real flows. */
   flows?: ProviderLoginFlows;
+  /** Override for tests; defaults to asking the provider over the network. */
+  verifier?: ApiKeyVerifier;
   /** Override for tenant mode; defaults to an in-process store. */
   sessions?: LoginSessionStore;
   /** Set when the hub is served over TLS. */
@@ -72,6 +83,7 @@ export function createProviderAuth(options: ProviderAuthOptions): ProviderAuth {
     sessions,
     credentials,
     flows: options.flows ?? sdkLoginFlows,
+    ...(options.verifier !== undefined ? { verifier: options.verifier } : {}),
   });
 
   const app = new Hono();

@@ -62,6 +62,8 @@ The ceiling carries (`security.py:74-90`):
   user wants (`security.py:75-77`).
 - `blocked_applications` — a deny-list, checked before the allow-list
   (`security.py:78, 145-146`).
+- `application_classes` — how far a client may go *inside* one application,
+  where the answer is not the same everywhere (`security.py:164-176`).
 - `idle_expiry_seconds` — how long a grant lasts without use. Defaults to 30
   minutes (`security.py:58`). A grant that never expires is a grant nobody
   remembers giving (`security.py:56-57`).
@@ -75,6 +77,50 @@ The ceiling carries (`security.py:74-90`):
 A title is text the user typed; a boundary drawn on it can be moved by typing
 (`security.py:22-23`). Matching is on the application's name, casefolded and
 substring-matched (`security.py:138-149`).
+
+### View-only, or interact
+
+The allow-list answers whether an application is reachable at all. It cannot
+answer how far a client may go once it is in one, and that is the setting
+people reach for first: read my chat app, do not type in it. `applicationClasses`
+answers it (`security.py:164-176`):
+
+```json
+{"scopes": {"operationClasses": ["observe", "edit", "activate"],
+            "applicationClasses": {"discord": ["observe"]}}}
+```
+
+An entry replaces `classes` for calls against that application, the same
+narrow-answer-wins rule a grant's `per_application` follows, and it is capped by
+`classes` — a per-application line is a narrowing device, never a side door
+(`security.py:286-311`). Two rules differ from the grant's version on purpose:
+
+- **Naming one application says nothing about the others.** A grant that names
+  applications individually has described its whole extent, so the ones it did
+  not name are outside it. This map sits behind an allow-list that already
+  decides who is in and who is out, so an application with no entry is governed
+  by `classes`. Reading an absent entry as a refusal would turn every file that
+  pins one application to view-only into a file that shut down every other
+  application on the desktop.
+- **The highest class named carries the ones below it.** `OPERATION_CLASSES` is
+  a severity ladder, so `activate` admits the `observe` and `edit` reads an
+  interaction is made of (`security.py:82-101`). A user who ticks interact has
+  already said view. The implication is applied where the answer is read and
+  never written back, so the file keeps the word the user chose.
+
+The cap is enforced in `decide`, separately from the grant's own answer so the
+refusal can say which of the two refused (`security.py:957-969`). A client told
+only that it "holds observe" when the *file* is what pinned the application to
+view-only would go and ask for a wider grant, be given one, and be refused in
+exactly the same place again. A `per_application` entry asking for more than the
+file allows there is refused at `grantScope` for the same reason
+(`security.py:719-742`): a grant that appears to have been issued and then
+refuses everything it covers is a grant somebody debugs for an hour. The general
+classes are not held to that check — they apply everywhere, and the file
+narrowing one application is the narrowing working.
+
+Every check reads the ceiling live, so a checkbox ticked now bites a grant
+already issued, without a reconnect and without a restart.
 
 ### The refusal tells you what to do
 
