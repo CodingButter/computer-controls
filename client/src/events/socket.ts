@@ -2,6 +2,7 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 
+import { DEVICE_SUBPROTOCOL_PREFIX } from "./device-credentials.ts";
 import type { EventSource } from "./source.ts";
 import { parseGesture, type StateEvent } from "./types.ts";
 
@@ -17,11 +18,16 @@ import { parseGesture, type StateEvent } from "./types.ts";
  * privacy claim checkable rather than aspirational: the socket has no
  * vocabulary for the thing that would violate it.
  *
- * Localhost only, and that is load-bearing rather than a default. The hub's
- * port is already the whole boundary — no auth adapter, no tenant path — so a
- * face reachable from the network would be an unauthenticated window onto a
- * machine's spoken conversation. The upgrade is refused unless the connection
- * came from this machine.
+ * The door admits two kinds of caller. A loopback peer — the kernel vouching
+ * for a process on this machine — walks in, which is what keeps development
+ * honest and every existing face working. Anyone else must present a device
+ * credential this hub minted, as the WebSocket subprotocol
+ * `comcon-device.<id>.<secret>` (see device-credentials.ts for why a
+ * subprotocol and why that is only defensible under TLS or loopback). The hub
+ * binds 127.0.0.1 today, so the credential path is exercised in-process rather
+ * than end-to-end — it exists so the socket's security story stops being
+ * "loopback", and so QR pairing (#35) has a door already checking what it will
+ * mint. Refusal is one shape with no hint which part failed.
  */
 
 /** Where a face connects. Not under /api: this is an upgrade, not a route. */
@@ -115,10 +121,15 @@ const LOOPBACK_V4 = /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
  */
 const MAX_BUFFERED_BYTES = 1 << 20;
 
+/** What the door needs from the credential store: one question, answered slowly enough to be safe. */
+export type CredentialCheck = {
+  verify(presented: string): Promise<boolean>;
+};
+
 export function attachEventSocket(
   server: UpgradableServer,
   source: EventSource,
-  options: { path?: string; brain?: LaneBrain } = {},
+  options: { path?: string; brain?: LaneBrain; credentials?: CredentialCheck } = {},
 ): EventSocket {
   const path = options.path ?? EVENTS_PATH;
   // `noServer` because the hub's HTTP app owns this server. Letting `ws` bind
@@ -211,15 +222,45 @@ export function attachEventSocket(
       return;
     }
 
-    if (!isLocalPeer(request.socket.remoteAddress)) {
+    const admit = () => {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit("connection", ws, request);
+      });
+    };
+
+    // Refusal is one shape whichever check failed. A caller that could tell
+    // "not loopback" from "unknown device" from "wrong secret" could walk the
+    // door's logic one refusal at a time.
+    const refuse = () => {
       socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       socket.destroy();
+    };
+
+    if (isLocalPeer(request.socket.remoteAddress)) {
+      admit();
       return;
     }
 
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit("connection", ws, request);
-    });
+    // A remote peer's only way in is a credential this hub minted, offered as
+    // a subprotocol. The header may carry a comma-separated list; only entries
+    // wearing the device prefix are considered, and the first one decides —
+    // presenting several credentials is not a way to get several verdicts.
+    const offered = (request.headers["sec-websocket-protocol"] ?? "")
+      .split(",")
+      .map((protocol) => protocol.trim())
+      .find((protocol) => protocol.startsWith(DEVICE_SUBPROTOCOL_PREFIX));
+    const check = options.credentials;
+    if (!offered || !check) {
+      refuse();
+      return;
+    }
+    void check
+      .verify(offered)
+      .then((valid) => {
+        if (valid) admit();
+        else refuse();
+      })
+      .catch(refuse);
   };
 
   server.on("upgrade", onUpgrade);

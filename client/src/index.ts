@@ -13,7 +13,13 @@ import { cureChromiumApps, type CureReport } from "./curing/curing.ts";
 import { resolveClientConfig } from "./config.ts";
 import { buildDevicesApp } from "./devices/index.ts";
 import { buildDesktopConfigApp } from "./desktop-config/routes.ts";
-import { attachEventSocket, combineEventSources, createTouchLane } from "./events/index.ts";
+import {
+  DEVICE_CREDENTIALS_FILE,
+  attachEventSocket,
+  combineEventSources,
+  createDeviceCredentialStore,
+  createTouchLane,
+} from "./events/index.ts";
 import { prepareHub } from "./hub.ts";
 import { wrapTurnWithPermissionAwareness } from "./permissions/aware-turn.ts";
 import { defaultConfigPath } from "./permissions/config-file.ts";
@@ -284,4 +290,9 @@ export const eventSource = combineEventSources(chooseFaceSource(orb), touchLane)
  */
 export const eventSocket = attachEventSocket(server, eventSource, {
   brain: createHubBrain({ turn: chat }),
+  // The store is empty until QR pairing (#35) mints into it; loopback still
+  // walks in. Wired now so the door checks the same file pairing will write.
+  credentials: createDeviceCredentialStore(
+    path.join(config.root, config.configDir, DEVICE_CREDENTIALS_FILE),
+  ),
 });

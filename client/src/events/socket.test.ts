@@ -2,7 +2,19 @@ import { createServer, type Server } from "node:http";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { WebSocket } from "ws";
 
-import { ASK_FAILED, EVENTS_PATH, attachEventSocket, isLocalPeer, type EventSocket } from "./socket.ts";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+import { createDeviceCredentialStore, DEVICE_SUBPROTOCOL_PREFIX } from "./device-credentials.ts";
+import {
+  ASK_FAILED,
+  EVENTS_PATH,
+  attachEventSocket,
+  isLocalPeer,
+  type EventSocket,
+  type UpgradableServer,
+} from "./socket.ts";
 import { ScriptedEventSource } from "./source.ts";
 import type { StateEvent } from "./types.ts";
 
@@ -481,6 +493,141 @@ describe("the conversation", () => {
       await settle();
       expect(heard).toHaveLength(0);
       expect(mouth.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      await bareSocket.close();
+      await new Promise<void>((resolve) => bare.close(() => resolve()));
+    }
+  });
+});
+
+describe("the door", () => {
+  /**
+   * The hub binds loopback, so a genuinely remote TCP peer cannot reach these
+   * tests. The peer is fabricated instead: a real server, a real client, and
+   * an interposed upgrade listener that hands the handler a request whose
+   * socket claims a tailnet address — the same one the isLocalPeer unit test
+   * already refuses. The credential path's end-to-end exercise arrives with
+   * #35's pairing; what is being proven here is the handler's own decisions.
+   */
+  let doorServer: Server;
+  let doorSocket: EventSocket;
+  let doorUrl: string;
+  let credentialDir: string;
+  let peerAddress: string | undefined;
+  let minted: { id: string; secret: string };
+
+  beforeEach(async () => {
+    peerAddress = undefined;
+    credentialDir = await mkdtemp(path.join(os.tmpdir(), "comcon-door-"));
+    const store = createDeviceCredentialStore(path.join(credentialDir, "device-credentials.json"));
+    minted = await store.mint("a paired device");
+
+    doorServer = createServer((_request, response) => response.end("hub"));
+    const fabricated: UpgradableServer = {
+      on: (_event, listener) => {
+        doorServer.on("upgrade", (request, socket, head) => {
+          if (peerAddress === undefined) {
+            listener(request, socket, head);
+            return;
+          }
+          // Own-property shadows: everything else — headers, the duplex the
+          // handshake is written to — stays real.
+          const claimedSocket = Object.create(request.socket, {
+            remoteAddress: { value: peerAddress },
+          }) as typeof request.socket;
+          const claimedRequest = Object.create(request, {
+            socket: { value: claimedSocket },
+          }) as typeof request;
+          listener(claimedRequest, socket, head);
+        });
+      },
+      off: () => {},
+    };
+    doorSocket = attachEventSocket(fabricated, new ScriptedEventSource(), { credentials: store });
+    await new Promise<void>((resolve) => doorServer.listen(0, "127.0.0.1", resolve));
+    const address = doorServer.address();
+    if (typeof address === "string" || address === null) throw new Error("no port");
+    doorUrl = `ws://127.0.0.1:${address.port}${EVENTS_PATH}`;
+  });
+
+  afterEach(async () => {
+    await doorSocket.close();
+    await new Promise<void>((resolve) => doorServer.close(() => resolve()));
+    await rm(credentialDir, { recursive: true, force: true });
+  });
+
+  const dial = (protocols?: string[]) =>
+    new Promise<{ opened: boolean; reason: string }>((resolve) => {
+      const client = protocols ? new WebSocket(doorUrl, protocols) : new WebSocket(doorUrl);
+      open.push(client);
+      client.once("open", () => resolve({ opened: true, reason: "" }));
+      client.once("error", (error) => resolve({ opened: false, reason: String(error) }));
+    });
+
+  test("loopback still walks in without a credential", async () => {
+    expect((await dial()).opened).toBe(true);
+  });
+
+  test("a remote peer with a minted credential is admitted", async () => {
+    peerAddress = "100.99.230.54";
+    const result = await dial([`${DEVICE_SUBPROTOCOL_PREFIX}${minted.id}.${minted.secret}`]);
+    expect(result.opened).toBe(true);
+    expect(doorSocket.faceCount).toBe(1);
+  });
+
+  test("a remote peer with no credential is refused", async () => {
+    peerAddress = "100.99.230.54";
+    const result = await dial();
+    expect(result.opened).toBe(false);
+    expect(doorSocket.faceCount).toBe(0);
+  });
+
+  test("a wrong secret and an unknown device are refused identically", async () => {
+    peerAddress = "100.99.230.54";
+    const wrongSecret = await dial([`${DEVICE_SUBPROTOCOL_PREFIX}${minted.id}.${"0".repeat(64)}`]);
+    const unknownDevice = await dial([`${DEVICE_SUBPROTOCOL_PREFIX}feedfacefeedface.${"0".repeat(64)}`]);
+    expect(wrongSecret.opened).toBe(false);
+    expect(unknownDevice.opened).toBe(false);
+    // The same refusal, byte for byte as far as a caller can see. A door that
+    // said "wrong secret" differently from "no such device" would confirm
+    // which ids exist.
+    expect(wrongSecret.reason).toBe(unknownDevice.reason);
+    expect(doorSocket.faceCount).toBe(0);
+  });
+
+  test("a credential presented to a lane with no store is refused", async () => {
+    // A hub wired without credentials has a loopback-only door, even for a
+    // caller holding something that looks right.
+    const bare = createServer((_request, response) => response.end("hub"));
+    const fabricated: UpgradableServer = {
+      on: (_event, listener) => {
+        bare.on("upgrade", (request, socket, head) => {
+          const claimedSocket = Object.create(request.socket, {
+            remoteAddress: { value: "100.99.230.54" },
+          }) as typeof request.socket;
+          const claimedRequest = Object.create(request, {
+            socket: { value: claimedSocket },
+          }) as typeof request;
+          listener(claimedRequest, socket, head);
+        });
+      },
+      off: () => {},
+    };
+    const bareSocket = attachEventSocket(fabricated, new ScriptedEventSource());
+    await new Promise<void>((resolve) => bare.listen(0, "127.0.0.1", resolve));
+    const address = bare.address();
+    if (typeof address === "string" || address === null) throw new Error("no port");
+
+    try {
+      const client = new WebSocket(`ws://127.0.0.1:${address.port}${EVENTS_PATH}`, [
+        `${DEVICE_SUBPROTOCOL_PREFIX}${minted.id}.${minted.secret}`,
+      ]);
+      open.push(client);
+      const opened = await new Promise<boolean>((resolve) => {
+        client.once("open", () => resolve(true));
+        client.once("error", () => resolve(false));
+      });
+      expect(opened).toBe(false);
     } finally {
       await bareSocket.close();
       await new Promise<void>((resolve) => bare.close(() => resolve()));
