@@ -34,8 +34,21 @@ export const SENTIMENTS = [
  * wrong in the cheap direction. A false negative costs a repeated sentence; a
  * false positive costs audio leaving the machine, which is the one failure this
  * design exists to prevent.
+ *
+ * "Mastra" is not an English word, and the English-only local ear writes down
+ * what it knows: live testing showed Moonshine transcribing the spoken name as
+ * "Master". The list therefore carries the model's spellings of the one name,
+ * not extra names — each entry is still required to START the utterance, which
+ * is what keeps "master bedroom" muttered across the room from opening a gate.
  */
-export const WAKE_WORDS = ["mastra", "hey mastra"];
+export const WAKE_WORDS = [
+    "mastra",
+    "hey mastra",
+    "master",
+    "hey master",
+    "mastro",
+    "hey mastro",
+];
 const COMMAND_VERBS = [
     "open",
     "close",

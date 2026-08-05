@@ -36,10 +36,24 @@ env.backends.onnx.wasm.numThreads = 1;
  * this onnxruntime-web build (proven in the segment-05 spike). */
 const MODEL_ID = "onnx-community/moonshine-tiny-ONNX";
 
-const transcriber = pipeline("automatic-speech-recognition", MODEL_ID, {
-  dtype: "q4",
-  device: "wasm",
-});
+/**
+ * Below this, the encoder's own convolutions cannot produce a valid shape —
+ * a two-frame noise blip is not speech, and handing it to the model is worse
+ * than useless: a failed run can leave this onnxruntime-web build's session
+ * unusable, deafening the widget until restart. Short utterances answer with
+ * an empty transcript instead, which the gate reads as a closed gate.
+ * Empirical floor: 256 samples fails, 1024 passes; 4000 (a quarter second)
+ * keeps a wide margin while staying shorter than any spoken wake word.
+ */
+const MIN_TRANSCRIBABLE_SAMPLES = 4000;
+
+const loadTranscriber = () =>
+  pipeline("automatic-speech-recognition", MODEL_ID, {
+    dtype: "q4",
+    device: "wasm",
+  });
+
+let transcriber = loadTranscriber();
 
 transcriber.then(
   () => self.postMessage({ kind: "ready", languages: ["en"] }),
@@ -54,12 +68,20 @@ self.onmessage = async (event) => {
     // rate at 16 kHz — the capture context's rate — which is also the rate
     // Moonshine was trained at, so no resampling happens here or anywhere.
     const pcm = new Int16Array(samples);
+    if (pcm.length < MIN_TRANSCRIBABLE_SAMPLES) {
+      self.postMessage({ kind: "transcript", id, text: "" });
+      return;
+    }
     const audio = new Float32Array(pcm.length);
     for (let i = 0; i < pcm.length; i++) audio[i] = pcm[i] / 32768;
     const asr = await transcriber;
     const result = await asr(audio);
     self.postMessage({ kind: "transcript", id, text: String(result?.text ?? "") });
   } catch (error) {
+    // A failed run can poison the WASM session, so the pipeline is rebuilt
+    // before the next utterance: one bad inference must not deafen the ear.
+    transcriber = loadTranscriber();
+    transcriber.catch(() => {});
     // The gate treats a failed transcription as a CLOSED gate; this message
     // is what lets it make that decision instead of waiting forever.
     self.postMessage({ kind: "transcript-failed", id, error: String(error?.message ?? error) });
