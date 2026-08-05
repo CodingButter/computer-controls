@@ -2,8 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, expect, test } from "vitest";
+import { WebSocket } from "ws";
 
 import desktopControl from "../../plugin/src/index.ts";
+import type { DevicesView } from "./devices/index.ts";
+import { EVENTS_PATH } from "./events/index.ts";
 
 /**
  * The hub, booted for real: the entry module constructs Mastra, finalizes the
@@ -160,6 +163,31 @@ test("the orb serves as a second face through the booted hub", async () => {
   if (!status.enabled) {
     expect(status.reason).toMatch(/\S/);
     expect(orbHealth.orb!.reason).toBe(status.reason);
+  }
+});
+
+test("the devices route answers through the booted hub, and counts a real face", async () => {
+  // Same wiring lesson as the sign-in and voice surfaces — the module's own
+  // tests build the app directly and would pass with nothing mounted — plus the
+  // one claim only the running process can make: the count is read off the live
+  // event socket, so a face connecting has to change this answer.
+  const before = (await fetch(`${baseUrl}/api/devices`).then((r) => r.json())) as DevicesView;
+  expect(before.devices[0]!.kind).toBe("hub");
+  expect(before.devices[0]!.connected).toBe(true);
+  expect(before.devices.find((d) => d.kind === "widget")!.connected).toBe(false);
+  expect(before.pairing.enabled).toBe(false);
+
+  const face = new WebSocket(`${baseUrl.replace("http://", "ws://")}${EVENTS_PATH}`);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      face.once("open", () => resolve());
+      face.once("error", reject);
+    });
+
+    const during = (await fetch(`${baseUrl}/api/devices`).then((r) => r.json())) as DevicesView;
+    expect(during.devices.find((d) => d.kind === "widget")!.connected).toBe(true);
+  } finally {
+    face.close();
   }
 });
 

@@ -58,6 +58,12 @@ export type AppDeps = {
   permissions?: Hono;
   /** The audit feed's one read-only route. Optional for the same reason. */
   audit?: Hono;
+  /**
+   * What is talking to this hub. No reason arm: unlike voice and the orb, this
+   * one cannot be refused — a hub that is answering the request is itself the
+   * first device on the list.
+   */
+  devices?: Hono;
 };
 
 /**
@@ -112,6 +118,7 @@ export function buildApp(deps: AppDeps): Hono {
   if (deps.orb) app.route("/", deps.orb.app);
   if (deps.permissions) app.route("/", deps.permissions);
   if (deps.audit) app.route("/", deps.audit);
+  if (deps.devices) app.route("/", deps.devices);
 
   app.get("*", (c) => {
     // The hub's own static root answers first — chat, the orb, the vendored
