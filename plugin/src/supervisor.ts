@@ -4,8 +4,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { DesktopClient, DesktopServiceError } from "./client.ts";
+import { daemonEndpointFor, venvPython } from "./platform.ts";
 import type { GrantScopeResult } from "./protocol.generated.ts";
-import { PROTOCOL_VERSION, SCHEMA_DIGEST } from "./protocol.generated.ts";
+import { PROTOCOL_VERSION } from "./protocol.generated.ts";
 import { brainFromGrant, type BrainChoice } from "./scope-brain.ts";
 
 /**
@@ -27,16 +28,19 @@ const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(pluginRoot, "..");
 
 export const SERVICE_ROOT = join(repoRoot, "service");
-export const SERVICE_PYTHON = join(SERVICE_ROOT, ".venv", "bin", "python");
+export const SERVICE_PYTHON = venvPython(SERVICE_ROOT);
 
 const START_TIMEOUT_MS = 20_000;
 
-/** Where a shared desktop service listens. Mirrors the service's own default. */
+/**
+ * Where a shared desktop service listens. Mirrors the service's own default.
+ *
+ * The explicit override stays here rather than in the adapters: an operator
+ * naming a socket outranks every OS convention, and that is a policy about who
+ * decides, not a fact about the platform.
+ */
 export function daemonSocketPath(): string {
-  const explicit = process.env.MASTRACODE_DESKTOP_SOCKET;
-  if (explicit) return explicit;
-  const runtimeDir = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 1000}`;
-  return join(runtimeDir, "mastracode-desktop", `daemon-${SCHEMA_DIGEST}.sock`);
+  return process.env.MASTRACODE_DESKTOP_SOCKET || daemonEndpointFor();
 }
 
 export class DesktopSupervisor {

@@ -13,6 +13,7 @@ const status = async (): Promise<ClientStatus> => ({
   desktopScope: "observe",
   plugins: { admitted: [], refused: [] },
   model: { pack: "test", thinking: "test", tiers: {} },
+  platform: { id: "freedesktop", supports: { installedScan: true, icons: true, shortcutCuring: true } },
 });
 
 const appWithDashboard = () =>

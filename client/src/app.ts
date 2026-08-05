@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 
 import type { AgentTurn } from "./chat.ts";
+import type { PlatformId, PlatformSupport } from "./platform/index.ts";
 import { UNBUILT_DASHBOARD_PAGE, dashboardIsBuilt, readUiAsset } from "./ui.ts";
 
 export type ClientStatus = {
@@ -21,6 +22,8 @@ export type ClientStatus = {
     thinking: string;
     tiers: Record<string, string>;
   };
+  /** The OS adapter this hub resolved at boot, and what it can do. */
+  platform: { id: PlatformId; supports: PlatformSupport };
 };
 
 export type AppDeps = {

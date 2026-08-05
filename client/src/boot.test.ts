@@ -15,7 +15,11 @@ import { EVENTS_PATH } from "./events/index.ts";
  */
 let baseUrl: string;
 let close: () => Promise<void>;
-let health: { tools: string[]; desktopScope: string };
+let health: {
+  tools: string[];
+  desktopScope: string;
+  platform: { id: string; supports: Record<string, boolean> };
+};
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "comcon-client-"));
 
@@ -72,6 +76,21 @@ test("test_client_boots_and_serves_the_ui", async () => {
   const deepLink = await fetch(`${baseUrl}/threads/whatever`);
   expect(deepLink.status).toBe(200);
   expect(await deepLink.text()).toContain("dashboard-fixture-root");
+});
+
+test("the running hub names the OS adapter it booted with", async () => {
+  // Read off the live process, because the adapter is chosen once at boot and
+  // nothing downstream may ask again. On the desktop this is developed and
+  // measured on that answer is freedesktop.
+  expect(health.platform.id).toBe("freedesktop");
+
+  // And it says out loud what it can do, so an empty application list on an OS
+  // whose wave has not come is distinguishable from a machine with nothing
+  // installed.
+  expect(health.platform.supports.installedScan).toBe(true);
+  expect(health.platform.supports.icons).toBe(true);
+  // Curing is #115's to turn on, and claiming it now would be a lie.
+  expect(health.platform.supports.shortcutCuring).toBe(false);
 });
 
 test("the sign-in surface serves through the booted hub, not just its own module", async () => {
