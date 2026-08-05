@@ -141,6 +141,71 @@ describe("the guards", () => {
   });
 });
 
+describe("the conversation words", () => {
+  // Each word in both mutations that matter: one key added, one key removed,
+  // one field wrong-typed. The exact-keys discipline is the vocabulary's whole
+  // security story, so every new word is tested the way an attacker would
+  // probe it.
+  test("admit exactly what a mouth is allowed to say, and nothing beside it", () => {
+    expect(isGesture({ type: "ask", id: "call-1", request: "what is on my calendar" })).toBe(true);
+    expect(isGesture({ type: "ask", id: "call-1", request: "x", tool: "shell" })).toBe(false);
+    expect(isGesture({ type: "ask", id: "call-1" })).toBe(false);
+    expect(isGesture({ type: "ask", id: "call-1", request: 42 })).toBe(false);
+
+    expect(isGesture({ type: "voice_open" })).toBe(true);
+    expect(isGesture({ type: "voice_open", device: "widget" })).toBe(false);
+    expect(isGesture({ type: "voice_close" })).toBe(true);
+    expect(isGesture({ type: "voice_close", reason: "done" })).toBe(false);
+
+    expect(isGesture({ type: "caption", text: "turn the lights down" })).toBe(true);
+    expect(isGesture({ type: "caption", text: "hi", audio: "UklGRg==" })).toBe(false);
+    expect(isGesture({ type: "caption" })).toBe(false);
+    expect(isGesture({ type: "caption", text: ["hi"] })).toBe(false);
+  });
+
+  test("admit exactly what the hub replies with, and nothing beside it", () => {
+    expect(isStateEvent({ type: "progress", id: "call-1", text: "You are now working on: files." })).toBe(true);
+    expect(isStateEvent({ type: "progress", id: "call-1", text: "x", tool: "grep" })).toBe(false);
+    expect(isStateEvent({ type: "progress", id: "call-1" })).toBe(false);
+    expect(isStateEvent({ type: "progress", id: 7, text: "x" })).toBe(false);
+
+    expect(isStateEvent({ type: "answer", id: "call-1", text: "Done." })).toBe(true);
+    expect(isStateEvent({ type: "answer", id: "call-1", text: "Done.", credential: "sk-live" })).toBe(false);
+    expect(isStateEvent({ type: "answer", text: "Done." })).toBe(false);
+    expect(isStateEvent({ type: "answer", id: "call-1", text: null })).toBe(false);
+
+    expect(isStateEvent({ type: "voice_opened" })).toBe(true);
+    expect(isStateEvent({ type: "voice_opened", by: "widget" })).toBe(false);
+    expect(isStateEvent({ type: "voice_closed" })).toBe(true);
+    expect(isStateEvent({ type: "voice_closed", remaining: 0 })).toBe(false);
+  });
+
+  test("treat an empty ask, id, or caption as noise rather than a question", () => {
+    // An ask with no request is not a question, and a reply with no id has no
+    // asker. Noise, not an error — the guard answers nothing either way.
+    expect(isGesture({ type: "ask", id: "", request: "x" })).toBe(false);
+    expect(isGesture({ type: "ask", id: "call-1", request: "" })).toBe(false);
+    expect(isGesture({ type: "caption", text: "" })).toBe(false);
+    expect(isStateEvent({ type: "progress", id: "", text: "x" })).toBe(false);
+    expect(isStateEvent({ type: "progress", id: "call-1", text: "" })).toBe(false);
+    expect(isStateEvent({ type: "answer", id: "", text: "x" })).toBe(false);
+    expect(isStateEvent({ type: "answer", id: "call-1", text: "" })).toBe(false);
+  });
+
+  test("keep the two vocabularies apart even where the words rhyme", () => {
+    // voice_open is something a mouth does; voice_opened is something the hub
+    // reports. A client replaying the hub's word, or the hub's word arriving
+    // as a gesture, is refused the way any out-of-vocabulary frame is.
+    expect(isGesture({ type: "voice_opened" })).toBe(false);
+    expect(isGesture({ type: "voice_closed" })).toBe(false);
+    expect(isGesture({ type: "progress", id: "call-1", text: "x" })).toBe(false);
+    expect(isGesture({ type: "answer", id: "call-1", text: "x" })).toBe(false);
+    expect(isStateEvent({ type: "voice_open" })).toBe(false);
+    expect(isStateEvent({ type: "voice_close" })).toBe(false);
+    expect(isStateEvent({ type: "ask", id: "call-1", request: "x" })).toBe(false);
+  });
+});
+
 describe("parsing off the wire", () => {
   test("returns the message when the frame is a word the hub knows", () => {
     expect(parseGesture('{"type":"mute"}')).toEqual({ type: "mute" });

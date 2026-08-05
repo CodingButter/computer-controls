@@ -1,5 +1,5 @@
-export { EVENTS_PATH, attachEventSocket, isLocalPeer } from "./socket.ts";
-export type { EventSocket } from "./socket.ts";
+export { ASK_FAILED, EVENTS_PATH, attachEventSocket, isLocalPeer } from "./socket.ts";
+export type { EventSocket, LaneBrain } from "./socket.ts";
 export { ScriptedEventSource } from "./source.ts";
 export type { EventSource } from "./source.ts";
 export { combineEventSources, createTouchLane, harvestGeometry, targetOf } from "./touch-lane.ts";

@@ -9,11 +9,13 @@ import { parseGesture, type StateEvent } from "./types.ts";
  * The one stream between the hub and its faces.
  *
  * The shape is fixed by what a face is allowed to be. State events go out;
- * gestures come in; nothing else crosses in either direction. There is no
- * request the face can make, no tool it can name, and no audio on the wire at
- * all — a caption is text the hub already decided to publish, not a sample of a
- * room. That is what makes the privacy claim checkable rather than aspirational:
- * the socket has no vocabulary for the thing that would violate it.
+ * gestures come in; nothing else crosses in either direction. A mouth may
+ * `ask` — one request, routed whole to the same brain the typed lane runs, and
+ * answered in words — but it names no tool and holds no path to the daemon,
+ * and there is no audio on the wire at all: a caption is text a session
+ * already decided to publish, not a sample of a room. That is what makes the
+ * privacy claim checkable rather than aspirational: the socket has no
+ * vocabulary for the thing that would violate it.
  *
  * Localhost only, and that is load-bearing rather than a default. The hub's
  * port is already the whole boundary — no auth adapter, no tenant path — so a
@@ -39,6 +41,28 @@ export type UpgradableServer = {
   on(event: "upgrade", listener: (req: IncomingMessage, socket: Duplex, head: Buffer) => void): unknown;
   off(event: "upgrade", listener: (req: IncomingMessage, socket: Duplex, head: Buffer) => void): unknown;
 };
+
+/**
+ * The brain, as far as the lane is concerned.
+ *
+ * Structurally identical to the orb's `HubBrain`, and deliberately not
+ * imported from there: the lane outlives the hub-side realtime session, and a
+ * type import in this direction would tie the socket's compile to a module the
+ * migration retires. One method, callable with nothing but a request — that is
+ * the whole dispatch seam.
+ */
+export type LaneBrain = {
+  ask(request: string, onProgress?: (signal: string) => void): Promise<string>;
+};
+
+/**
+ * What the lane answers when the brain throws.
+ *
+ * The same sentence the orb's dispatch speaks today, for the same reason: a
+ * mouth mid-conversation needs a complete sentence to say, and the error's
+ * text belongs in the hub's log, not in a stranger's ears.
+ */
+export const ASK_FAILED = "That did not work. Nothing was changed.";
 
 export type EventSocket = {
   /**
@@ -94,13 +118,77 @@ const MAX_BUFFERED_BYTES = 1 << 20;
 export function attachEventSocket(
   server: UpgradableServer,
   source: EventSource,
-  options: { path?: string } = {},
+  options: { path?: string; brain?: LaneBrain } = {},
 ): EventSocket {
   const path = options.path ?? EVENTS_PATH;
   // `noServer` because the hub's HTTP app owns this server. Letting `ws` bind
   // its own listener would put a second thing in front of the port that Hono
   // does not know about.
   const wss = new WebSocketServer({ noServer: true });
+
+  // Each face's delivery function, so a broadcast rides the same buffered-
+  // amount discipline the subscription path enforces. A stuck reader is hung
+  // up on identically whether the word came from the hub's source or from
+  // another face's mouth.
+  const deliverTo = new Map<WebSocket, (event: StateEvent) => void>();
+
+  /**
+   * The connections that currently own an open voice session.
+   *
+   * A set, not a count: the same connection saying `voice_open` twice is one
+   * membership, and only transitions of the whole set broadcast. Two openers
+   * produce one `voice_opened`; a joiner produces nothing — which is how a
+   * client tells "my open caused this" from "someone else was already talking".
+   */
+  const voiceOwners = new Set<WebSocket>();
+
+  const broadcast = (event: StateEvent) => {
+    for (const deliver of [...deliverTo.values()]) deliver(event);
+  };
+
+  /**
+   * A member leaves the voice set — by saying `voice_close`, or by dying.
+   *
+   * Both paths land here on purpose. A widget deafened by a crashed page is a
+   * bug a user cannot see: the set would stay half-open forever and no
+   * `voice_closed` would ever unplug its ears. Socket death counts as closing.
+   */
+  const leaveVoice = (ws: WebSocket) => {
+    if (!voiceOwners.delete(ws)) return;
+    if (voiceOwners.size === 0) broadcast({ type: "voice_closed" });
+  };
+
+  const joinVoice = (ws: WebSocket) => {
+    const wasEmpty = voiceOwners.size === 0;
+    voiceOwners.add(ws);
+    if (wasEmpty) broadcast({ type: "voice_opened" });
+  };
+
+  /**
+   * Ack-then-background, the shape the orb's dispatch already has: the reply
+   * to the frame is immediate silence (WebSocket frames are not requests),
+   * the work happens behind it, and `progress`/`answer` land on the asking
+   * connection only — the id is that asker's correlation id, meaningless to
+   * anyone else. A lane with no brain treats `ask` as noise: answering "no
+   * brain" would be telling an unauthenticated stranger about the hub's
+   * internals, and the word is simply not in service yet.
+   */
+  const dispatchAsk = (ws: WebSocket, ask: { id: string; request: string }) => {
+    const brain = options.brain;
+    if (!brain) return;
+    const reply = (event: StateEvent) => deliverTo.get(ws)?.(event);
+    void (async () => {
+      let answer: string;
+      try {
+        answer = await brain.ask(ask.request, (signal) => {
+          reply({ type: "progress", id: ask.id, text: signal });
+        });
+      } catch {
+        answer = ASK_FAILED;
+      }
+      reply({ type: "answer", id: ask.id, text: answer });
+    })();
+  };
 
   const onUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     // A URL is only parsed far enough to route it. Anything after the path —
@@ -137,7 +225,7 @@ export function attachEventSocket(
   server.on("upgrade", onUpgrade);
 
   wss.on("connection", (ws: WebSocket) => {
-    const unsubscribe = source.subscribe((event: StateEvent) => {
+    const deliver = (event: StateEvent) => {
       if (ws.readyState !== ws.OPEN) return;
 
       // A face that stopped reading does not get to grow the hub's memory.
@@ -155,13 +243,26 @@ export function attachEventSocket(
       // reconnects on its own and comes back hidden, which is the one state
       // that is safe to be wrong about.
       if (ws.bufferedAmount > MAX_BUFFERED_BYTES) {
-        unsubscribe();
+        cleanup();
         ws.terminate();
         return;
       }
 
       ws.send(JSON.stringify(event));
-    });
+    };
+
+    const unsubscribe = source.subscribe(deliver);
+    deliverTo.set(ws, deliver);
+
+    // Cleanup is one function because the endings are many: goodbye, crash, a
+    // stuck buffer. Whichever fires, the hub ends holding no handler for a
+    // window that is gone — and if the dead connection owned a voice session,
+    // the set transition it never got to send happens anyway.
+    const cleanup = () => {
+      unsubscribe();
+      deliverTo.delete(ws);
+      leaveVoice(ws);
+    };
 
     ws.on("message", (raw: unknown, isBinary: boolean) => {
       // Binary is refused before it is even looked at. Nothing in the
@@ -175,15 +276,34 @@ export function attachEventSocket(
       // nothing it did not already know.
       if (!gesture) return;
 
-      source.handleGesture?.(gesture);
+      // The conversation words are the lane's own. Everything else — mute,
+      // dismiss, drag — is intent about the hub's state and goes to the
+      // source, which is the seam the orb's gate listens on. The split is the
+      // point: a source never learns which connection said what, and the lane
+      // never interprets a gesture it merely carries.
+      switch (gesture.type) {
+        case "voice_open":
+          joinVoice(ws);
+          return;
+        case "voice_close":
+          leaveVoice(ws);
+          return;
+        case "caption":
+          // Relayed to every face, the sender included — a mouth hearing its
+          // own caption back is confirmation, not an echo problem.
+          broadcast({ type: "caption", text: gesture.text });
+          return;
+        case "ask":
+          dispatchAsk(ws, gesture);
+          return;
+        default:
+          source.handleGesture?.(gesture);
+      }
     });
 
-    // Both endings run the same cleanup: a face that crashes and a face that
-    // says goodbye leave the hub in the same state, holding no handler for a
-    // window that is gone.
-    ws.on("close", unsubscribe);
+    ws.on("close", cleanup);
     ws.on("error", () => {
-      unsubscribe();
+      cleanup();
       ws.terminate();
     });
   });

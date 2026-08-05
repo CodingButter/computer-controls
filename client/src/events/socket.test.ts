@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { WebSocket } from "ws";
 
-import { EVENTS_PATH, attachEventSocket, isLocalPeer, type EventSocket } from "./socket.ts";
+import { ASK_FAILED, EVENTS_PATH, attachEventSocket, isLocalPeer, type EventSocket } from "./socket.ts";
 import { ScriptedEventSource } from "./source.ts";
 import type { StateEvent } from "./types.ts";
 
@@ -20,15 +20,28 @@ let source: ScriptedEventSource;
 let url: string;
 const open: WebSocket[] = [];
 
+/** The brain, played by a hand: every ask recorded, every answer scripted. */
+let asked: { request: string; onProgress?: (signal: string) => void }[];
+let answerWith: (request: string) => Promise<string>;
+
 beforeEach(async () => {
   source = new ScriptedEventSource();
+  asked = [];
+  answerWith = async () => "Done.";
   // A bare HTTP server standing in for the hub's: this module attaches to an
   // upgrade listener, and Hono is not part of that contract.
   server = createServer((_request, response) => {
     response.writeHead(200, { "content-type": "text/plain" });
     response.end("hub");
   });
-  socket = attachEventSocket(server, source);
+  socket = attachEventSocket(server, source, {
+    brain: {
+      ask: (request, onProgress) => {
+        asked.push({ request, ...(onProgress ? { onProgress } : {}) });
+        return answerWith(request);
+      },
+    },
+  });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (typeof address === "string" || address === null) throw new Error("no port");
@@ -267,5 +280,210 @@ describe("the socket", () => {
       client.once("error", () => resolve(false));
     });
     expect(opened).toBe(true);
+  });
+});
+
+describe("the voice set", () => {
+  test("broadcasts on set transitions, never on memberships", async () => {
+    const widget = await connectFace();
+    const page = await connectFace();
+    const widgetHeard = collect(widget);
+    const pageHeard = collect(page);
+
+    // The first opener transitions the set: one broadcast, to everyone. The
+    // page that caused it hears it too — hearing voice_opened right after
+    // your own open is how a client knows its open was first.
+    page.send(JSON.stringify({ type: "voice_open" }));
+    await settle();
+    expect(widgetHeard).toEqual([{ type: "voice_opened" }]);
+    expect(pageHeard).toEqual([{ type: "voice_opened" }]);
+
+    // A joiner is not a transition. This silence is load-bearing: a widget
+    // that heard a second voice_opened could not tell "someone else was
+    // already talking" from "my open caused this".
+    widget.send(JSON.stringify({ type: "voice_open" }));
+    await settle();
+    expect(widgetHeard).toHaveLength(1);
+    expect(pageHeard).toHaveLength(1);
+
+    // The first closer leaves a non-empty set: still no broadcast.
+    page.send(JSON.stringify({ type: "voice_close" }));
+    await settle();
+    expect(widgetHeard).toHaveLength(1);
+
+    // The last closer empties it: one voice_closed, to everyone.
+    widget.send(JSON.stringify({ type: "voice_close" }));
+    await settle();
+    expect(widgetHeard).toEqual([{ type: "voice_opened" }, { type: "voice_closed" }]);
+    expect(pageHeard).toEqual([{ type: "voice_opened" }, { type: "voice_closed" }]);
+
+    // None of it reached the source: arbitration is the lane's own business,
+    // and the ear chain never learns which connection said what.
+    expect(source.received).toHaveLength(0);
+  });
+
+  test("a voice_close from a connection that never opened changes nothing", async () => {
+    const bystander = await connectFace();
+    const widget = await connectFace();
+    const widgetHeard = collect(widget);
+
+    bystander.send(JSON.stringify({ type: "voice_close" }));
+    await settle();
+    expect(widgetHeard).toHaveLength(0);
+  });
+
+  test("a socket that dies without saying voice_close counts as having said it", async () => {
+    // The failure a user cannot see: a page crashes mid-conversation, the set
+    // never empties, and the widget sits with plugged ears forever. Socket
+    // death is closing, whether or not the client got to say so.
+    const widget = await connectFace();
+    const page = await connectFace();
+    const widgetHeard = collect(widget);
+
+    page.send(JSON.stringify({ type: "voice_open" }));
+    await settle();
+    expect(widgetHeard).toEqual([{ type: "voice_opened" }]);
+
+    page.terminate();
+    await settle();
+    expect(widgetHeard).toEqual([{ type: "voice_opened" }, { type: "voice_closed" }]);
+  });
+
+  test("a crash of one owner among two closes nothing", async () => {
+    const widget = await connectFace();
+    const first = await connectFace();
+    const second = await connectFace();
+    const widgetHeard = collect(widget);
+
+    first.send(JSON.stringify({ type: "voice_open" }));
+    second.send(JSON.stringify({ type: "voice_open" }));
+    await settle();
+    expect(widgetHeard).toEqual([{ type: "voice_opened" }]);
+
+    // One of two owners dies: the set is still occupied, so nothing is said.
+    first.terminate();
+    await settle();
+    expect(widgetHeard).toHaveLength(1);
+
+    // The survivor closing is what empties it.
+    second.send(JSON.stringify({ type: "voice_close" }));
+    await settle();
+    expect(widgetHeard).toEqual([{ type: "voice_opened" }, { type: "voice_closed" }]);
+  });
+});
+
+describe("the conversation", () => {
+  test("an ask routes to the brain and answers on the asking socket only", async () => {
+    const mouth = await connectFace();
+    const bystander = await connectFace();
+    const mouthHeard = collect(mouth);
+    const bystanderHeard = collect(bystander);
+
+    let sendProgress!: (signal: string) => void;
+    let finish!: (answer: string) => void;
+    answerWith = () =>
+      new Promise<string>((resolve) => {
+        finish = resolve;
+      });
+
+    mouth.send(JSON.stringify({ type: "ask", id: "call-1", request: "what is on my calendar" }));
+    await settle();
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.request).toBe("what is on my calendar");
+    sendProgress = asked[0]!.onProgress!;
+
+    // Progress lands mid-flight, on the asker, carrying the asker's own id.
+    sendProgress("You are now working on: calendar.");
+    await settle();
+    expect(mouthHeard).toEqual([
+      { type: "progress", id: "call-1", text: "You are now working on: calendar." },
+    ]);
+
+    finish("Two meetings, both before noon.");
+    await settle();
+    expect(mouthHeard).toEqual([
+      { type: "progress", id: "call-1", text: "You are now working on: calendar." },
+      { type: "answer", id: "call-1", text: "Two meetings, both before noon." },
+    ]);
+
+    // The reply is addressed, not broadcast: another face never hears a
+    // conversation it is not holding.
+    expect(bystanderHeard).toHaveLength(0);
+    // And the ask never reached the source — the brain is the lane's seam.
+    expect(source.received).toHaveLength(0);
+  });
+
+  test("a brain that throws answers with the fixed sentence, never the error", async () => {
+    const mouth = await connectFace();
+    const mouthHeard = collect(mouth);
+    answerWith = async () => {
+      throw new Error("ECONNREFUSED at internal-host:5432");
+    };
+
+    mouth.send(JSON.stringify({ type: "ask", id: "call-2", request: "do the thing" }));
+    await settle();
+    expect(mouthHeard).toEqual([{ type: "answer", id: "call-2", text: ASK_FAILED }]);
+    // The error's text stayed on the hub. A stranger's ears get a sentence,
+    // not a stack trace naming internal hosts.
+    expect(JSON.stringify(mouthHeard)).not.toContain("ECONNREFUSED");
+  });
+
+  test("an answer to a mouth that died is dropped, not delivered to a stranger", async () => {
+    const mouth = await connectFace();
+    const bystander = await connectFace();
+    const bystanderHeard = collect(bystander);
+
+    let finish!: (answer: string) => void;
+    answerWith = () =>
+      new Promise<string>((resolve) => {
+        finish = resolve;
+      });
+
+    mouth.send(JSON.stringify({ type: "ask", id: "call-3", request: "slow thing" }));
+    await settle();
+    mouth.terminate();
+    await settle();
+    finish("Too late.");
+    await settle();
+    expect(bystanderHeard).toHaveLength(0);
+  });
+
+  test("a caption from a mouth is relayed to every face", async () => {
+    const mouth = await connectFace();
+    const widget = await connectFace();
+    const mouthHeard = collect(mouth);
+    const widgetHeard = collect(widget);
+
+    mouth.send(JSON.stringify({ type: "caption", text: "turn the lights down" }));
+    await settle();
+    // Every face, the sender included — a mouth hearing its own caption back
+    // is confirmation, not an echo problem. It arrives as the state word,
+    // indistinguishable from a caption the hub produced itself.
+    expect(widgetHeard).toEqual([{ type: "caption", text: "turn the lights down" }]);
+    expect(mouthHeard).toEqual([{ type: "caption", text: "turn the lights down" }]);
+    expect(source.received).toHaveLength(0);
+  });
+
+  test("a lane with no brain treats an ask as noise", async () => {
+    // A hub booted without a brain — or before one — answers nothing.
+    // Answering "no brain here" would tell a caller about the hub's insides.
+    const bare = createServer((_request, response) => response.end("hub"));
+    const bareSource = new ScriptedEventSource();
+    const bareSocket = attachEventSocket(bare, bareSource);
+    await new Promise<void>((resolve) => bare.listen(0, "127.0.0.1", resolve));
+    const address = bare.address();
+    if (typeof address === "string" || address === null) throw new Error("no port");
+
+    try {
+      const mouth = await connectFace(`ws://127.0.0.1:${address.port}${EVENTS_PATH}`);
+      const heard = collect(mouth);
+      mouth.send(JSON.stringify({ type: "ask", id: "call-1", request: "anyone home" }));
+      await settle();
+      expect(heard).toHaveLength(0);
+      expect(mouth.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      await bareSocket.close();
+      await new Promise<void>((resolve) => bare.close(() => resolve()));
+    }
   });
 });
