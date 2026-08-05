@@ -24,6 +24,7 @@ import { realtimeConfig, type RealtimeProvider } from "./live.ts";
 import { Mouth } from "./mouth.ts";
 import { Orb, type OrbEvent, type Speaker } from "./orb.ts";
 import { buildRealtimeSettingsApp, readRealtimeSettings } from "./realtime-settings.ts";
+import { buildTokenMintApp } from "./token-mint.ts";
 import { buildOrbApp, ORB_BASE_PATH } from "./routes.ts";
 import { UtteranceBank, type ClipStore } from "./utterance-bank.ts";
 
@@ -109,10 +110,20 @@ const NO_EAR =
  * thing a person can actually fix, so it is the one they are told about.
  */
 export async function mountOrb(options: OrbMountOptions): Promise<OrbMount> {
-  // The settings route is mounted unconditionally — it works even when the orb
-  // is refused, because the settings are machine facts, not session state.
+  // The settings and mint routes are mounted unconditionally — they work even
+  // when the orb is refused. Settings are machine facts, not session state;
+  // and the mint resolves the credential per request, so a person can paste a
+  // key and wire a client without a hub restart. A hub with no credential
+  // still answers, with the one sentence that says what to fix.
   const composeSettings = (app: Hono): Hono => {
     if (options.settingsPath) app.route("/", buildRealtimeSettingsApp(options.settingsPath));
+    app.route(
+      "/",
+      buildTokenMintApp({
+        credentials: options.credentials,
+        ...(options.settingsPath !== undefined ? { settingsPath: options.settingsPath } : {}),
+      }),
+    );
     return app;
   };
 
