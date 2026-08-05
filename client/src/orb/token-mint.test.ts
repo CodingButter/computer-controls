@@ -10,7 +10,7 @@ import {
   TOKEN_TTL_MS,
   buildTokenMintApp,
 } from "./token-mint.ts";
-import { LIVE_MODEL, LIVE_VOICE } from "./live.ts";
+import { LIVE_MODEL, LIVE_VOICE } from "../live/live.ts";
 
 const STORED_KEY = "AIzaSyFAKE-b1gbeast-key-that-must-never-travel";
 

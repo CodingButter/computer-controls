@@ -3,18 +3,14 @@ import type { Gesture, StateEvent } from "./types.ts";
 /**
  * Where state events come from, as far as the socket is concerned.
  *
- * This interface is the seam this issue exists to install. The hub owns the
- * mic, the wake gate, and the Live provider socket; the faces own none of it.
- * But the ear chain itself — tier-0 VAD, the local Moonshine ear, the
- * classifier, the realtime provider — is prerequisite work that lands with the
- * orb, not with the widget. Building the widget against a real ear would mean
- * the face could not be proved without a microphone, a model download, and a
- * network credential, which is three reasons a test would be skipped.
- *
- * So the socket depends on this and nothing more: something that emits state
- * and accepts gestures. A scripted source proves the pipe and the face today;
- * the real chain implements the same two methods and swaps in with no change
- * on either side of the socket.
+ * The seam outlived the hardware it was built to hide. It once stood between
+ * the socket and a hub-owned ear chain; since the client migration the
+ * microphones, wake gates, and realtime sessions all live on devices, and
+ * what feeds this interface is the hub's own derived view of the lane — a
+ * session opened somewhere, an ask is in flight — joined with the touch lane.
+ * The socket still depends on this and nothing more: something that emits
+ * state and accepts gestures. A scripted source proves the pipe and the face
+ * in tests; the real sources implement the same two methods.
  *
  * The narrowness is also the point. A source hands out state descriptors —
  * "wake opened", "here is a caption line" — and never audio. Nothing in this

@@ -22,22 +22,19 @@ export const ORB_STATES = ["idle", "listening", "thinking", "speaking"];
 export const GESTURES = ["toggle", "mute", "dismiss"];
 
 /**
- * Every mood the hub can report, and the only ones this page will wear (#106).
- *
- * Closed like the state list above it. An unrecognised mood renders as the
- * resting colour rather than as whatever the shader does with a word it has
- * never seen, because a face guessing at a label it does not know is a face
- * showing something the hub never said.
- */
-export const ORB_MOODS = ["neutral", "frustrated", "excited", "calm"];
-
-/**
  * Decide what an event from the hub means for the page.
  *
  * Returns an instruction rather than touching anything, so the whole event
  * vocabulary can be exercised in a test. An event the page does not recognise
  * produces `null` — a face that guessed at an unknown event would be a face
  * that renders something the hub never said.
+ *
+ * The vocabulary shrank with the hub's hearing: the deaf hub speaks states
+ * and captions, nothing else. Captions arrive unattributed — the lane's
+ * caption word deliberately carries no speaker, because which device was
+ * talking is arbitration state, not content a face renders. Mood is gone
+ * entirely: sentiment lives on the device that heard the voice now, and the
+ * hub never learns it, so there is nothing for this pipe to carry.
  */
 export function interpret(event) {
   if (!event || typeof event !== "object") return null;
@@ -46,11 +43,7 @@ export function interpret(event) {
   }
   if (event.type === "caption") {
     if (typeof event.text !== "string" || !event.text.trim()) return null;
-    const speaker = event.speaker === "user" || event.speaker === "assistant" ? event.speaker : null;
-    return speaker ? { kind: "caption", text: event.text, speaker } : null;
-  }
-  if (event.type === "mood") {
-    return ORB_MOODS.includes(event.mood) ? { kind: "mood", mood: event.mood } : null;
+    return { kind: "caption", text: event.text };
   }
   return null;
 }
@@ -60,6 +53,12 @@ export function interpret(event) {
  *
  * Ruling 5: no credential means no orb, and the page says why rather than
  * presenting a control that cannot work.
+ *
+ * The status route speaks its own coarse vocabulary — idle or talking — while
+ * this page renders the richer one. "Talking" maps to the listening render
+ * state: a conversation is live somewhere, and the stream will refine the
+ * picture the moment it says anything. Anything unrecognised is idle, which
+ * is the one state that is safe to be wrong about.
  */
 export function availability(status) {
   if (!status || status.enabled !== true) {
@@ -68,6 +67,7 @@ export function availability(status) {
       reason: status?.reason ?? "The orb is unavailable.",
     };
   }
+  if (status.state === "talking") return { usable: true, state: "listening" };
   return { usable: true, state: ORB_STATES.includes(status.state) ? status.state : "idle" };
 }
 
@@ -112,16 +112,10 @@ function init() {
       if (instruction.state === "idle") caption.textContent = "";
       return;
     }
-    if (instruction.kind === "mood") {
-      // The colour is the only place this label lands. It is not written to the
-      // drawer, not added to the caption, and not kept in a variable the page
-      // reads back — the shader tweens toward it and that is the whole of its
-      // life. A DOM-only face simply does not show a mood.
-      webglOrb?.setMood(instruction.mood);
-      return;
-    }
+    // A stream caption is unattributed — the lane's word carries no speaker —
+    // so it lands on the caption line only. The drawer log stays the record of
+    // turns this page can attribute: its own typing, and its own mouth.
     caption.textContent = instruction.text;
-    appendTurn(instruction.text, instruction.speaker === "user" ? "you" : "agent");
   };
 
   const gesture = async (name) => {

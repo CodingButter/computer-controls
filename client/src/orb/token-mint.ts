@@ -25,8 +25,8 @@
 import { Hono } from "hono";
 
 import { isRefusal, resolveOrbCredential } from "./credentials.ts";
-import { ORB_SYSTEM_INSTRUCTION } from "./live-gemini.ts";
-import { HUB_FUNCTION_DECLARATION, LIVE_MODEL, LIVE_VOICE } from "./live.ts";
+import { ORB_SYSTEM_INSTRUCTION } from "../live/session.ts";
+import { HUB_FUNCTION_DECLARATION, LIVE_MODEL, LIVE_VOICE } from "../live/live.ts";
 import { readRealtimeSettings } from "./realtime-settings.ts";
 
 export const TOKEN_MINT_PATH = "/api/orb/token";
