@@ -36,10 +36,17 @@ export type CatalogEntry = { name: string; source: "curated" };
  * Curated, not fetched: a settings page that needs the network to render is a
  * settings page that cannot be opened when the network is the problem. An
  * unknown value a person pastes is still saved — it is just not in this list.
+ *
+ * Every name here was read back from the provider's own `models.list`, filtered
+ * to those declaring `bidiGenerateContent`. The list shipped with a name that
+ * had never been checked against anything, and a curated list carrying a model
+ * the provider does not have is worse than no list: it is the settings page
+ * handing a person a broken choice with the authority of a menu.
  */
 export const REALTIME_MODELS: readonly CatalogEntry[] = Object.freeze([
   { name: "gemini-3.1-flash-live-preview", source: "curated" },
-  { name: "gemini-3.1-pro-live-preview", source: "curated" },
+  { name: "gemini-2.5-flash-native-audio-latest", source: "curated" },
+  { name: "gemini-2.5-flash-native-audio-preview-12-2025", source: "curated" },
 ]);
 
 /**

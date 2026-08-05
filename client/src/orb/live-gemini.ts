@@ -89,12 +89,30 @@ export type SocketLike = {
 };
 
 /**
- * A close code the provider sends when it will not accept this connection
- * again — a retired model (1008) or a policy rejection (4xxx). Redialing a
- * permanent refusal is how the orb went mute: the same model re-sent forever.
+ * What a close reason looks like when the model itself is the thing the
+ * provider will not accept. Matched against the server's own words, because
+ * the close code does not carry the distinction this needs.
  */
-function isPermanentClose(code: number): boolean {
-  return code === 1008 || code >= 4000;
+const MODEL_REFUSAL =
+  /not found|not supported|unsupported|does not exist|is not available|no longer available|invalid model/i;
+
+/**
+ * A close the provider will send again for the same setup frame.
+ *
+ * The code alone cannot answer this. Gemini Live sends 1008 for a model it does
+ * not have — permanent, and redialing it is how the orb went mute in #129 — and
+ * it sends 1008 again for a session it aborted on its own side, which is a drop
+ * like any other and comes back on the next dial. Treating both as permanent
+ * turns a blip into an orb that is off until someone restarts the hub, wearing
+ * a message that blames a model the provider never complained about.
+ *
+ * So the code narrows and the reason decides: 4xxx stays permanent because a
+ * policy rejection is the provider declining this client rather than dropping
+ * it, and 1008 is permanent only when the server's own words name the model.
+ */
+function isPermanentClose(code: number, reason: string): boolean {
+  if (code >= 4000) return true;
+  return code === 1008 && MODEL_REFUSAL.test(reason);
 }
 
 /** Format a permanent refusal so the model name travels to the UI. */
@@ -244,7 +262,7 @@ export function geminiLiveProvider(
               // A permanent refusal during setup — a retired model, a policy
               // rejection — must name the model rather than read as a transient
               // blip. This is the exact gap that left the orb mute in #129.
-              if (isPermanentClose(event.code)) {
+              if (isPermanentClose(event.code, event.reason)) {
                 settled = true;
                 reject(new Error(formatRefusal(config.model, event.reason)));
                 return;
@@ -258,7 +276,7 @@ export function geminiLiveProvider(
             if (current !== socket) return;
             current = undefined;
             if (!closedByUs) {
-              if (isPermanentClose(event.code)) {
+              if (isPermanentClose(event.code, event.reason)) {
                 // A permanent refusal after setup: stop redialing the same
                 // rejected model, surface the reason so the person knows what
                 // to change. Retry would loop forever against a model the
@@ -266,7 +284,14 @@ export function geminiLiveProvider(
                 closedByUs = true;
                 config.events.onRefusal?.(formatRefusal(config.model, event.reason));
               } else {
-                console.warn("[orb] realtime socket dropped by the server; redialing");
+                // The code and the reason are logged because the difference
+                // between them is what decides whether the orb comes back, and
+                // reading that difference out of a log beats reproducing it.
+                console.warn(
+                  `[orb] realtime socket dropped by the server (${event.code}${
+                    event.reason ? `: ${event.reason}` : ""
+                  }); redialing`,
+                );
                 void redial();
               }
             }
