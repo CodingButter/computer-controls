@@ -8,7 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Field, Select } from "@/components/ui/select";
-import type { LoginFlow, ModelPack, ProviderFlow, VoiceProvider } from "@/lib/hub";
+import type {
+  CatalogEntry,
+  LoginFlow,
+  ModelPack,
+  ProviderFlow,
+  RealtimeSettings,
+  VoiceProvider,
+} from "@/lib/hub";
 import { cn } from "@/lib/utils";
 
 /**
@@ -268,40 +275,90 @@ function ModelPackCard(props: { pack?: ModelPack }) {
 }
 
 /**
- * Which provider the orb opens its socket to, and which voice it wears.
+ * A picker over a curated catalog that still shows a value the catalog does
+ * not name.
  *
- * The controls are here and inert, on purpose: the hub does not yet accept a
- * choice, and the honest thing is to show the shape of the setting with its
- * current value rather than a control that silently does nothing. Wiring is
- * issue #129.
+ * The saved value is offered as an option even when the hub does not recognise
+ * it, because it is what the file holds and what the orb will send. A picker
+ * that dropped it would show a person a setting other than the one they are
+ * running — the shape of the bug #129 was filed about.
  */
-function RealtimeVoiceCard(props: { providers: readonly VoiceProvider[] }) {
-  const realtime = props.providers.filter((entry) => entry.lane === "realtime");
+function CatalogSelect(props: {
+  label: string;
+  value: string | undefined;
+  catalog: readonly CatalogEntry[];
+  defaultLabel: string;
+  busy: boolean;
+  onChange: (value: string) => void;
+}) {
+  const known = props.catalog.some((entry) => entry.name === props.value);
+  return (
+    <Field label={props.label}>
+      <Select
+        aria-label={props.label}
+        disabled={props.busy}
+        value={props.value ?? ""}
+        onChange={(event) => props.onChange(event.target.value)}
+      >
+        <option value="">{props.defaultLabel}</option>
+        {props.catalog.map((entry) => (
+          <option key={entry.name} value={entry.name}>
+            {entry.name}
+          </option>
+        ))}
+        {props.value !== undefined && !known ? (
+          <option value={props.value}>{props.value} (not in this list)</option>
+        ) : null}
+      </Select>
+    </Field>
+  );
+}
+
+/**
+ * Which provider the orb opens its socket to, which model answers on it, and
+ * which voice it wears.
+ *
+ * The provider picker is still inert: the hub reports which lanes exist and
+ * whether they are usable, and nothing accepts a choice between them yet. It
+ * shows the lane the orb would open today, with the reason when that lane is
+ * not usable, rather than a control that silently does nothing.
+ *
+ * The model and voice pickers are live against the hub's settings file. A
+ * change takes effect on the orb's next conversation, not mid-sentence — the
+ * settings are read when a socket is dialled, and reaching into a running
+ * conversation to swap the voice underneath somebody mid-reply is a worse
+ * behaviour than waiting for them to finish.
+ */
+function RealtimeVoiceCard(props: {
+  providers: readonly VoiceProvider[];
+  realtime?: RealtimeSettings;
+  realtimeError?: string;
+  busy: boolean;
+  onChooseModel: (model: string) => void;
+  onChooseVoice: (voice: string) => void;
+}) {
+  const lanes = props.providers.filter((entry) => entry.lane === "realtime");
   // The one the orb would open today: a usable lane if there is one, otherwise
   // the first offered — with its reason shown rather than swallowed.
-  const current = realtime.find((entry) => entry.usable) ?? realtime[0];
+  const current = lanes.find((entry) => entry.usable) ?? lanes[0];
+  const settings = props.realtime;
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-base text-foreground">Realtime voice</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        {realtime.length === 0 ? (
+        {lanes.length === 0 ? (
           <p className="text-sm text-muted">Connect an account above to give the orb a voice.</p>
         ) : (
           <>
             <Field label="Provider">
               <Select aria-label="Realtime voice provider" disabled value={current?.provider ?? ""}>
-                {realtime.map((entry) => (
+                {lanes.map((entry) => (
                   <option key={entry.provider} value={entry.provider}>
                     {entry.name}
                   </option>
                 ))}
-              </Select>
-            </Field>
-            <Field label="Voice">
-              <Select aria-label="Realtime voice" disabled value="">
-                <option value="">Provider default</option>
               </Select>
             </Field>
             {current && !current.usable ? (
@@ -309,9 +366,43 @@ function RealtimeVoiceCard(props: { providers: readonly VoiceProvider[] }) {
             ) : null}
           </>
         )}
+
+        {settings ? (
+          <>
+            <CatalogSelect
+              label="Model"
+              value={settings.model}
+              catalog={settings.models}
+              defaultLabel="This build's default"
+              busy={props.busy}
+              onChange={props.onChooseModel}
+            />
+            <CatalogSelect
+              label="Voice"
+              value={settings.voice}
+              catalog={settings.voices}
+              defaultLabel="This build's default"
+              busy={props.busy}
+              onChange={props.onChooseVoice}
+            />
+            {settings.warnings.map((warning) => (
+              <p key={warning} className="text-xs text-warning">
+                {warning}
+              </p>
+            ))}
+          </>
+        ) : (
+          <p className="text-xs text-muted">
+            {props.realtimeError ?? "The hub did not answer for the realtime model and voice."}
+          </p>
+        )}
+        {props.realtimeError && settings ? (
+          <p className="text-xs text-danger">{props.realtimeError}</p>
+        ) : null}
+
         <p className="text-xs text-muted">
-          The socket the orb opens to listen and speak. The model and the voice are pinned by this
-          build today; picking them here lands with model and voice selection.
+          The socket the orb opens to listen and speak. A change here applies to the next
+          conversation, not the one in progress.
         </p>
       </CardContent>
     </Card>
@@ -324,11 +415,17 @@ export function ModelsPanel(props: {
   pack?: ModelPack;
   flow?: LoginFlow;
   error?: string;
+  /** Absent when the hub did not answer for them; `realtimeError` says why. */
+  realtime?: RealtimeSettings;
+  realtimeError?: string;
+  realtimeBusy?: boolean;
   onConnect: (provider: string) => void;
   onDisconnect: (provider: string) => void;
   onSaveKey: (provider: string, key: string) => void;
   onSubmitCode: (code: string) => void;
   onCancelFlow: () => void;
+  onChooseRealtimeModel: (model: string) => void;
+  onChooseRealtimeVoice: (voice: string) => void;
 }) {
   const { providers, voices, flow } = props;
   const unconnected = providers.filter((entry) => !entry.connected);
@@ -367,7 +464,14 @@ export function ModelsPanel(props: {
       <ModelPackCard pack={props.pack} />
 
       <div className="grid gap-4 md:grid-cols-2">
-        <RealtimeVoiceCard providers={voices} />
+        <RealtimeVoiceCard
+          providers={voices}
+          {...(props.realtime ? { realtime: props.realtime } : {})}
+          {...(props.realtimeError ? { realtimeError: props.realtimeError } : {})}
+          busy={props.realtimeBusy === true}
+          onChooseModel={props.onChooseRealtimeModel}
+          onChooseVoice={props.onChooseRealtimeVoice}
+        />
         <VoiceLane
           title="Speech synthesis"
           blurb="One request, one answer: what the typed lane speaks with."

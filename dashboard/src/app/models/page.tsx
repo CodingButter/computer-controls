@@ -9,14 +9,17 @@ import {
   disconnectProvider,
   getFlows,
   getHealth,
+  getRealtimeSettings,
   getVoiceProviders,
   pollLogin,
+  putRealtimeSettings,
   saveApiKey,
   startLogin,
   type Fetched,
   type ModelPack,
   type LoginFlow,
   type ProviderFlow,
+  type RealtimeSettings,
   type VoiceProvider,
 } from "@/lib/hub";
 
@@ -32,6 +35,9 @@ export default function ModelsPage() {
   const [pack, setPack] = useState<ModelPack | undefined>(undefined);
   const [flow, setFlow] = useState<LoginFlow | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [realtime, setRealtime] = useState<RealtimeSettings | undefined>(undefined);
+  const [realtimeError, setRealtimeError] = useState<string | undefined>(undefined);
+  const [realtimeBusy, setRealtimeBusy] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const refresh = useCallback(async () => {
@@ -40,6 +46,35 @@ export default function ModelsPage() {
     setVoices(voiceAnswer.kind === "ok" ? voiceAnswer.data : []);
     const health = await getHealth();
     setPack(health.kind === "ok" ? health.data.model : undefined);
+    const settings = await getRealtimeSettings();
+    if (settings.kind === "ok") {
+      setRealtime(settings.data);
+      setRealtimeError(undefined);
+    } else {
+      // The pickers are hidden rather than shown empty: an empty picker reads
+      // as "nothing to choose", and the truth is that nobody was asked.
+      setRealtime(undefined);
+      setRealtimeError(settings.detail);
+    }
+  }, []);
+
+  /**
+   * Save one field and take the hub's answer as the new truth.
+   *
+   * The state is set from the response, never from the value that was picked,
+   * so the page cannot show a setting the file does not hold — including the
+   * warning the hub attaches to a value its catalog does not name.
+   */
+  const choose = useCallback(async (patch: { model?: string } | { voice?: string }) => {
+    setRealtimeBusy(true);
+    try {
+      setRealtime(await putRealtimeSettings(patch));
+      setRealtimeError(undefined);
+    } catch (cause) {
+      setRealtimeError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setRealtimeBusy(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -95,6 +130,11 @@ export default function ModelsPage() {
       pack={pack}
       flow={flow}
       error={error}
+      realtime={realtime}
+      realtimeError={realtimeError}
+      realtimeBusy={realtimeBusy}
+      onChooseRealtimeModel={(model) => void choose({ model })}
+      onChooseRealtimeVoice={(voice) => void choose({ voice })}
       onConnect={(provider) => void guard(async () => land(await startLogin(provider)))}
       onDisconnect={(provider) =>
         void guard(async () => {
