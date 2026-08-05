@@ -11,19 +11,28 @@
 import { connectToHub } from "./connection.js";
 import { isOverVisibleShape, paintCaption, presenceClasses, wasDrag } from "./paint.js";
 import { INITIAL_STATE, applyGesture, reduce } from "./state-machine.js";
+import { mountWebGlOrb, syntheticLevel, hasWebGl } from "./face/orb-webgl.js";
+import { shaderStateFor } from "./face-state.js";
 
 const root = document.getElementById("widget");
 const orbElement = document.getElementById("orb");
+const orbCanvas = document.getElementById("orb-canvas");
 const captionElement = document.getElementById("caption");
 const menuElement = document.getElementById("menu");
 const menuDismiss = document.getElementById("menu-dismiss");
 const menuQuit = document.getElementById("menu-quit");
 
 let state = INITIAL_STATE;
+let webglOrb = null;
+// The shader reads a single face state rather than the widget's
+// presence+activity pair. The mapping is pure and tested apart from this DOM.
+let shaderState = shaderStateFor(state);
 
 function paint() {
   root.className = presenceClasses(state).join(" ");
   paintCaption(captionElement, state.caption);
+  shaderState = shaderStateFor(state);
+  webglOrb?.setState(shaderState);
 }
 
 const hub = connectToHub({
@@ -156,5 +165,45 @@ window.addEventListener("mouseup", (event) => {
   if (moved) perform({ type: "drag", x: event.screenX, y: event.screenY });
   else perform({ type: "mute" });
 });
+
+/*
+ * The same face the /orb page wears, rendered here when the machine can.
+ *
+ * WebGL is probed on a throwaway canvas: the display canvas remembers its first
+ * context type forever, and three.js needs to claim its own. If the probe fails
+ * — or three fails to load, or the context fails — the CSS orb was never
+ * suppressed, so the widget is already in its fallback. This is the single
+ * fallback decision point, the same shape the hub's page uses.
+ *
+ * The canvas is a child of #orb so the gesture and click-through geometry above
+ * — keyed off #orb's bounding box — keep working unchanged.
+ */
+if (hasWebGl(document.createElement("canvas"))) {
+  mountWebGlOrb({
+    canvas: orbCanvas,
+    reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
+  })
+    .then((orb3d) => {
+      webglOrb = orb3d;
+      orbElement.classList.add("webgl");
+      webglOrb.setState(shaderState);
+    })
+    .catch(() => {
+      // WebGL reported present but three or the context failed. The CSS orb was
+      // never suppressed, so the widget is already in its fallback state.
+    });
+}
+
+// The single animation loop: synthesize a level from the current face state and
+// feed it to the shader each frame. When the CSS orb is the active face,
+// webglOrb is null and this is a no-op — the same shape the hub's page uses.
+const loop = (now) => {
+  if (webglOrb) {
+    webglOrb.setLevel(syntheticLevel(shaderState, now));
+    webglOrb.tick(now);
+  }
+  requestAnimationFrame(loop);
+};
+requestAnimationFrame(loop);
 
 paint();
