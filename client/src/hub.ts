@@ -61,7 +61,7 @@ export async function prepareHub(config: ClientConfig) {
     // door onto this machine that the hub is allowed to knock on; a shell, a
     // file write, or a language-server spawn would be a second door, opening
     // without a scope check and without an audit line. See ./toolbox.ts.
-    workspace: hubWorkspace,
+    workspace: hubWorkspace({ commonsPath: config.commonsPath }),
     disabledTools: HANDS_OFF_TOOL_NAMES,
     // Left to itself the runtime resolves plugins from this project *and* from
     // the operator's home directory, which handed a session that holds a
