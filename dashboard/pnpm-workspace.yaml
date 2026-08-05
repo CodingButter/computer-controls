@@ -1,0 +1,11 @@
+# Same answer client/ gives, for the same reason: pnpm refuses to finish an
+# install that silently skipped a dependency's build script, and an unanswered
+# package fails `pnpm install` outright. Next.js pulls native helpers whose
+# builds this package does not need — the dashboard is a static export, built
+# once by `next build`, and nothing at runtime loads a native module.
+#
+# So: build nothing. If a future dependency genuinely needs its build to run,
+# flip that one entry and say why.
+allowBuilds:
+  sharp: false
+  unrs-resolver: false

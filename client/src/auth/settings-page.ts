@@ -13,6 +13,7 @@
  * see.
  */
 
+import { REALTIME_SETTINGS_PATH } from "../orb/realtime-settings.ts";
 import { VOICE_PROVIDERS_PATH } from "../voice/routes.ts";
 import { PROVIDER_AUTH_BASE_PATH } from "./routes.ts";
 
@@ -34,6 +35,11 @@ const STYLES = `
   .error { color: #b3261e; font-size: .9rem; margin-top: .5rem; }
   .voice { margin: 0 0 .35rem; font-size: .9rem; }
   .voice:last-child { margin-bottom: 0; }
+  .field { margin-top: .75rem; }
+  .field label { display: block; font-weight: 600; margin-bottom: .25rem; }
+  select { font: inherit; padding: .35rem .5rem; border-radius: .35rem; min-width: 14rem; }
+  .note { font-size: .85rem; opacity: .7; margin-top: .25rem; }
+  .warning { color: #b3261e; font-size: .85rem; margin-top: .25rem; }
 `;
 
 const SCRIPT = String.raw`
@@ -131,6 +137,7 @@ async function poll(section, session) {
 async function refresh() {
   render((await call("/flows")).providers);
   await refreshVoices();
+  await refreshRealtime();
 }
 
 /**
@@ -159,6 +166,63 @@ async function refreshVoices() {
   }));
 }
 
+/**
+ * The realtime model and speaking voice the orb uses. Both take effect on the
+ * next conversation — the provider can't change them mid-socket — and the
+ * page says so. The server ships a curated list, but a saved value not on it
+ * (e.g. a model that was added or retired upstream) still appears and applies,
+ * with a warning rather than a refusal.
+ */
+async function refreshRealtime() {
+  const settings = await call("__REALTIME_SETTINGS__");
+
+  document.getElementById("realtime-model").replaceChildren(
+    ...settings.models.map((m) => new Option(m.name, m.name, false, m.name === settings.model)),
+  );
+  document.getElementById("realtime-voice").replaceChildren(
+    ...settings.voices.map((v) => new Option(v.name, v.name, false, v.name === settings.voice)),
+  );
+
+  // An unknown-but-typed saved value — not on the curated list — still applies,
+  // but the person should see that it isn't recognised.
+  if (settings.model && !settings.models.some((m) => m.name === settings.model)) {
+    document.getElementById("realtime-model").append(
+      new Option(settings.model + " (unknown)", settings.model, true, true),
+    );
+    document.getElementById("model-warning").textContent =
+      "The saved model " + settings.model + " is not in the known list. It may have been added or retired upstream.";
+  } else {
+    document.getElementById("model-warning").textContent = "";
+  }
+  if (settings.voice && !settings.voices.some((v) => v.name === settings.voice)) {
+    document.getElementById("realtime-voice").append(
+      new Option(settings.voice + " (unknown)", settings.voice, true, true),
+    );
+    document.getElementById("voice-warning").textContent =
+      "The saved voice " + settings.voice + " is not in the known list.";
+  } else {
+    document.getElementById("voice-warning").textContent = "";
+  }
+
+  document.getElementById("realtime-model").value = settings.model || "";
+  document.getElementById("realtime-voice").value = settings.voice || "";
+}
+
+document.getElementById("realtime-model").addEventListener("change", () =>
+  saveRealtime("model", document.getElementById("realtime-model").value).catch(() => {}),
+);
+document.getElementById("realtime-voice").addEventListener("change", () =>
+  saveRealtime("voice", document.getElementById("realtime-voice").value).catch(() => {}),
+);
+
+async function saveRealtime(field, value) {
+  // Both fields are sent so one change doesn't clear the other.
+  const payload = {};
+  payload[field] = value;
+  await call("__REALTIME_SETTINGS__", { method: "PUT", body: JSON.stringify(payload) });
+  await refreshRealtime();
+}
+
 refresh().catch((problem) => { document.getElementById("providers").textContent = problem.message; });
 `;
 
@@ -177,6 +241,22 @@ export function renderSettingsPage(basePath: string = PROVIDER_AUTH_BASE_PATH): 
   <h1>Voice</h1>
   <p class="lede">Which account the agent speaks and listens with. Set <code>COMCON_VOICE_PROVIDER</code> to pick one; otherwise the connected one is used.</p>
   <section id="voices"></section>
+  <h1>Realtime</h1>
+  <p class="lede">The model and voice the orb uses over its live connection. These take effect on the next conversation — the provider cannot change them mid-socket.</p>
+  <section>
+    <div class="field">
+      <label for="realtime-model">Model</label>
+      <select id="realtime-model"></select>
+      <p class="note">Takes effect on the next conversation.</p>
+      <p class="warning" id="model-warning"></p>
+    </div>
+    <div class="field">
+      <label for="realtime-voice">Speaking voice</label>
+      <select id="realtime-voice"></select>
+      <p class="note">Takes effect on the next conversation.</p>
+      <p class="warning" id="voice-warning"></p>
+    </div>
+  </section>
 </main>
 <template id="provider-template">
   <section>
@@ -200,9 +280,8 @@ export function renderSettingsPage(basePath: string = PROVIDER_AUTH_BASE_PATH): 
     <p class="error" role="alert"></p>
   </section>
 </template>
-<script type="module">${SCRIPT.replace("__BASE__", basePath).replace(
-  "__VOICE_PROVIDERS__",
-  VOICE_PROVIDERS_PATH,
-)}</script>
+<script type="module">${SCRIPT.replace("__BASE__", basePath)
+  .replace("__VOICE_PROVIDERS__", VOICE_PROVIDERS_PATH)
+  .replace(/__REALTIME_SETTINGS__/g, REALTIME_SETTINGS_PATH)}</script>
 </html>`;
 }

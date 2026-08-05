@@ -4,6 +4,7 @@ import {
   HUB_FUNCTION_DECLARATION,
   HUB_FUNCTION_NAME,
   LIVE_MODEL,
+  LIVE_VOICE,
   REALTIME_TOOLS,
   realtimeConfig,
 } from "./live.ts";
@@ -80,6 +81,14 @@ describe("test_the_live_provider_holds_no_desktop_or_memory_tools", () => {
 
   it("pins the Live model rather than inheriting a default that can move", () => {
     expect(realtimeConfig({ apiKey: "k", events: events() }).model).toBe(LIVE_MODEL);
+  });
+
+  it("defaults to the pinned voice rather than the provider's own, which is free to move", () => {
+    expect(realtimeConfig({ apiKey: "k", events: events() }).voice).toBe(LIVE_VOICE);
+  });
+
+  it("threads a chosen voice through to the provider config", () => {
+    expect(realtimeConfig({ apiKey: "k", voice: "Aoede", events: events() }).voice).toBe("Aoede");
   });
 
   it("asks for proactive audio, which is what lets a signal be spoken unprompted", () => {

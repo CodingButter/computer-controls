@@ -7,6 +7,7 @@ import { describe, expect, test } from "vitest";
 // this suite could only run on a machine with a display.
 import { GRANTED_PERMISSIONS, placeWindow } from "./window-shape.js";
 import { hubEventsUrl, nextRetryDelay } from "./connection.js";
+import { dashboardUrl } from "./dashboard.js";
 
 /**
  * The widget is a face, never an ear — checked against the code that ships.
@@ -112,9 +113,19 @@ test("test_idle_audio_never_leaves_the_machine_with_the_widget_running", () => {
   // widget's half — that there is no second connection, to anywhere, over
   // which anything at all could leave.
 
-  // Exactly one address is built in this process, and it is loopback.
+  // Two addresses are built in this process, and both are loopback: the socket
+  // the face listens on, and the dashboard the shell hands to a browser. Only
+  // the port varies in either, and a port does not change which machine the
+  // traffic reaches.
   expect(hubEventsUrl(4111)).toBe("ws://127.0.0.1:4111/events");
   expect(hubEventsUrl(9999)).toContain("127.0.0.1");
+  expect(dashboardUrl(4111)).toBe("http://127.0.0.1:4111/");
+  expect(dashboardUrl(9999)).toContain("http://127.0.0.1:");
+  // A port that is not a port opens nothing at all, rather than an address
+  // assembled out of whatever was in the environment.
+  for (const notAPort of [Number.NaN, 0, -1, 70000, 4111.5]) {
+    expect(dashboardUrl(notAPort), String(notAPort)).toBeNull();
+  }
 
   // No other way out: no HTTP client, no second socket, no telemetry. The
   // face is read here too — a shader that phoned home for a texture would be
@@ -151,6 +162,15 @@ describe("the shell", () => {
 
     // Clicks fall through the transparent rectangle by default.
     expect(main).toContain("setIgnoreMouseEvents(true");
+
+    // And the default is the only unconditional setting there is. The window is
+    // made click-through when it opens, and the single other call is the
+    // renderer's report of what it drew — so a hit test that goes wrong leaves
+    // the widget transparent, which is the direction the issue insists a bug
+    // here must fail in. Swallowing a click meant for the user's editor is the
+    // worst outcome available.
+    const flips = [...main.matchAll(/setIgnoreMouseEvents\(([^,)]*)/g)].map((match) => match[1]);
+    expect(flips).toEqual(["true", "!over"]);
 
     // It never steals what the user was typing into.
     expect(main).toContain("focusable: false");
@@ -274,9 +294,78 @@ describe("the exit", () => {
     expect(page).toContain('id="menu"');
     expect(page).toContain('id="menu-quit"');
     expect(page).toContain('id="menu-dismiss"');
+    expect(page).toContain('id="menu-dashboard"');
 
     // Right-click is still the interaction; it now opens a menu rather than
     // dismissing immediately.
     expect(renderer).toContain("contextmenu");
+  });
+});
+
+describe("the dashboard", () => {
+  test("opens in a browser, on a channel, at an address the page cannot choose", () => {
+    const preload = read("preload.js");
+    const main = read("main.js");
+
+    expect(preload).toContain('ipcRenderer.send("widget:open-dashboard"');
+    expect(main).toContain('ipcMain.on("widget:open-dashboard"');
+
+    // The bridge carries no URL, and the shell opens exactly one thing: the
+    // address it built itself. An always-on-top window that opened links
+    // chosen by its page would be a phishing surface with a nice animation,
+    // and this is the assertion that keeps a later `openExternal(link)` from
+    // slipping in beside this one.
+    expect(preload).not.toContain("http");
+    const opened = [...main.matchAll(/openExternal\(([^)]*)\)/g)].map((match) => match[1]);
+    expect(opened).toEqual(["url"]);
+    expect(main).toContain("const url = dashboardUrl(hubPort())");
+  });
+
+  test("never reaches the hub", () => {
+    // Same ruling as quit: showing the user their own settings page is a
+    // shell-level action, so it does not enter the closed gesture vocabulary
+    // and nothing about it travels the socket.
+    for (const file of ["connection.js", "state-machine.js"]) {
+      expect(read(file), `${file} must know nothing about the dashboard`).not.toContain("dashboard");
+    }
+  });
+});
+
+describe("the drag", () => {
+  test("the page reports a distance; the shell owns the window", () => {
+    const preload = read("preload.js");
+    const renderer = read("renderer.js");
+    const main = read("main.js");
+
+    expect(preload).toContain('ipcRenderer.send("widget:drag"');
+    expect(main).toContain('ipcMain.on("widget:drag"');
+
+    // Only the shell moves the window, and only after the request has been
+    // read as a drag — a NaN reaching setPosition would put the face somewhere
+    // nobody can find it.
+    expect(main).toContain("readDragRequest(request)");
+    expect(main).toContain("window.setPosition(placement.x, placement.y)");
+    expect(renderer).not.toContain("setPosition");
+
+    // The page never names a place, only a distance travelled since the press.
+    // It cannot name one honestly: on a desk with three monitors it does not
+    // know where its own window is.
+    expect(renderer).toContain('window.widget.drag("begin"');
+    expect(renderer).toContain('window.widget.drag("end"');
+  });
+
+  test("the position is written down once, when the hand lets go", () => {
+    const main = read("main.js");
+
+    // Persisting on every mousemove would rewrite a file on disk sixty times a
+    // second for the length of a drag.
+    const writes = [...main.matchAll(/writePlacement\(/g)];
+    expect(writes).toHaveLength(1);
+    expect(main).toMatch(/drag\.phase === "end"[\s\S]*writePlacement\(/);
+
+    // And it is read back when the window opens, resolved against the display
+    // it is opening on rather than replayed as raw pixels.
+    expect(main).toContain("readPlacement(placementFile())");
+    expect(main).toContain("restorePlacement(display.workArea, stored)");
   });
 });
