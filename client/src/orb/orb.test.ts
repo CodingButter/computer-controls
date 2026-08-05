@@ -248,6 +248,7 @@ describe("an answer that arrives during a reconnect gap survives the redial", ()
     const orb = new Orb({
       gate: {
         vad: controllableVad(),
+        wakeWord: alwaysWakeWord,
         ear: { languages: ["en"], transcribe: async () => "" },
         classifier: createWakeWordClassifier(),
       },
