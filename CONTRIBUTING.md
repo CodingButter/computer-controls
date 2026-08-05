@@ -112,6 +112,33 @@ An issue is the entire world of whoever picks it up. It must carry:
 No issue without a ruling. If nobody has ruled on it yet, it is a question, and it goes to whoever
 can answer it before it becomes work.
 
+**And when the work depends on work that has not landed yet, the issue says so, in a
+`Depends on:` line naming the PR or issue and what it provides.** An issue is read by somebody
+starting from `main`, and `main` is the only thing they can see. Work that assumes a package,
+a route, or a seam that exists only on a branch will be built twice: once against nothing, and
+again after the rebase. That is not a merge conflict, it is a day. The dependency line is what
+stops the second build from happening.
+
+Nothing starts until what it depends on is merged. If the dependency slips, the issue waits —
+building ahead of it produces a branch that has to be reconciled by hand with whatever actually
+landed, which is the expensive kind of rework.
+
+## Merging in the right order
+
+Several branches at once is normal here. Losing one to a bad merge is not, and the way that
+happens is always the same: two branches both taught the same shared file about a new thing.
+
+- **Own your files.** A new page owns its own directory and its own data slice. Where a shared
+  file cannot be avoided, the shared edit should be *one line* — an export, a route mount, a nav
+  entry — because a one-line collision is resolvable and a rewritten file is not.
+- **Rebase before you open, rebase again before you merge.** The base moves; a PR that was
+  mergeable an hour ago is a claim, not a fact.
+- **Merge one at a time, and re-check the rest.** After each merge, every other open PR against
+  the same area is re-checked for mergeability. GitHub reporting a conflict is the cheap
+  discovery; a green merge that silently drops somebody's change is the expensive one.
+- **When the base moves under open work, say so on the issue and the PR.** The branch cannot
+  smell it.
+
 ## Reviews
 
 PRs are reviewed adversarially before merge, by models with no stake in the change. Their findings

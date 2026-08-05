@@ -19,14 +19,18 @@ That is the point of asking the object store instead of asking the program.
 from __future__ import annotations
 
 import json
-import subprocess
 
 import pytest
 
 from desktop_service import model, redaction, state
 
 from episode_recorder import Review
-from recorder_tests.conftest import action, snapshot, window
+from recorder_tests.conftest import (
+    action,
+    everything_ever_written,
+    snapshot,
+    window,
+)
 
 SECRET = "hunter2-correct-horse"
 
@@ -38,25 +42,6 @@ def real_policy():
     model.set_value_policy(redaction.default_policy())
     yield
     model.set_value_policy(previous)
-
-
-def everything_ever_written(store) -> str:
-    """Every object in the store, contents and all, as one searchable string.
-
-    Includes commit messages, tree entries and note blobs, because a leak that
-    landed in a commit subject would be just as permanent as one in a file.
-
-    Read as bytes and decoded leniently: tree objects are binary, and a scan
-    that fell over on the first one would be a scan that had not looked at
-    everything. A secret is text, so anything a decoder mangles was not it.
-    """
-    objects = subprocess.run(
-        ("git", "-C", str(store.path), "cat-file", "--batch-all-objects", "--batch"),
-        capture_output=True,
-        check=True,
-    ).stdout.decode("utf-8", errors="replace")
-    refs = store.git("for-each-ref", "--format=%(refname) %(contents)")
-    return objects + "\n" + refs
 
 
 def _keys(document) -> set[str]:

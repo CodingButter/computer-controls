@@ -448,6 +448,8 @@ describe("the fallback path for a pasted key", () => {
       name: "OpenAI",
       connected: true,
       method: "api-key",
+      loginKind: "device-code",
+      docUrl: "https://platform.openai.com/docs/models",
     });
     // Same auth provider id as the OAuth path, same store, one lookup.
     expect(storage.getStoredApiKey("openai-codex")).toBe(SECRETS.pastedApiKey);
@@ -497,12 +499,23 @@ describe("disconnecting", () => {
 describe("what the settings page is told", () => {
   it("lists every provider, how each signs in, and whether it is connected", async () => {
     const before = await browser.get("/api/oauth/flows");
-    expect(before.body.providers).toEqual([
+    const leading = before.body.providers
+      .slice(0, 3)
+      .map(({ provider, name, connected, loginKind }: Record<string, unknown>) => ({
+        provider,
+        name,
+        connected,
+        loginKind,
+      }));
+
+    // The two the product owns a login flow for lead the list, then Google:
+    // the orb's credential, which arrives by paste because there is no SDK flow
+    // to drive, and the settings page renders a key field rather than a sign-in
+    // button because of this value. Everything after them is the rest of the
+    // runtime's registry, which `provider-catalogue.test.ts` covers.
+    expect(leading).toEqual([
       { provider: "anthropic", name: "Anthropic", connected: false, loginKind: "paste-code" },
       { provider: "openai", name: "OpenAI", connected: false, loginKind: "device-code" },
-      // Google is the orb's credential and arrives by paste: there is no SDK
-      // flow to drive, and the settings page renders a key field rather than a
-      // sign-in button because of this value.
       { provider: "google", name: "Google", connected: false, loginKind: "api-key" },
     ]);
 
@@ -519,6 +532,7 @@ describe("what the settings page is told", () => {
       connected: true,
       method: "oauth",
       loginKind: "paste-code",
+      docUrl: "https://docs.anthropic.com/en/docs/about-claude/models",
       expiresAt: ANTHROPIC_CREDENTIALS.expires,
     });
   });

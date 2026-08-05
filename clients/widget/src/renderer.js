@@ -19,6 +19,7 @@ const orbElement = document.getElementById("orb");
 const orbCanvas = document.getElementById("orb-canvas");
 const captionElement = document.getElementById("caption");
 const menuElement = document.getElementById("menu");
+const menuDashboard = document.getElementById("menu-dashboard");
 const menuDismiss = document.getElementById("menu-dismiss");
 const menuQuit = document.getElementById("menu-quit");
 
@@ -72,6 +73,11 @@ window.addEventListener("mousemove", (event) => {
   // and a mousemove that released clicks would drop the menu through the
   // floor.
   if (menuVisible) return;
+  // A drag locks it for a harder reason. A hand moving faster than the window
+  // follows leaves the pointer outside the orb for a frame, and releasing the
+  // claim there would hand the rest of the gesture — including the mouseup —
+  // to whatever is behind the widget, dropping the face mid-drag.
+  if (dragging) return;
   const orb = orbElement.getBoundingClientRect();
   const caption = state.caption ? captionElement.getBoundingClientRect() : null;
   const over = isOverVisibleShape(
@@ -81,6 +87,11 @@ window.addEventListener("mousemove", (event) => {
   );
   if (over === claiming) return;
   claiming = over;
+  // Hover acknowledges the pointer and does nothing else: no gesture, no
+  // message, no record that the pointer was ever there. It is the one piece of
+  // feedback that tells the user the orb is a thing that can be touched rather
+  // than a picture painted on the desk.
+  orbElement.classList.toggle("hovered", over);
   window.widget.setPointerOverShape(over);
 });
 
@@ -91,8 +102,9 @@ window.addEventListener("mousemove", (event) => {
  * Right-click opens it where the pointer is. While it is open, the window
  * keeps claiming clicks so the buttons stay clickable, and a click anywhere
  * else — on the orb, on transparent pixels the window is capturing — closes
- * it. Dismiss and Quit are the two things the face can do: go away for this
- * turn, or go away for good.
+ * it. The three items are the three things the face can do that are not
+ * gestures: show the user the dashboard, go away for this turn, or go away for
+ * good.
  */
 let menuVisible = false;
 
@@ -119,6 +131,13 @@ window.addEventListener("contextmenu", (event) => {
   else showMenu(event.clientX, event.clientY);
 });
 
+menuDashboard.addEventListener("click", () => {
+  hideMenu();
+  // Shell-level, like quit: the hub is not asked for permission to show the
+  // user their own settings page, and nothing about this crosses the socket.
+  window.widget.openDashboard();
+});
+
 menuDismiss.addEventListener("click", () => {
   hideMenu();
   perform({ type: "dismiss" });
@@ -141,29 +160,50 @@ window.addEventListener("mousedown", (event) => {
 /*
  * Dragging moves the face.
  *
- * The position is reported to the hub so the other faces and the next launch
- * agree about where the user put it — the widget is not the owner of that
- * preference any more than it is the owner of anything else.
+ * Two things happen, and they are different things. The window follows the
+ * hand — that is the shell's job, asked for here as a distance travelled since
+ * the press, because the page has no idea where its own window sits on the
+ * desk. And the position is reported to the hub, so the other faces agree
+ * about where the user put it; the widget is not the owner of that preference
+ * any more than it is the owner of anything else.
+ *
+ * Holding shift while dragging asks for a snap. Which edge, corner, or centre
+ * that lands on — or whether the release was too far from any of them to snap
+ * at all — is decided by the shell, which is the half that knows the shape of
+ * the screen.
  */
 let dragging = null;
 orbElement.addEventListener("mousedown", (event) => {
   if (menuVisible) return;
+  // The left button drags and, without travel, mutes. The right button belongs
+  // to the menu: a right-click that also started a drag would end its own
+  // mouseup as a mute, and silence the ears on the way to opening a menu.
+  if (event.button !== 0) return;
   dragging = { x: event.screenX, y: event.screenY, moved: false };
+  window.widget.drag("begin", 0, 0, event.shiftKey);
 });
 window.addEventListener("mousemove", (event) => {
   if (!dragging) return;
   if (wasDrag(dragging, event.screenX, event.screenY)) dragging.moved = true;
+  // Below the threshold nothing moves, so a hand resting on the mouse does not
+  // nudge the face a pixel sideways on its way to a click.
+  if (!dragging.moved) return;
+  window.widget.drag("move", event.screenX - dragging.x, event.screenY - dragging.y, event.shiftKey);
 });
 window.addEventListener("mouseup", (event) => {
   if (!dragging) return;
-  const moved = dragging.moved;
+  const { moved, x, y } = dragging;
   dragging = null;
 
   // Press and release without travelling is a click, and a click on the orb
   // is the mute. Dragging a widget across the desk must not also mute it,
   // which is what a plain `click` listener beside this one would have done.
-  if (moved) perform({ type: "drag", x: event.screenX, y: event.screenY });
-  else perform({ type: "mute" });
+  if (!moved) {
+    perform({ type: "mute" });
+    return;
+  }
+  window.widget.drag("end", event.screenX - x, event.screenY - y, event.shiftKey);
+  perform({ type: "drag", x: event.screenX, y: event.screenY });
 });
 
 /*
