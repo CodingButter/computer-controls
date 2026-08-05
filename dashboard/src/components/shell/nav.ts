@@ -1,5 +1,6 @@
 import {
   Bot,
+  Boxes,
   LayoutDashboard,
   MessagesSquare,
   MonitorSmartphone,
@@ -7,7 +8,6 @@ import {
   ScrollText,
   Settings,
   ShieldCheck,
-  Users,
   type LucideIcon,
 } from "lucide-react";
 
@@ -33,7 +33,7 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
   { label: "Orb", href: "/orb", icon: Bot, external: true },
   { label: "Permissions", href: "/permissions", icon: ShieldCheck, external: false },
   { label: "Audit", href: "/audit", icon: ScrollText, external: false },
-  { label: "Accounts", href: "/accounts", icon: Users, external: false },
+  { label: "Models", href: "/models", icon: Boxes, external: false },
   { label: "Plugins", href: "/plugins", icon: Puzzle, external: false },
   { label: "Devices", href: "/devices", icon: MonitorSmartphone, external: false },
   { label: "Settings", href: "/settings", icon: Settings, external: false },

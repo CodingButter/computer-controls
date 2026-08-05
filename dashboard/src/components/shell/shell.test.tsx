@@ -11,7 +11,7 @@ test("the sidebar names all nine destinations", () => {
     "Orb",
     "Permissions",
     "Audit",
-    "Accounts",
+    "Models",
     "Plugins",
     "Devices",
     "Settings",
@@ -41,7 +41,7 @@ test("the visitor's page gets the pill and only that page", () => {
   expect(isActive("/audit", "/")).toBe(false);
   expect(isActive("/audit", "/audit")).toBe(true);
   expect(isActive("/audit/entry-1", "/audit")).toBe(true);
-  expect(isActive("/accounts", "/audit")).toBe(false);
+  expect(isActive("/models", "/audit")).toBe(false);
 
   const html = renderToStaticMarkup(<Sidebar activePath="/audit" />);
   const activeMarks = [...html.matchAll(/data-active="true"/g)];

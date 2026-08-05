@@ -2,31 +2,34 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { AccountsPanel } from "@/components/accounts/accounts";
+import { ModelsPanel } from "@/components/models/models";
 import { UnreachableNotice } from "@/components/overview/overview";
 import {
   completeLogin,
   disconnectProvider,
   getFlows,
+  getHealth,
   getVoiceProviders,
   pollLogin,
   saveApiKey,
   startLogin,
   type Fetched,
+  type ModelPack,
   type LoginFlow,
   type ProviderFlow,
   type VoiceProvider,
 } from "@/lib/hub";
 
 /**
- * The accounts page: a driver over the sign-in routes the hub already had.
+ * The models page: a driver over the sign-in routes the hub already had.
  * It starts flows, waits on them at the pace the server asks for, and
  * re-reads the provider list when one lands. It holds no credential, because
  * none of these answers carry one.
  */
-export default function AccountsPage() {
+export default function ModelsPage() {
   const [providers, setProviders] = useState<Fetched<readonly ProviderFlow[]> | null>(null);
   const [voices, setVoices] = useState<readonly VoiceProvider[]>([]);
+  const [pack, setPack] = useState<ModelPack | undefined>(undefined);
   const [flow, setFlow] = useState<LoginFlow | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -35,6 +38,8 @@ export default function AccountsPage() {
     setProviders(await getFlows());
     const voiceAnswer = await getVoiceProviders();
     setVoices(voiceAnswer.kind === "ok" ? voiceAnswer.data : []);
+    const health = await getHealth();
+    setPack(health.kind === "ok" ? health.data.model : undefined);
   }, []);
 
   useEffect(() => {
@@ -84,9 +89,10 @@ export default function AccountsPage() {
   }
 
   return (
-    <AccountsPanel
+    <ModelsPanel
       providers={providers.data}
       voices={voices}
+      pack={pack}
       flow={flow}
       error={error}
       onConnect={(provider) => void guard(async () => land(await startLogin(provider)))}

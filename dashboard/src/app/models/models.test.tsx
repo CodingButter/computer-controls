@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { AccountsPanel } from "@/components/accounts/accounts";
+import { ModelsPanel } from "@/components/models/models";
 import {
   completeLogin,
   parseFlows,
@@ -25,9 +25,9 @@ const VOICES: readonly VoiceProvider[] = [
 
 const noop = () => {};
 
-function panel(overrides: Partial<Parameters<typeof AccountsPanel>[0]> = {}) {
+function panel(overrides: Partial<Parameters<typeof ModelsPanel>[0]> = {}) {
   return renderToStaticMarkup(
-    <AccountsPanel
+    <ModelsPanel
       providers={PROVIDERS}
       voices={VOICES}
       onConnect={noop}
@@ -59,6 +59,28 @@ test("providers render with their connection state and the affordance each one h
   // third party learning which accounts this machine holds.
   expect(html).not.toContain('src="http');
   expect((html.match(/<svg/g) ?? []).length).toBeGreaterThanOrEqual(3);
+});
+
+test("the pack this build declared is shown with every tier's model, read-only", () => {
+  const html = panel({
+    pack: { pack: "computer-controls-anthropic", tiers: { minimal: "haiku-4-5", heavy: "opus-4-6" } },
+  });
+  expect(html).toContain("Model pack");
+  expect(html).toContain("computer-controls-anthropic");
+  expect(html).toContain("haiku-4-5");
+  expect(html).toContain("opus-4-6");
+  // No pack is a sentence, not an empty card.
+  expect(panel()).toContain("The hub has not named a pack.");
+});
+
+test("the realtime lane offers provider and voice controls, inert until the hub can take a choice", () => {
+  const html = panel();
+  expect(html).toContain('aria-label="Realtime voice provider"');
+  expect(html).toContain('aria-label="Realtime voice"');
+  // Inert, and saying so — a control that silently does nothing would be worse
+  // than an absent one.
+  expect((html.match(/<select[^>]*disabled/g) ?? []).length).toBe(2);
+  expect(html).toContain("Provider default");
 });
 
 test("voice lanes render what the hub offers, and say why a provider cannot serve", () => {

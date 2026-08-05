@@ -2,17 +2,17 @@
 
 import { useState } from "react";
 
-import { ProviderLogo } from "@/components/accounts/provider-logo";
+import { ProviderLogo } from "@/components/models/provider-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { LoginFlow, ProviderFlow, VoiceProvider } from "@/lib/hub";
+import type { LoginFlow, ModelPack, ProviderFlow, VoiceProvider } from "@/lib/hub";
 import { cn } from "@/lib/utils";
 
 /**
- * The accounts page per the approved design: model providers with their
- * connection state, the sign-in flow each provider actually has, and the
- * voices this machine's credentials can wear.
+ * The models page: the providers this machine holds accounts with, the pack
+ * this build runs, and the voices those credentials can wear — the same
+ * configuration surface Factory exposes, in this dashboard's own clothes.
  *
  * Rendered from what the hub offers and nothing else. There is no token in
  * any of these props, because there is none in any of the answers they came
@@ -216,9 +216,120 @@ function VoiceLane(props: { title: string; blurb: string; providers: readonly Vo
   );
 }
 
-export function AccountsPanel(props: {
+/**
+ * The pack the runtime declared at boot, and which model each tier wears.
+ *
+ * Read-only on purpose: the pack is named in this build's configuration, not
+ * chosen here, and a dropdown that cannot change anything would be a lie with
+ * a chevron on it.
+ */
+function ModelPackCard(props: { pack?: ModelPack }) {
+  if (!props.pack) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg text-foreground">Model pack</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted">The hub has not named a pack.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+  const tiers = Object.entries(props.pack.tiers);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg text-foreground">Model pack</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <Badge variant="success">active</Badge>
+          <span className="font-medium text-foreground">{props.pack.pack}</span>
+        </div>
+        <ul className="flex flex-col gap-1 text-sm">
+          {tiers.map(([tier, model]) => (
+            <li key={tier} className="flex items-center justify-between gap-3">
+              <span className="text-muted capitalize">{tier}</span>
+              <span className="truncate text-foreground">{model}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="text-xs text-muted">
+          Declared by this build at boot. Choosing a pack from here arrives with model selection.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Which provider the orb opens its socket to, and which voice it wears.
+ *
+ * The controls are here and inert, on purpose: the hub does not yet accept a
+ * choice, and the honest thing is to show the shape of the setting with its
+ * current value rather than a control that silently does nothing. Wiring is
+ * issue #129.
+ */
+function RealtimeVoiceCard(props: { providers: readonly VoiceProvider[] }) {
+  const realtime = props.providers.filter((entry) => entry.lane === "realtime");
+  // The one the orb would open today: a usable lane if there is one, otherwise
+  // the first offered — with its reason shown rather than swallowed.
+  const current = realtime.find((entry) => entry.usable) ?? realtime[0];
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base text-foreground">Realtime voice</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {realtime.length === 0 ? (
+          <p className="text-sm text-muted">Connect an account above to give the orb a voice.</p>
+        ) : (
+          <>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted">Provider</span>
+              <select
+                aria-label="Realtime voice provider"
+                disabled
+                value={current?.provider ?? ""}
+                className="rounded-lg border border-border bg-well px-3 py-1.5 text-sm text-foreground disabled:opacity-70"
+              >
+                {realtime.map((entry) => (
+                  <option key={entry.provider} value={entry.provider}>
+                    {entry.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted">Voice</span>
+              <select
+                aria-label="Realtime voice"
+                disabled
+                value=""
+                className="rounded-lg border border-border bg-well px-3 py-1.5 text-sm text-foreground disabled:opacity-70"
+              >
+                <option value="">Provider default</option>
+              </select>
+            </label>
+            {current && !current.usable ? (
+              <p className="text-xs text-muted">{current.reason ?? "unavailable"}</p>
+            ) : null}
+          </>
+        )}
+        <p className="text-xs text-muted">
+          The socket the orb opens to listen and speak. The model and the voice are pinned by this
+          build today; picking them here lands with model and voice selection.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function ModelsPanel(props: {
   providers: readonly ProviderFlow[];
   voices: readonly VoiceProvider[];
+  pack?: ModelPack;
   flow?: LoginFlow;
   error?: string;
   onConnect: (provider: string) => void;
@@ -233,9 +344,10 @@ export function AccountsPanel(props: {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold text-foreground">Accounts</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Models</h1>
         <p className="text-sm text-muted">
-          Sign in with your own provider accounts. Credentials stay on this machine.
+          Providers, the pack this build runs, and the voice the orb speaks with. Credentials stay
+          on this machine.
         </p>
       </div>
 
@@ -260,12 +372,10 @@ export function AccountsPanel(props: {
         </CardContent>
       </Card>
 
+      <ModelPackCard pack={props.pack} />
+
       <div className="grid gap-4 md:grid-cols-2">
-        <VoiceLane
-          title="Realtime voice"
-          blurb="The socket the orb opens to listen and speak."
-          providers={voices.filter((entry) => entry.lane === "realtime")}
-        />
+        <RealtimeVoiceCard providers={voices} />
         <VoiceLane
           title="Speech synthesis"
           blurb="One request, one answer: what the typed lane speaks with."

@@ -224,7 +224,7 @@ export function getPermissions(): Promise<PermissionsFetch> {
  * A model provider, how it signs in, and whether it currently is.
  *
  * Every field here is copied by name from the hub's answer. That is the
- * accounts page's half of the property the routes already keep: there is no
+ * models page's half of the property the routes already keep: there is no
  * token in these responses, and there is no line here that would carry one
  * into the page if one appeared tomorrow.
  */
