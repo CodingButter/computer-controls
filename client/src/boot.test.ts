@@ -130,8 +130,11 @@ test("the voice routes serve through the booted hub, not just their own module",
 
   // The settings section renders that list rather than a copy of it, so the
   // page has to point at this route or the two answers can drift apart.
+  // The same page now hosts the realtime model + voice pickers (#129), and
+  // those point at the orb's settings route.
   const settings = await fetch(`${baseUrl}/settings/accounts`).then((r) => r.text());
   expect(settings).toContain("/api/voice/providers");
+  expect(settings).toContain("/api/orb/realtime-settings");
 });
 
 test("the orb serves as a second face through the booted hub", async () => {

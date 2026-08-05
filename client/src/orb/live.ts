@@ -66,6 +66,13 @@ export type RealtimeEvents = {
   onBargeIn(): void;
   /** The socket reconnected after a server-side drop. Answers queued during the gap are flushed here. */
   onReconnect?(): void;
+  /**
+   * The provider permanently refused the connection (e.g. the model was
+   * retired upstream). Redialing stops — retrying a model the provider has
+   * rejected is how the orb went mute in the first place (#129). The reason
+   * names the model so the person knows what to change.
+   */
+  onRefusal?(reason: string): void;
 };
 
 /**
@@ -146,8 +153,9 @@ export function realtimeConfig(input: {
   apiKey: string;
   events: RealtimeEvents;
   model?: string;
-  proactiveAudio?: boolean;
+  /** Overrides the pinned voice for this session; absent keeps LIVE_VOICE. */
   voice?: string;
+  proactiveAudio?: boolean;
 }): RealtimeConfig {
   return {
     apiKey: input.apiKey,

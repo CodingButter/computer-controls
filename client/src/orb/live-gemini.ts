@@ -72,6 +72,9 @@ const defaultRetryWait: RetryWait = (attempt) =>
     if (typeof timer === "object" && "unref" in timer) timer.unref();
   });
 
+/** What a WebSocket close event carries, as this module needs it. */
+export type SocketCloseEvent = { code: number; reason: string; wasClean: boolean };
+
 /** The subset of WebSocket this module uses, injectable for tests. */
 export type SocketLike = {
   /**
@@ -84,6 +87,23 @@ export type SocketLike = {
   close(): void;
   addEventListener(type: "open" | "message" | "close" | "error", listener: (event: never) => void): void;
 };
+
+/**
+ * A close code the provider sends when it will not accept this connection
+ * again — a retired model (1008) or a policy rejection (4xxx). Redialing a
+ * permanent refusal is how the orb went mute: the same model re-sent forever.
+ */
+function isPermanentClose(code: number): boolean {
+  return code === 1008 || code >= 4000;
+}
+
+/** Format a permanent refusal so the model name travels to the UI. */
+function formatRefusal(model: string, reason: string): string {
+  const trimmed = reason.trim();
+  return trimmed
+    ? `The realtime voice provider refused the model '${model}': ${trimmed}`
+    : `The realtime voice provider refused the model '${model}'.`;
+}
 
 export type SocketFactory = (url: string) => SocketLike;
 
@@ -219,8 +239,16 @@ export function geminiLiveProvider(
               } satisfies FunctionCall);
             }
           }) as (event: never) => void);
-          socket.addEventListener("close", () => {
+          socket.addEventListener("close", ((event: SocketCloseEvent) => {
             if (!settled) {
+              // A permanent refusal during setup — a retired model, a policy
+              // rejection — must name the model rather than read as a transient
+              // blip. This is the exact gap that left the orb mute in #129.
+              if (isPermanentClose(event.code)) {
+                settled = true;
+                reject(new Error(formatRefusal(config.model, event.reason)));
+                return;
+              }
               settled = true;
               reject(new Error("The realtime socket closed before setup completed."));
               return;
@@ -230,10 +258,19 @@ export function geminiLiveProvider(
             if (current !== socket) return;
             current = undefined;
             if (!closedByUs) {
-              console.warn("[orb] realtime socket dropped by the server; redialing");
-              void redial();
+              if (isPermanentClose(event.code)) {
+                // A permanent refusal after setup: stop redialing the same
+                // rejected model, surface the reason so the person knows what
+                // to change. Retry would loop forever against a model the
+                // provider has retired.
+                closedByUs = true;
+                config.events.onRefusal?.(formatRefusal(config.model, event.reason));
+              } else {
+                console.warn("[orb] realtime socket dropped by the server; redialing");
+                void redial();
+              }
             }
-          });
+          }) as (event: never) => void);
           socket.addEventListener("error", () => {
             if (!settled) {
               settled = true;

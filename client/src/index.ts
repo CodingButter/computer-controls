@@ -3,6 +3,7 @@ import os from "node:os";
 import { serve } from "@hono/node-server";
 import { AuthStorage } from "@mastra/code-sdk/auth/storage";
 import { Mastra } from "@mastra/core/mastra";
+import path from "node:path";
 
 import { buildApp } from "./app.ts";
 import { defaultAuditPath } from "./audit/log.ts";
@@ -133,6 +134,7 @@ const orb = await mountOrb({
   credentials: storage,
   turn: chat,
   clips: diskClipStore(config.root),
+  settingsPath: path.join(config.root, config.configDir, "settings.json"),
   ...(orbLive
     ? {
         speaker: commandSpeaker(),

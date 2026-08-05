@@ -75,7 +75,8 @@ const SIGNAL_SETTLE_MS = 1_200;
 export type OrbEvent =
   | { type: "state"; state: OrbState }
   | { type: "caption"; text: string; speaker: "user" | "assistant" }
-  | { type: "mood"; mood: Sentiment };
+  | { type: "mood"; mood: Sentiment }
+  | { type: "refusal"; reason: string };
 
 /**
  * The four things the orb can be doing, which are also the four ways it moves.
@@ -120,6 +121,12 @@ export class Orb {
   #announcing: Promise<void> = Promise.resolve();
   readonly #wait: (ms: number) => Promise<void>;
   #closed = false;
+  /**
+   * Set when the realtime provider refuses permanently (e.g. a retired model).
+   * A non-empty refusal means the orb is off until the person changes the
+   * setting — retrying the same model would loop forever (#129).
+   */
+  #refusal: string | undefined;
 
   constructor(deps: OrbDeps) {
     this.#session = deps.session;
@@ -157,6 +164,15 @@ export class Orb {
 
   get gateState(): GateState {
     return this.#gate.state;
+  }
+
+  /**
+   * A permanent refusal from the provider — a retired model, a policy reject.
+   * Routes read this to decide whether `/api/orb/status` reports the orb as
+   * off-with-reason rather than healthy-but-idle.
+   */
+  get refusal(): string | undefined {
+    return this.#refusal;
   }
 
   /** Every captured frame enters here, and only here. */
@@ -284,6 +300,15 @@ export class Orb {
       onBargeIn: () => this.#mouth.barge(),
       // The socket came back. Flush anything that was queued during the gap.
       onReconnect: () => this.#flushPending(),
+      // The provider refused permanently — a retired model, a policy reject.
+      // Stop the session, freeze the state, and tell the faces why. There is
+      // no OrbState for "broken" because the page renders motion, not a label;
+      // the refusal lives on the status endpoint instead.
+      onRefusal: (reason: string) => {
+        this.#refusal = reason;
+        this.#session.mute();
+        this.#emit({ type: "refusal", reason });
+      },
     };
   }
 

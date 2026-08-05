@@ -50,7 +50,7 @@ export type AppDeps = {
    * it is the same promise: a face that cannot run says so, and the typed lane
    * keeps working regardless.
    */
-  orb?: { app: Hono; reason?: string };
+  orb?: { app: Hono; reason?: string; orb?: { refusal?: string } };
   /**
    * The permissions page's routes. Optional the way auth is: tests that are
    * not about permissions boot without it, the entry module always supplies it.
@@ -91,7 +91,9 @@ export function buildApp(deps: AppDeps): Hono {
         ? {
             orb: deps.orb.reason
               ? { enabled: false, reason: deps.orb.reason }
-              : { enabled: true },
+              : deps.orb.orb?.refusal
+                ? { enabled: false, reason: deps.orb.orb.refusal }
+                : { enabled: true },
           }
         : {}),
     }),
