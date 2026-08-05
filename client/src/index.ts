@@ -9,6 +9,7 @@ import { buildApp } from "./app.ts";
 import { defaultAuditPath } from "./audit/log.ts";
 import { buildAuditApp } from "./audit/routes.ts";
 import { createProviderAuth } from "./auth/index.ts";
+import { buildAutostartApp } from "./autostart/routes.ts";
 import { cureChromiumApps, type CureReport } from "./curing/curing.ts";
 import { resolveClientConfig } from "./config.ts";
 import { buildDevicesApp } from "./devices/index.ts";
@@ -229,6 +230,12 @@ const app = buildApp({
    * daemon socket, which remains unable to author its own ceiling.
    */
   desktopConfig: buildDesktopConfigApp(),
+  /**
+   * Writes the person's own XDG autostart entry through the platform port —
+   * the session manager launches the widget at login, the hub only holds the
+   * pen.
+   */
+  autostart: buildAutostartApp({ platform: config.platform }),
 });
 
 // Cure at boot, once, and never fatally: a launcher that could not be

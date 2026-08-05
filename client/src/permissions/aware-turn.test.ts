@@ -114,7 +114,7 @@ test("both transports ride the same wrapped turn: the orb's brain and the typed 
     desktopScope: "observe",
     plugins: { admitted: [], refused: [] },
     model: { pack: "test", thinking: "test", tiers: {} },
-    platform: { id: "freedesktop", supports: { installedScan: true, icons: true, shortcutCuring: true } },
+    platform: { id: "freedesktop", supports: { installedScan: true, icons: true, shortcutCuring: true, autostart: true } },
   });
   const app = buildApp({
     chat: wrapped,
