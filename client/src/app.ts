@@ -51,6 +51,11 @@ export type AppDeps = {
    * keeps working regardless.
    */
   orb?: { app: Hono; reason?: string };
+  /**
+   * The permissions page's routes. Optional the way auth is: tests that are
+   * not about permissions boot without it, the entry module always supplies it.
+   */
+  permissions?: Hono;
 };
 
 /**
@@ -103,6 +108,7 @@ export function buildApp(deps: AppDeps): Hono {
   if (deps.auth) app.route("/", deps.auth);
   if (deps.voice) app.route("/", deps.voice.app);
   if (deps.orb) app.route("/", deps.orb.app);
+  if (deps.permissions) app.route("/", deps.permissions);
 
   app.get("*", (c) => {
     // The hub's own static root answers first — chat, the orb, the vendored

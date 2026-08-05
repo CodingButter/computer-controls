@@ -132,3 +132,99 @@ export function getHealth(): Promise<Fetched<HubHealth>> {
 export function getOrbStatus(): Promise<Fetched<OrbStatus>> {
   return fetchJson("/api/orb/status", parseOrbStatus);
 }
+
+/** One row of the permissions checklist, as the hub's merged view reports it. */
+export type PermissionRow = {
+  name: string;
+  permitted: boolean;
+  running: boolean;
+  /** Running on the accessibility bus. Running-but-not-readable is the "needs a restart" state. */
+  readable: boolean;
+  desktopId?: string;
+};
+
+export type PermissionsView = {
+  mode: "open" | "per-application";
+  daemon: { reachable: true } | { reachable: false; reason: string };
+  applications: readonly PermissionRow[];
+};
+
+/**
+ * Permissions can fail a third way health cannot: the user's hand-written
+ * config file refuses to parse, and the hub refuses to guess (409). That is
+ * not "unreachable" — the hub answered, with a reason worth showing verbatim.
+ */
+export type PermissionsFetch =
+  | { kind: "ok"; data: PermissionsView }
+  | { kind: "unreachable"; detail: string }
+  | { kind: "refused"; detail: string };
+
+export function parsePermissions(body: unknown): PermissionsView {
+  if (typeof body !== "object" || body === null || !("applications" in body)) {
+    throw new Error("not a permissions response");
+  }
+  const raw = body as Record<string, unknown>;
+  const daemon =
+    typeof raw.daemon === "object" && raw.daemon !== null
+      ? (raw.daemon as Record<string, unknown>)
+      : {};
+  return {
+    mode: raw.mode === "per-application" ? "per-application" : "open",
+    daemon:
+      daemon.reachable === true
+        ? { reachable: true }
+        : {
+            reachable: false,
+            reason: typeof daemon.reason === "string" ? daemon.reason : "unreachable",
+          },
+    applications: (Array.isArray(raw.applications) ? raw.applications : [])
+      .filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null)
+      .filter((row) => typeof row.name === "string")
+      .map((row) => ({
+        name: row.name as string,
+        permitted: row.permitted === true,
+        running: row.running === true,
+        readable: row.readable === true,
+        ...(typeof row.desktopId === "string" ? { desktopId: row.desktopId } : {}),
+      })),
+  };
+}
+
+async function fetchPermissions(
+  path: string,
+  init?: RequestInit,
+): Promise<PermissionsFetch> {
+  try {
+    const response = await fetch(path, init);
+    if (response.status === 409) {
+      const body = (await response.json().catch(() => ({}))) as { error?: unknown };
+      return {
+        kind: "refused",
+        detail:
+          typeof body.error === "string" ? body.error : "The hub refused to read the config.",
+      };
+    }
+    if (!response.ok) {
+      return { kind: "unreachable", detail: `${path} answered ${response.status}` };
+    }
+    return { kind: "ok", data: parsePermissions(await response.json()) };
+  } catch (error) {
+    return {
+      kind: "unreachable",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export function getPermissions(): Promise<PermissionsFetch> {
+  return fetchPermissions("/api/permissions");
+}
+
+/** The page's one write: toggle a single application, exactly as named. */
+export function putPermission(app: string, permitted: boolean): Promise<PermissionsFetch> {
+  return fetchPermissions(`/api/permissions/${encodeURIComponent(app)}`, {
+    method: "PUT",
+    body: JSON.stringify({ permitted }),
+    headers: { "content-type": "application/json" },
+  });
+}

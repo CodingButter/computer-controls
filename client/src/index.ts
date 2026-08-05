@@ -1,3 +1,5 @@
+import os from "node:os";
+
 import { serve } from "@hono/node-server";
 import { AuthStorage } from "@mastra/code-sdk/auth/storage";
 import { Mastra } from "@mastra/core/mastra";
@@ -7,6 +9,16 @@ import { createProviderAuth } from "./auth/index.ts";
 import { resolveClientConfig } from "./config.ts";
 import { attachEventSocket } from "./events/index.ts";
 import { prepareHub } from "./hub.ts";
+import { wrapTurnWithPermissionAwareness } from "./permissions/aware-turn.ts";
+import { defaultConfigPath } from "./permissions/config-file.ts";
+import { findDaemonSocket, readCensus } from "./permissions/daemon.ts";
+import {
+  SYSTEM_APPLICATIONS_DIR,
+  scanDesktopEntries,
+  userApplicationsDir,
+} from "./permissions/desktop-entries.ts";
+import { createPermissionRegistry } from "./permissions/registry.ts";
+import { buildPermissionsApp } from "./permissions/routes.ts";
 import { commandSpeaker, startMicrophone, type Microphone } from "./orb/audio-host.ts";
 import { pocEarChain } from "./orb/ear-poc.ts";
 import { diskClipStore, unwiredSpeaker } from "./orb/host.ts";
@@ -22,6 +34,24 @@ import { buildVoiceApp } from "./voice/routes.ts";
 
 const config = resolveClientConfig();
 const hub = await prepareHub(config);
+
+/**
+ * The permission registry, and the one wrapping of the hub's turn.
+ *
+ * Wrapped here, right after the hub hands its turn back, because this is the
+ * single site both transports flow from: the orb's `turn:` below and the
+ * typed route's `chat:` receive the same wrapped function, so a request that
+ * arrived by voice and one that arrived by typing get the same "no permission
+ * yet" context. brain, app and hub stay untouched — the signal is a wrapper,
+ * not a rewrite.
+ */
+const permissionRegistry = createPermissionRegistry({
+  configPath: defaultConfigPath(),
+  readCensus: () => readCensus(findDaemonSocket()),
+  scanInstalled: () =>
+    scanDesktopEntries([SYSTEM_APPLICATIONS_DIR, userApplicationsDir(os.homedir())]),
+});
+const chat = wrapTurnWithPermissionAwareness(hub.chat, permissionRegistry);
 
 /**
  * The literal stays here, in the entry module, on purpose: the deployer's
@@ -80,7 +110,7 @@ let orbFaceCount: ((count: number) => void) | undefined;
 
 const orb = await mountOrb({
   credentials: storage,
-  turn: hub.chat,
+  turn: chat,
   clips: diskClipStore(config.root),
   ...(orbLive
     ? {
@@ -114,13 +144,14 @@ if (orbLive && orb.orb) {
 }
 
 const app = buildApp({
-  chat: hub.chat,
+  chat,
   uiRoot: config.uiRoot,
   dashboardRoot: config.dashboardRoot,
   status: hub.status,
   auth: providerAuth.app,
   voice,
   orb,
+  permissions: buildPermissionsApp(permissionRegistry),
 });
 
 let announce: (url: string) => void;
