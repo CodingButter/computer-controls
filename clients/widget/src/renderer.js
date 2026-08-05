@@ -16,7 +16,7 @@ import {
   scoutRects,
   wasDrag,
 } from "./paint.js";
-import { INITIAL_STATE, applyGesture, reduce } from "./state-machine.js";
+import { AUTO_HIDE_MS, INITIAL_STATE, applyGesture, fade, reduce } from "./state-machine.js";
 import { mountWebGlOrb, syntheticLevel, hasWebGl } from "./face/orb-webgl.js";
 import { shaderStateFor } from "./face-state.js";
 import { HEIGHT, WIDTH, placeOrb } from "./window-shape.js";
@@ -146,11 +146,41 @@ window.widget.onPlaced?.((placement) => {
   paint();
 });
 
+/*
+ * Auto-hide: the face lingers a readable while after the conversation rests,
+ * then fades — if the user left that choice on.
+ *
+ * The timer runs here because this is the process that sees the lane: every
+ * event lands in `reduce` and rewinds the clock, so a face that is listening
+ * to someone or saying something is structurally a face whose timer has not
+ * fired — "visible while active" is not a race against the timeout. The
+ * setting itself arrives from the shell over a receive-only channel; this
+ * page can be told auto-hide is off, and can never turn its own off.
+ */
+let autoHide = true;
+let fadeTimer = null;
+
+function rewindFade() {
+  clearTimeout(fadeTimer);
+  fadeTimer = null;
+  if (state.presence !== "visible") return;
+  fadeTimer = setTimeout(() => {
+    state = fade(state, autoHide);
+    paint();
+  }, AUTO_HIDE_MS);
+}
+
+window.widget.onTrayState?.((next) => {
+  autoHide = next.autoHide;
+  rewindFade();
+});
+
 const hub = connectToHub({
   port: window.widget.hubPort,
   onEvent: (event) => {
     state = reduce(state, event);
     paint();
+    rewindFade();
   },
 });
 
@@ -166,6 +196,8 @@ const hub = connectToHub({
 function perform(gesture) {
   state = applyGesture(state, gesture);
   paint();
+  // A hand on the face is a person using it: not the moment to fade away.
+  rewindFade();
   hub.send(gesture);
 }
 

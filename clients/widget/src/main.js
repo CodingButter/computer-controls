@@ -25,12 +25,17 @@ import {
   stageFor,
 } from "./window-shape.js";
 import { readPlacement, writePlacement } from "./placement-store.js";
+import { readTrayState, writeTrayState } from "./tray-state.js";
+import { createTray } from "./tray.js";
 import { dashboardUrl } from "./dashboard.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Where the drag is written down, beside whatever else this app stores. */
 const placementFile = () => path.join(app.getPath("userData"), "placement.json");
+
+/** Where the tray's choices are written down, beside the placement. */
+const trayStateFile = () => path.join(app.getPath("userData"), "tray-state.json");
 
 /** The hub's port, read from the environment exactly as the bridge reads it. */
 const hubPort = () => Number(process.env.COMCON_CLIENT_PORT ?? 4111);
@@ -66,7 +71,7 @@ function openingStage() {
   return stageFor(display, stored ?? process.env.COMCON_WIDGET_PLACEMENT ?? "corner");
 }
 
-function createWindow() {
+function createWindow({ startHidden = false } = {}) {
   const stage = openingStage();
 
   const window = new BrowserWindow({
@@ -130,7 +135,11 @@ function createWindow() {
   window.setIgnoreMouseEvents(true, { forward: true });
 
   window.loadFile(path.join(here, "index.html"));
-  window.once("ready-to-show", () => window.showInactive());
+  // A widget the user disabled last run comes back disabled: loaded and
+  // wired, so enabling it later is instant, but never shown.
+  window.once("ready-to-show", () => {
+    if (!startHidden) window.showInactive();
+  });
 
   // The stage travels out with the window because the drag handler needs the
   // same origin the page was given. Two readings of the display could disagree
@@ -161,7 +170,66 @@ function refuseEverything() {
 
 app.whenReady().then(() => {
   refuseEverything();
-  const { window, stage } = createWindow();
+
+  // How the user left things, restored before anything is drawn: a widget
+  // disabled last run starts disabled, not visible-for-a-frame.
+  let trayState = readTrayState(trayStateFile());
+
+  const { window, stage } = createWindow({ startHidden: trayState.disabled });
+
+  // The one page this process opens, shared by the tray menu and the face's
+  // own context menu. The address is built here, in the main process, from a
+  // constant host and the environment's port — never taken from a page or a
+  // menu item.
+  const openDashboard = () => {
+    const url = dashboardUrl(hubPort());
+    if (url) shell.openExternal(url);
+  };
+
+  /**
+   * A tray choice landed: remember it, redraw the icon, and apply it.
+   *
+   * Written on every change — a choice that only persisted on clean exit
+   * would be lost to every crash — and told to the renderer, which owns the
+   * auto-hide timer because it is the process that sees the lane's events.
+   * The renderer is told, never asked: tray control stays on this side of
+   * the bridge, because a page that could disable its own indicator would
+   * defeat the indicator.
+   *
+   * @param {import("./tray-state.js").TrayState} next
+   */
+  const applyTrayState = (next) => {
+    const wasDisabled = trayState.disabled;
+    trayState = next;
+    writeTrayState(trayStateFile(), trayState);
+    trayControls.refresh(trayState);
+    if (window.isDestroyed()) return;
+    if (trayState.disabled !== wasDisabled) {
+      // Disable is the honest off: the whole face leaves, and the tray icon
+      // is what says so. Enable brings it back without stealing focus.
+      if (trayState.disabled) window.hide();
+      else window.showInactive();
+    }
+    window.webContents.send("widget:tray-state", {
+      autoHide: trayState.autoHide,
+      disabled: trayState.disabled,
+    });
+  };
+
+  const trayControls = createTray(trayState, {
+    toggleAutoHide: () => applyTrayState({ ...trayState, autoHide: !trayState.autoHide }),
+    toggleDisabled: () => applyTrayState({ ...trayState, disabled: !trayState.disabled }),
+    openDashboard,
+    quit: () => app.quit(),
+  });
+
+  // The renderer hears the current choices once it is ready to hear anything.
+  window.webContents.on("did-finish-load", () => {
+    window.webContents.send("widget:tray-state", {
+      autoHide: trayState.autoHide,
+      disabled: trayState.disabled,
+    });
+  });
 
   // The renderer knows what shape it painted; the shell owns the window. While
   // the pointer is over the orb the window takes clicks, and the moment it
@@ -228,18 +296,17 @@ app.whenReady().then(() => {
   // The dashboard opens in the user's browser, not in this process. A widget
   // that rendered a settings page would have become a second application, and
   // this one is a face.
-  ipcMain.on("widget:open-dashboard", () => {
-    const url = dashboardUrl(hubPort());
-    if (url) shell.openExternal(url);
-  });
+  ipcMain.on("widget:open-dashboard", openDashboard);
 
   // A face the user asked to leave leaves. The process closes its own windows
   // and exits — never a kill from outside, always a semantic close.
   ipcMain.on("widget:quit", () => app.quit());
 });
 
-// No windows left means no face left, and a face is all this process is.
-app.on("window-all-closed", () => app.quit());
+// A closed window is not a closed application any more: the tray owns the
+// lifetime, and quit lives in its menu. This listener existing is what stops
+// Electron's default exit — deliberately empty, not forgotten.
+app.on("window-all-closed", () => {});
 
 // Nothing here opens a second window or navigates anywhere. A widget that
 // followed a link would have stopped being a widget.

@@ -117,6 +117,24 @@ contextBridge.exposeInMainWorld("widget", {
   },
 
   /**
+   * How the user set the tray, told to the page whenever it changes.
+   *
+   * Receive-only, and carrying two booleans: whether the face may hide
+   * itself after a quiet while, and whether the widget is disabled. The page
+   * is told so it can run the auto-hide timer against the events it already
+   * watches — there is no member here to change either value, because tray
+   * control never crosses this bridge. A page that could disable its own
+   * indicator would defeat the indicator.
+   *
+   * @param {(state: { autoHide: boolean, disabled: boolean }) => void} listener
+   */
+  onTrayState(listener) {
+    ipcRenderer.on("widget:tray-state", (_event, state) => {
+      listener({ autoHide: Boolean(state?.autoHide), disabled: Boolean(state?.disabled) });
+    });
+  },
+
+  /**
    * Show me the dashboard.
    *
    * No URL crosses this seam. The renderer asks for the one page the shell

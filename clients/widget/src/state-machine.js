@@ -91,11 +91,15 @@ export function reduce(state, event) {
       return { ...state, presence: "visible", activity: "speaking" };
 
     case "idle":
-      // The turn is over: the widget fades and takes its caption with it, and
-      // every scout with it too — nothing is being touched by an agent that
-      // has stopped. Position and mute survive, because those are the user's
-      // settings and not part of the conversation.
-      return { ...state, presence: "hidden", activity: "listening", caption: "", scouts: [] };
+      // The turn is over: the widget rests, listening, and the scouts go —
+      // nothing is being touched by an agent that has stopped. The face itself
+      // stays where it is: hiding is `fade`'s decision, made by the shell's
+      // auto-hide timer, not by the conversation ending. A user who turned
+      // auto-hide off gets a face that never leaves, and the last words stay
+      // under it until the next wake clears them. Position and mute survive
+      // regardless, because those are the user's settings and not part of the
+      // conversation.
+      return { ...state, activity: "listening", scouts: [] };
 
     case "touching": {
       const scout = asScout(event);
@@ -121,6 +125,40 @@ export function reduce(state, event) {
       const scouts = state.scouts.filter((existing) => existing.id !== event.id);
       return scouts.length === state.scouts.length ? state : { ...state, scouts };
     }
+
+    case "progress":
+      // The hub reporting on work a mouth asked for. To a face this is the
+      // agent thinking out loud: visible, busy, and saying what it is doing.
+      // The id is the asker's correlation id — routing replies to the right
+      // function call is the mouth's job, not the face's, so it is not kept.
+      return {
+        ...state,
+        presence: "visible",
+        activity: "thinking",
+        caption: typeof event.text === "string" ? event.text : "",
+      };
+
+    case "answer":
+      // The work is done and the hub is saying so. The mouth speaks it; this
+      // face shows it being said.
+      return {
+        ...state,
+        presence: "visible",
+        activity: "speaking",
+        caption: typeof event.text === "string" ? event.text : "",
+      };
+
+    case "voice_opened":
+      // Somewhere, a mouth opened: a conversation is happening, so the face
+      // shows up for it — the same entrance a wake gets, because to a face
+      // they are the same news. The previous turn's caption goes with it.
+      return { ...state, presence: "visible", activity: "listening", caption: "" };
+
+    case "voice_closed":
+      // The last mouth closed. Same resting posture as `idle`, for the same
+      // reason: the conversation ended, and whether the face then leaves the
+      // desk is auto-hide's call, not this word's.
+      return { ...state, activity: "listening", scouts: [] };
 
     default:
       return state;
@@ -205,7 +243,58 @@ export const UNDERSTOOD_EVENTS = Object.freeze([
   "idle",
   "touching",
   "released",
+  "progress",
+  "answer",
+  "voice_opened",
+  "voice_closed",
 ]);
 
-/** Every gesture the widget can ask for. Same reasoning, same parity test. */
-export const OFFERED_GESTURES = Object.freeze(["mute", "dismiss", "drag"]);
+/**
+ * Every gesture the widget can ask for. Same reasoning, same parity test.
+ *
+ * The last four are the mouth's words — ask, voice_open, voice_close, caption
+ * — which the widget speaks from its session code rather than from a pointer
+ * event, so they have no case in `applyGesture`: opening a voice session
+ * changes what the microphone is doing, not what the face is drawing.
+ */
+export const OFFERED_GESTURES = Object.freeze([
+  "mute",
+  "dismiss",
+  "drag",
+  "ask",
+  "voice_open",
+  "voice_close",
+  "caption",
+]);
+
+/**
+ * How long a resting face lingers before auto-hide takes it, in milliseconds.
+ *
+ * Long enough to read the last answer off the screen; short enough that the
+ * desk is not permanently decorated. The number lives here, beside the fade
+ * it feeds, so the test that checks the behaviour and the shell that runs the
+ * timer read the same one.
+ */
+export const AUTO_HIDE_MS = 20_000;
+
+/**
+ * The auto-hide timer fired; here is what the widget becomes.
+ *
+ * A local transition, not a hub word: the hub says `idle` and the reducer
+ * rests the face, and whether the face then leaves the desk after
+ * `AUTO_HIDE_MS` is the user's setting, applied here. When auto-hide is off
+ * the state comes back untouched — a face the user asked to keep is kept, and
+ * the caller does not need to know which it got.
+ *
+ * The caption and the scouts go with the face, the same way `idle` used to
+ * take them: words with no orb over them would be a subtitle for nothing.
+ * Position and mute survive, as always — they are the user's.
+ *
+ * @param {WidgetState} state
+ * @param {boolean} autoHide
+ * @returns {WidgetState}
+ */
+export function fade(state, autoHide) {
+  if (!autoHide) return state;
+  return { ...state, presence: "hidden", caption: "", scouts: [] };
+}
