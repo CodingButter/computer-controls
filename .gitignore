@@ -9,12 +9,20 @@ __pycache__/
 .mastracode/plugins/
 # The hub keeps the runtime's settings under its own root rather than the
 # machine's shared one (client/src/hub.ts); what lands there is local state.
+# Both spellings on purpose, for the same reason the clips below carry two: a
+# pattern with an internal slash anchors to the repo root, and the hub resolves
+# these against its own package (client/src/index.ts). The root spelling alone
+# left the real file — the one carrying which voice a person picked — visible
+# to `git add`.
 .mastracode/settings.json
+client/.mastracode/settings.json
 # What this machine's owner picked, and the record of them picking it. Both are
 # facts about one person's machine, and the audit is the one file here that
 # would be actively wrong to publish (client/src/settings/).
 .mastracode/hub-settings.json
 .mastracode/settings-audit.jsonl
+client/.mastracode/hub-settings.json
+client/.mastracode/settings-audit.jsonl
 
 # The hub's own plugin registry: derived from the allowlist on every boot
 .mastracode-hub/
