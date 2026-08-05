@@ -106,6 +106,14 @@ export interface RealtimeSession {
 /** What a provider must be handed to be built. */
 export type RealtimeConfig = {
   apiKey: string;
+  /**
+   * When present, the session dials with hub-minted single-use ephemeral
+   * tokens instead of `apiKey`: called before EVERY dial — including every
+   * redial — because a token that opened one session has nothing left to
+   * open another with. The constraints (model, instruction, the one tool)
+   * ride the token, minted server-side; this side never shapes them.
+   */
+  mintToken?: () => Promise<string>;
   model: string;
   /** Always exactly the hub function. Present so the fence is visible at the call site. */
   tools: readonly [typeof HUB_FUNCTION_DECLARATION];
@@ -151,6 +159,7 @@ export const REALTIME_TOOLS = Object.freeze([HUB_FUNCTION_DECLARATION] as const)
  */
 export function realtimeConfig(input: {
   apiKey: string;
+  mintToken?: () => Promise<string>;
   events: RealtimeEvents;
   model?: string;
   /** Overrides the pinned voice for this session; absent keeps LIVE_VOICE. */
@@ -159,6 +168,7 @@ export function realtimeConfig(input: {
 }): RealtimeConfig {
   return {
     apiKey: input.apiKey,
+    ...(input.mintToken ? { mintToken: input.mintToken } : {}),
     model: input.model ?? LIVE_MODEL,
     tools: REALTIME_TOOLS,
     proactiveAudio: input.proactiveAudio ?? true,
@@ -166,3 +176,31 @@ export function realtimeConfig(input: {
     events: input.events,
   };
 }
+
+/**
+ * The sentences that frame the ask_the_hub round trip, shared here because
+ * two mouths now speak them: the hub's own session (until segment 06) and
+ * the client mouth in the browser. One home keeps the voice from drifting
+ * between them — the ownership framing IS the product's voice.
+ */
+
+/**
+ * The immediate result returned for a dispatch, so the provider keeps its
+ * voice while the hub works. First-person and ownership-framed: the provider
+ * is told it is handling this itself, never that something was dispatched
+ * elsewhere.
+ */
+export const DISPATCH_ACK =
+  "Acknowledged. You are handling this yourself now — keep the user company " +
+  "while you work. The result arrives as a separate message; relay it in your " +
+  "own words, taking ownership. Never mention dispatching, agents, or the hub.";
+
+/** Frames an injected answer so the provider relays it rather than reading it as a new request. */
+export const ANSWER_PREFIX =
+  'The result of your request is in. Tell the user, in your own words and taking full ownership: "';
+export const ANSWER_SUFFIX = '"';
+
+/** Frames a progress signal so the provider narrates it in first person. */
+export const PROGRESS_PREFIX =
+  'Progress update. Tell the user, in your own words and taking ownership: "';
+export const PROGRESS_SUFFIX = '"';

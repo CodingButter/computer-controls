@@ -18,6 +18,15 @@
  * agrees with it.
  */
 export const LIVE_ENDPOINT = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+/**
+ * Where an ephemeral token dials. A different endpoint on purpose: the
+ * constraints — model, system instruction, the one tool, both
+ * transcriptions — were locked into the token when the hub minted it, and
+ * this endpoint enforces them at connect. Proven live against Google on
+ * 2026-08-05 (segment 02's green leg): a hub-minted token opened a session
+ * here with nothing but the model name in the setup frame.
+ */
+export const CONSTRAINED_ENDPOINT = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained";
 /** What the orb is, to the voice that fronts it. */
 export const ORB_SYSTEM_INSTRUCTION = "You are the voice of this computer's assistant. Converse naturally and " +
     "briefly. You do not know what this computer's assistant can or cannot do: " +
@@ -149,13 +158,18 @@ function decodeFrame(data) {
 export function geminiLiveProvider(socketFactory = (url) => new WebSocket(url), retryWait = defaultRetryWait) {
     return {
         async connect(config) {
-            const url = `${LIVE_ENDPOINT}?key=${encodeURIComponent(config.apiKey)}`;
+            // Token dials mint fresh per dial — a single-use token that opened one
+            // session has nothing left to open another with — so the URL is
+            // resolved inside dial(), not once out here.
+            const dialUrl = async () => config.mintToken
+                ? `${CONSTRAINED_ENDPOINT}?access_token=${encodeURIComponent(await config.mintToken())}`
+                : `${LIVE_ENDPOINT}?key=${encodeURIComponent(config.apiKey)}`;
             let muted = true;
             /** True only when this side hung up. A server drop is not this. */
             let closedByUs = false;
             /** The socket that has completed setup, or undefined during a gap. */
             let current;
-            const setup = {
+            const fullSetup = {
                 setup: {
                     model: `models/${config.model}`,
                     generationConfig: {
@@ -180,111 +194,119 @@ export function geminiLiveProvider(socketFactory = (url) => new WebSocket(url), 
                     outputAudioTranscription: {},
                 },
             };
-            const dial = () => new Promise((resolve, reject) => {
-                const socket = socketFactory(url);
-                if ("binaryType" in socket)
-                    socket.binaryType = "arraybuffer";
-                let settled = false;
-                // A handshake that never answers must become a refusal, not a hub
-                // that hangs at boot with its port unbound — which is precisely what
-                // happened when an undecodable frame carried the setupComplete.
-                const deadline = setTimeout(() => {
-                    if (settled)
-                        return;
-                    settled = true;
-                    socket.close();
-                    reject(new Error(`The realtime server did not complete setup within ${SETUP_TIMEOUT_MS}ms.`));
-                }, SETUP_TIMEOUT_MS);
-                unrefTimer(deadline);
-                socket.addEventListener("open", () => {
-                    socket.send(JSON.stringify(setup));
-                });
-                socket.addEventListener("message", ((event) => {
-                    const message = decodeFrame(event.data);
-                    if (!message)
-                        return;
-                    if (message.setupComplete && !settled) {
+            // A token dial repeats none of the constraints: they ride the token,
+            // minted server-side, and a second statement of them here would be a
+            // second place capability is described — drift between the two would
+            // surface as connect-time refusals a page cannot explain.
+            const setup = config.mintToken ? { setup: { model: `models/${config.model}` } } : fullSetup;
+            const dial = async () => {
+                const url = await dialUrl();
+                return new Promise((resolve, reject) => {
+                    const socket = socketFactory(url);
+                    if ("binaryType" in socket)
+                        socket.binaryType = "arraybuffer";
+                    let settled = false;
+                    // A handshake that never answers must become a refusal, not a hub
+                    // that hangs at boot with its port unbound — which is precisely what
+                    // happened when an undecodable frame carried the setupComplete.
+                    const deadline = setTimeout(() => {
+                        if (settled)
+                            return;
                         settled = true;
-                        // Becoming `current` happens here, inside the handshake, so a
-                        // close event can never race the assignment and mistake a live
-                        // socket for a stale one.
-                        current = socket;
-                        resolve();
-                        return;
-                    }
-                    const content = message.serverContent;
-                    if (content) {
-                        if (content.interrupted)
-                            config.events.onBargeIn();
-                        for (const part of content.modelTurn?.parts ?? []) {
-                            const inline = part.inlineData;
-                            if (inline?.data && (inline.mimeType ?? "").startsWith("audio/pcm")) {
-                                const bytes = base64ToBytes(inline.data);
-                                if (bytes)
-                                    config.events.onAudio(bytes);
-                            }
-                        }
-                        if (content.inputTranscription?.text) {
-                            config.events.onTranscript(content.inputTranscription.text, "user");
-                        }
-                        if (content.outputTranscription?.text) {
-                            config.events.onTranscript(content.outputTranscription.text, "assistant");
-                        }
-                    }
-                    for (const call of message.toolCall?.functionCalls ?? []) {
-                        if (!call.name)
-                            continue;
-                        config.events.onFunctionCall({
-                            id: call.id ?? "",
-                            name: call.name,
-                            args: call.args ?? {},
-                        });
-                    }
-                }));
-                socket.addEventListener("close", ((event) => {
-                    if (!settled) {
-                        // A permanent refusal during setup — a retired model, a policy
-                        // rejection — must name the model rather than read as a transient
-                        // blip. This is the exact gap that left the orb mute in #129.
-                        if (isPermanentClose(event.code, event.reason)) {
+                        socket.close();
+                        reject(new Error(`The realtime server did not complete setup within ${SETUP_TIMEOUT_MS}ms.`));
+                    }, SETUP_TIMEOUT_MS);
+                    unrefTimer(deadline);
+                    socket.addEventListener("open", () => {
+                        socket.send(JSON.stringify(setup));
+                    });
+                    socket.addEventListener("message", ((event) => {
+                        const message = decodeFrame(event.data);
+                        if (!message)
+                            return;
+                        if (message.setupComplete && !settled) {
                             settled = true;
-                            reject(new Error(formatRefusal(config.model, event.reason)));
+                            // Becoming `current` happens here, inside the handshake, so a
+                            // close event can never race the assignment and mistake a live
+                            // socket for a stale one.
+                            current = socket;
+                            resolve();
                             return;
                         }
-                        settled = true;
-                        reject(new Error("The realtime socket closed before setup completed."));
-                        return;
-                    }
-                    // A stale socket dying — one already replaced by a redial — is
-                    // not news. Only the current socket's death matters.
-                    if (current !== socket)
-                        return;
-                    current = undefined;
-                    if (!closedByUs) {
-                        if (isPermanentClose(event.code, event.reason)) {
-                            // A permanent refusal after setup: stop redialing the same
-                            // rejected model, surface the reason so the person knows what
-                            // to change. Retry would loop forever against a model the
-                            // provider has retired.
-                            closedByUs = true;
-                            config.events.onRefusal?.(formatRefusal(config.model, event.reason));
+                        const content = message.serverContent;
+                        if (content) {
+                            if (content.interrupted)
+                                config.events.onBargeIn();
+                            for (const part of content.modelTurn?.parts ?? []) {
+                                const inline = part.inlineData;
+                                if (inline?.data && (inline.mimeType ?? "").startsWith("audio/pcm")) {
+                                    const bytes = base64ToBytes(inline.data);
+                                    if (bytes)
+                                        config.events.onAudio(bytes);
+                                }
+                            }
+                            if (content.inputTranscription?.text) {
+                                config.events.onTranscript(content.inputTranscription.text, "user");
+                            }
+                            if (content.outputTranscription?.text) {
+                                config.events.onTranscript(content.outputTranscription.text, "assistant");
+                            }
                         }
-                        else {
-                            // The code and the reason are logged because the difference
-                            // between them is what decides whether the orb comes back, and
-                            // reading that difference out of a log beats reproducing it.
-                            console.warn(`[orb] realtime socket dropped by the server (${event.code}${event.reason ? `: ${event.reason}` : ""}); redialing`);
-                            void redial();
+                        for (const call of message.toolCall?.functionCalls ?? []) {
+                            if (!call.name)
+                                continue;
+                            config.events.onFunctionCall({
+                                id: call.id ?? "",
+                                name: call.name,
+                                args: call.args ?? {},
+                            });
                         }
-                    }
-                }));
-                socket.addEventListener("error", () => {
-                    if (!settled) {
-                        settled = true;
-                        reject(new Error("The realtime socket failed before setup completed."));
-                    }
+                    }));
+                    socket.addEventListener("close", ((event) => {
+                        if (!settled) {
+                            // A permanent refusal during setup — a retired model, a policy
+                            // rejection — must name the model rather than read as a transient
+                            // blip. This is the exact gap that left the orb mute in #129.
+                            if (isPermanentClose(event.code, event.reason)) {
+                                settled = true;
+                                reject(new Error(formatRefusal(config.model, event.reason)));
+                                return;
+                            }
+                            settled = true;
+                            reject(new Error("The realtime socket closed before setup completed."));
+                            return;
+                        }
+                        // A stale socket dying — one already replaced by a redial — is
+                        // not news. Only the current socket's death matters.
+                        if (current !== socket)
+                            return;
+                        current = undefined;
+                        if (!closedByUs) {
+                            if (isPermanentClose(event.code, event.reason)) {
+                                // A permanent refusal after setup: stop redialing the same
+                                // rejected model, surface the reason so the person knows what
+                                // to change. Retry would loop forever against a model the
+                                // provider has retired.
+                                closedByUs = true;
+                                config.events.onRefusal?.(formatRefusal(config.model, event.reason));
+                            }
+                            else {
+                                // The code and the reason are logged because the difference
+                                // between them is what decides whether the orb comes back, and
+                                // reading that difference out of a log beats reproducing it.
+                                console.warn(`[orb] realtime socket dropped by the server (${event.code}${event.reason ? `: ${event.reason}` : ""}); redialing`);
+                                void redial();
+                            }
+                        }
+                    }));
+                    socket.addEventListener("error", () => {
+                        if (!settled) {
+                            settled = true;
+                            reject(new Error("The realtime socket failed before setup completed."));
+                        }
+                    });
                 });
-            });
+            };
             /**
              * Resolving this skips whatever remains of the current backoff wait.
              * The wake gate pulls it through unmute(): a person starting to talk
