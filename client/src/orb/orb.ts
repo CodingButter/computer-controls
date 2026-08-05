@@ -105,10 +105,6 @@ export class Orb {
   readonly #brain: HubBrain;
   readonly #onEvent: (event: OrbEvent) => void;
   #state: OrbState = "idle";
-  /** Monotonic dispatch counter; ids are orb-owned, not the socket-scoped call.id. */
-  #dispatchSeq = 0;
-  /** In-flight dispatches, keyed by orb-generated id so answers are attributable. */
-  #pending = new Map<number, string>();
   /** Text turns queued while the socket was down, flushed on reconnect. */
   #pendingAnnouncements: string[] = [];
   #closed = false;
@@ -318,8 +314,6 @@ export class Orb {
    * orb knows what is in flight.
    */
   async #dispatch(request: string): Promise<void> {
-    const id = ++this.#dispatchSeq;
-    this.#pending.set(id, request);
     let answer: string;
     try {
       answer = await this.#brain.ask(request, (signal) => {
@@ -330,7 +324,6 @@ export class Orb {
       console.error(`[orb] hub threw: ${error instanceof Error ? error.message : String(error)}`);
       answer = "That did not work. Nothing was changed.";
     }
-    this.#pending.delete(id);
     if (this.#closed) return;
     await this.announce(ANSWER_PREFIX + answer + ANSWER_SUFFIX);
   }
