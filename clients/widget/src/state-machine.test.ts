@@ -122,9 +122,101 @@ test("every word the hub can say has a case in the reducer", () => {
   // Totality, checked rather than assumed: an event the reducer silently
   // ignores would be a face that stops responding to something the hub
   // considers part of the conversation.
+  //
+  // Each word is sampled as it is actually spoken, because some of them carry
+  // fields and a reducer that dropped a malformed one would look identical to
+  // a reducer with no case at all. The baseline is a widget already pointing at
+  // something, so "released" has a scout to take away.
+  const spoken: Record<string, Record<string, unknown>> = {
+    wake_opened: {},
+    caption: { text: "x" },
+    thinking: {},
+    speaking: {},
+    idle: {},
+    touching: { id: "op-1", x: 10, y: 20, width: 30, height: 40 },
+    released: { id: "op-1" },
+  };
   const woken = reduce(INITIAL_STATE, { type: "wake_opened" });
+  const busy = reduce(woken, { type: "touching", ...spoken.touching });
+
   for (const type of STATE_EVENT_TYPES) {
-    const next = reduce(woken, { type, text: "x" });
-    expect(next, `no case for "${type}"`).not.toBe(woken);
+    expect(spoken[type], `no sample for "${type}"`).toBeDefined();
+    const next = reduce(busy, { type, ...spoken[type] });
+    expect(next, `no case for "${type}"`).not.toBe(busy);
   }
+});
+
+describe("pointing at what is being touched", () => {
+  const woken = reduce(INITIAL_STATE, { type: "wake_opened" });
+  const touch = (id: string, x = 100, y = 200) => ({
+    type: "touching",
+    id,
+    x,
+    y,
+    width: 80,
+    height: 24,
+  });
+
+  test("an idle widget is pointing at nothing", () => {
+    // The acceptance criterion, stated as the initial condition: no work, no
+    // scouts. The widget has no other way to acquire one.
+    expect(INITIAL_STATE.scouts).toEqual([]);
+    expect(reduce(INITIAL_STATE, { type: "thinking" }).scouts).toEqual([]);
+  });
+
+  test("a scout lands on the rectangle the hub reported, and leaves when the work ends", () => {
+    const touching = reduce(woken, touch("op-1"));
+    expect(touching.scouts).toEqual([{ id: "op-1", x: 100, y: 200, width: 80, height: 24 }]);
+
+    const released = reduce(touching, { type: "released", id: "op-1" });
+    expect(released.scouts).toEqual([]);
+    // Releasing something that was never held is not an error, it is a widget
+    // that already agreed nothing is happening there.
+    expect(reduce(released, { type: "released", id: "op-1" })).toBe(released);
+  });
+
+  test("one scout per operation, moved rather than multiplied", () => {
+    const first = reduce(woken, touch("op-1", 10, 10));
+    const second = reduce(first, touch("op-2", 900, 400));
+    const moved = reduce(second, touch("op-1", 500, 500));
+
+    expect(moved.scouts.map((scout) => scout.id).sort()).toEqual(["op-1", "op-2"]);
+    expect(moved.scouts.find((scout) => scout.id === "op-1")).toMatchObject({ x: 500, y: 500 });
+  });
+
+  test("a scout implies the orb that sent it", () => {
+    // A rectangle drawn on the desk with no face to have launched it would be
+    // a hand with no arm — the same reasoning a caption arriving early gets.
+    expect(reduce(INITIAL_STATE, touch("op-1")).presence).toBe("visible");
+  });
+
+  test("a rectangle that is not one is dropped, never repaired", () => {
+    // Every repair is a position the agent is not working at, and a scout in a
+    // place nothing is happening is the one thing this must never draw.
+    const nonsense = [
+      { type: "touching", x: 1, y: 2, width: 3, height: 4 },
+      { type: "touching", id: "", x: 1, y: 2, width: 3, height: 4 },
+      { type: "touching", id: "op-1", x: Number.NaN, y: 2, width: 3, height: 4 },
+      { type: "touching", id: "op-1", x: 1, y: Number.POSITIVE_INFINITY, width: 3, height: 4 },
+      { type: "touching", id: "op-1", x: 1, y: 2, width: 0, height: 4 },
+      { type: "touching", id: "op-1", x: 1, y: 2, width: 3, height: -4 },
+      { type: "touching", id: "op-1", x: 1, y: 2, width: 3 },
+      { type: "released" },
+    ];
+    for (const event of nonsense) {
+      expect(reduce(woken, event), JSON.stringify(event)).toBe(woken);
+    }
+
+    // A negative coordinate is not nonsense: a second monitor to the left of
+    // the first one is a real desk.
+    expect(reduce(woken, touch("op-1", -1920, -12)).scouts).toHaveLength(1);
+  });
+
+  test("nothing is being touched by an agent that has stopped", () => {
+    const touching = reduce(woken, touch("op-1"));
+    expect(reduce(touching, { type: "idle" }).scouts).toEqual([]);
+    // And a face the user sent away takes what it drew over their windows with
+    // it, rather than leaving rectangles behind on somebody else's screen.
+    expect(applyGesture(touching, { type: "dismiss" }).scouts).toEqual([]);
+  });
 });

@@ -9,10 +9,17 @@
  */
 
 import { connectToHub } from "./connection.js";
-import { isOverVisibleShape, paintCaption, presenceClasses, wasDrag } from "./paint.js";
+import {
+  isOverVisibleShape,
+  paintCaption,
+  presenceClasses,
+  scoutRects,
+  wasDrag,
+} from "./paint.js";
 import { INITIAL_STATE, applyGesture, reduce } from "./state-machine.js";
 import { mountWebGlOrb, syntheticLevel, hasWebGl } from "./face/orb-webgl.js";
 import { shaderStateFor } from "./face-state.js";
+import { HEIGHT, WIDTH, placeOrb } from "./window-shape.js";
 
 const root = document.getElementById("widget");
 const orbElement = document.getElementById("orb");
@@ -22,19 +29,122 @@ const menuElement = document.getElementById("menu");
 const menuDashboard = document.getElementById("menu-dashboard");
 const menuDismiss = document.getElementById("menu-dismiss");
 const menuQuit = document.getElementById("menu-quit");
+const scoutLayer = document.getElementById("scouts");
+
+/*
+ * Which piece of desk this window is, and therefore what "here" means.
+ *
+ * The shell measured it and handed it down at load. Without it the page still
+ * draws a face — at the default corner of its own window, which is where it
+ * would have been anyway — but it draws no scouts at all: every rectangle the
+ * hub reports is in screen coordinates, and a page that does not know where it
+ * is on the screen can only guess at where they land. A guessed scout is the
+ * one thing this feature must never produce, so the absence is honest and
+ * silent rather than approximate.
+ */
+const stage = window.widget.stage ?? null;
+const defaultOrb = stage
+  ? { x: stage.orb.x - stage.x, y: stage.orb.y - stage.y }
+  : placeOrb({ width: window.innerWidth, height: window.innerHeight }, "corner");
 
 let state = INITIAL_STATE;
 let webglOrb = null;
+// Where the shell last said the orb is, in this page's coordinates. It is the
+// answer to a drag rather than a guess made alongside one: the snapping and the
+// clamping happen where the shape of the desk is known, and this is what came
+// back.
+let placed = null;
 // The shader reads a single face state rather than the widget's
 // presence+activity pair. The mapping is pure and tested apart from this DOM.
 let shaderState = shaderStateFor(state);
 
+/**
+ * The orb's top-left in this page's coordinates.
+ *
+ * The user's dragged position is a screen coordinate, like everything else the
+ * widget is told about where things are, so the stage origin comes off it.
+ * Clamped to the window: a face dragged past the edge of the desk would be a
+ * face the user cannot get back.
+ *
+ * @returns {{ x: number, y: number }}
+ */
+function orbOrigin() {
+  if (placed) return clampToPage(placed);
+  const chosen = state.position;
+  if (!chosen) return defaultOrb;
+  const local = stage ? { x: chosen.x - stage.x, y: chosen.y - stage.y } : chosen;
+  return clampToPage(local);
+}
+
+/**
+ * Inside the page, always.
+ *
+ * The shell clamps to the work area and this clamps to the window, and both are
+ * worth doing: they are answers to different questions, and the second one is
+ * the one that holds when a remembered position arrives from a desk that has
+ * since changed shape.
+ *
+ * @param {{ x: number, y: number }} point
+ * @returns {{ x: number, y: number }}
+ */
+function clampToPage(point) {
+  return {
+    x: Math.min(Math.max(0, point.x), Math.max(0, window.innerWidth - WIDTH)),
+    y: Math.min(Math.max(0, point.y), Math.max(0, window.innerHeight - HEIGHT)),
+  };
+}
+
+/*
+ * The scouts: one small orb per thing the agent is touching, drawn over the
+ * rectangle the desktop reported for it.
+ *
+ * They are rebuilt from the state rather than animated in and out by hand,
+ * because the state is the only record of what is genuinely in flight. Nothing
+ * here can put a scout on the screen that the hub did not report, and nothing
+ * here can keep one alive after the operation ended.
+ */
+function paintScouts() {
+  const rects = stage ? scoutRects(state.scouts, stage) : [];
+  const wanted = new Set(rects.map((rect) => rect.id));
+  for (const drawn of scoutLayer.children) {
+    if (!wanted.has(drawn.dataset.scout)) drawn.remove();
+  }
+  for (const rect of rects) {
+    let element = scoutLayer.querySelector(`[data-scout="${CSS.escape(rect.id)}"]`);
+    if (!element) {
+      element = document.createElement("div");
+      element.className = "scout";
+      element.dataset.scout = rect.id;
+      scoutLayer.append(element);
+    }
+    element.style.left = `${rect.left}px`;
+    element.style.top = `${rect.top}px`;
+    element.style.width = `${rect.width}px`;
+    element.style.height = `${rect.height}px`;
+  }
+}
+
 function paint() {
   root.className = presenceClasses(state).join(" ");
+  const origin = orbOrigin();
+  root.style.left = `${origin.x}px`;
+  root.style.top = `${origin.y}px`;
+  root.style.width = `${WIDTH}px`;
+  root.style.height = `${HEIGHT}px`;
   paintCaption(captionElement, state.caption);
+  paintScouts();
   shaderState = shaderStateFor(state);
   webglOrb?.setState(shaderState);
 }
+
+// The shell answers every drag with a place to draw. Nothing else moves the
+// orb: a position that arrived from the hub is where the face was left, and a
+// position that arrives here is where the hand just put it.
+window.widget.onPlaced?.((placement) => {
+  if (!Number.isFinite(placement.x) || !Number.isFinite(placement.y)) return;
+  placed = placement;
+  paint();
+});
 
 const hub = connectToHub({
   port: window.widget.hubPort,
@@ -65,6 +175,13 @@ function perform(gesture) {
  * The window is a mostly-transparent rectangle sitting on top of the user's
  * work, so it tells the shell to let clicks through by default and claims them
  * back only while the pointer is genuinely over something it drew.
+ *
+ * The window is now the whole display, which makes this the load-bearing part
+ * of the design rather than a nicety: every pixel of the user's desk is under
+ * it. The hit-test is deliberately the orb and its caption and nothing else —
+ * a scout is drawn directly over a control the agent is working on, and a
+ * scout that claimed the pointer would take clicks meant for exactly the thing
+ * it is pointing at.
  */
 let claiming = false;
 window.addEventListener("mousemove", (event) => {
@@ -160,12 +277,21 @@ window.addEventListener("mousedown", (event) => {
 /*
  * Dragging moves the face.
  *
- * Two things happen, and they are different things. The window follows the
- * hand — that is the shell's job, asked for here as a distance travelled since
- * the press, because the page has no idea where its own window sits on the
- * desk. And the position is reported to the hub, so the other faces agree
- * about where the user put it; the widget is not the owner of that preference
- * any more than it is the owner of anything else.
+ * Two things happen, and they are different things.
+ *
+ * The face follows the hand — and the shell is the half that decides where it
+ * lands, asked for here as a distance travelled since the press, because the
+ * page has no idea where its own window sits on the desk. What moves is the orb
+ * inside the stage rather than the window under the compositor, which is what
+ * makes the face something that can be anywhere: a window that moved would be a
+ * window that could only ever be in one place at a time, and the scouts need
+ * the whole desk. Where it ended up comes back through `onPlaced`, in this
+ * page's coordinates, and that answer is the only thing drawn — no local guess
+ * runs alongside it, so a snap is never briefly overruled by a preview.
+ *
+ * And the position is reported to the hub, so the other faces and the next
+ * launch agree about where the user put it; the widget is not the owner of that
+ * preference any more than it is the owner of anything else.
  *
  * Holding shift while dragging asks for a snap. Which edge, corner, or centre
  * that lands on — or whether the release was too far from any of them to snap
@@ -203,7 +329,11 @@ window.addEventListener("mouseup", (event) => {
     return;
   }
   window.widget.drag("end", event.screenX - x, event.screenY - y, event.shiftKey);
-  perform({ type: "drag", x: event.screenX, y: event.screenY });
+  // Back in screen coordinates, which is the space the hub is told about
+  // positions in — and taken from where the orb actually landed rather than
+  // from where the pointer happened to be, which are different by however far
+  // down the face the user grabbed it.
+  if (placed) perform({ type: "drag", x: placed.x + (stage?.x ?? 0), y: placed.y + (stage?.y ?? 0) });
 });
 
 /*

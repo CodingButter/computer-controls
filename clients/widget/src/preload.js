@@ -7,25 +7,59 @@
 // is the only dialect this seam speaks.
 const { contextBridge, ipcRenderer } = require("electron");
 
+/** The flag the shell puts the stage on. Spelled the same way in main.js. */
+const STAGE_ARGUMENT = "--comcon-stage=";
+
+/**
+ * Which piece of desk this window covers, as the shell measured it.
+ *
+ * Read from the process arguments rather than asked for, because asking would
+ * mean a channel the page could ask other things through. It arrives once, at
+ * load, and a page that cannot parse it is a page that draws its orb at the
+ * top-left and points at nothing — wrong, but wrong in a way that does not
+ * invent positions.
+ *
+ * @returns {{ x: number, y: number, width: number, height: number, orb: { x: number, y: number } } | null}
+ */
+function readStage() {
+  const flag = process.argv.find((argument) => argument.startsWith(STAGE_ARGUMENT));
+  if (!flag) return null;
+  try {
+    return JSON.parse(flag.slice(STAGE_ARGUMENT.length));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The bridge, carrying as little as a bridge can carry.
  *
- * The renderer needs a few things from the process around it: the port the hub
- * is on, a way to say "the pointer is over me now" so the shell can stop
- * letting clicks fall through, a way to say "I am being dragged", a way to ask
- * for the dashboard, and a way to leave. Everything else it does — the socket,
- * the state, the drawing — it does with the web platform, in a sandbox.
+ * The renderer needs a handful of things from the process around it: the port
+ * the hub is on, the piece of desk this window covers so it can turn the screen
+ * coordinates the hub reports into places on its own page, a way to say "the
+ * pointer is over me now" so the shell can stop letting clicks fall through, a
+ * way to say "I am being dragged", somewhere to hear where that drag landed, a
+ * way to ask for the dashboard, and a way to leave. Everything else it does —
+ * the socket, the state, the drawing — it does with the web platform, in a
+ * sandbox.
  *
  * What is deliberately absent is the more interesting half of this file. There
  * is no filesystem here, no shell, no ipcRenderer handed over wholesale, and
- * nothing that reaches the daemon. Note what the two new members do *not*
- * carry: the drag reports a distance travelled, never a window position, and
- * the dashboard names no URL. The page describes what the hand did; the shell
- * decides what that means and where anything ends up.
+ * nothing that reaches the daemon. The stage is a measurement handed down, not
+ * a way to ask about the desktop: it says how big this window is and where, and
+ * there is no call here that could answer a question about anything else on the
+ * screen. Note what the drag members do *not* carry: the page reports a
+ * distance travelled and is told a place to draw, and neither direction ever
+ * names the window's own position — which the page has no honest way to know
+ * and no reason to. The dashboard names no URL. A skin author gets these
+ * things, and a skin that wanted more would find nothing to call.
  */
 contextBridge.exposeInMainWorld("widget", {
   /** Where the hub listens. Read from the environment, not chosen by the page. */
   hubPort: Number(process.env.COMCON_CLIENT_PORT ?? 4111),
+
+  /** The display this window covers, in screen coordinates. Null if unstated. */
+  stage: readStage(),
 
   /**
    * Whether the pointer is currently over something the widget drew.
@@ -58,6 +92,27 @@ contextBridge.exposeInMainWorld("widget", {
       dx: Number(dx),
       dy: Number(dy),
       snap: Boolean(snap),
+    });
+  },
+
+  /**
+   * Where the face ended up, in this page's own coordinates.
+   *
+   * The counterpart to `drag`, and the piece the stage made necessary: when the
+   * window moved, the page never had to learn the result, because the result
+   * *was* the window moving. Now the window is the whole display and the orb
+   * moves inside it, so the shell does the snapping and the clamping and hands
+   * back a place to draw.
+   *
+   * Page coordinates, not screen coordinates — the stage origin is subtracted
+   * before it crosses, so this member cannot become a way to ask where the
+   * window is.
+   *
+   * @param {(placement: { x: number, y: number }) => void} listener
+   */
+  onPlaced(listener) {
+    ipcRenderer.on("widget:placed", (_event, placement) => {
+      listener({ x: Number(placement?.x), y: Number(placement?.y) });
     });
   },
 

@@ -20,12 +20,9 @@ import { fileURLToPath } from "node:url";
  */
 
 import {
-  HEIGHT,
-  WIDTH,
   dragPlacement,
-  placeWindow,
   readDragRequest,
-  restorePlacement,
+  stageFor,
 } from "./window-shape.js";
 import { readPlacement, writePlacement } from "./placement-store.js";
 import { dashboardUrl } from "./dashboard.js";
@@ -39,31 +36,48 @@ const placementFile = () => path.join(app.getPath("userData"), "placement.json")
 const hubPort = () => Number(process.env.COMCON_CLIENT_PORT ?? 4111);
 
 /**
- * Where the face opens: where it was left, or where it has never been.
+ * The flag the stage travels on, spelled the same way in the preload.
  *
- * A stored placement is resolved against the display it was left on, so a
- * remembered corner is still a corner after the screen changed size and a
- * remembered spot on a monitor that is no longer there is pulled back onto one
- * that is.
+ * Two files hold this string because they are two dialects — this one is a
+ * module and the preload is CommonJS by construction — and a test asserts they
+ * agree, so the duplication cannot become a disagreement that shows up as a
+ * page that quietly does not know where it is.
  */
-function openingPlacement() {
+const STAGE_ARGUMENT = "--comcon-stage=";
+
+/**
+ * Which desk to draw on, and where on it the face starts.
+ *
+ * Two questions that used to be one. The window covers a display, so the
+ * display is chosen first — the one the face was last left on, or the primary
+ * one when it has never been left anywhere. Where the orb sits inside that
+ * stage is then either the remembered spot, resolved against this display's
+ * work area, or the default corner.
+ *
+ * A remembered spot on a monitor that is no longer plugged in resolves onto a
+ * display that is, which is the whole reason the placement is stored as an
+ * intention rather than as a pair of pixels.
+ */
+function openingStage() {
   const stored = readPlacement(placementFile());
-  if (stored) {
-    const display = screen.getDisplayNearestPoint({ x: stored.x, y: stored.y });
-    return restorePlacement(display.workArea, stored);
-  }
-  const area = screen.getPrimaryDisplay().workAreaSize;
-  return placeWindow(area, process.env.COMCON_WIDGET_PLACEMENT ?? "corner");
+  const display = stored
+    ? screen.getDisplayNearestPoint({ x: stored.x, y: stored.y })
+    : screen.getPrimaryDisplay();
+  return stageFor(display, stored ?? process.env.COMCON_WIDGET_PLACEMENT ?? "corner");
 }
 
 function createWindow() {
-  const { x, y } = openingPlacement();
+  const stage = openingStage();
 
   const window = new BrowserWindow({
-    width: WIDTH,
-    height: HEIGHT,
-    x,
-    y,
+    // The window is the whole display. It is transparent and click-through, so
+    // what the user sees is still an orb in a corner — but the renderer can now
+    // draw at any screen position, which is the only way a face can point at
+    // something the agent is touching on the other side of the desk.
+    width: stage.width,
+    height: stage.height,
+    x: stage.x,
+    y: stage.y,
     // Frameless and transparent: the widget is an orb on the desk, not an
     // application window with a title bar and a close button.
     frame: false,
@@ -75,7 +89,9 @@ function createWindow() {
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
-    movable: true,
+    // Dragging the orb moves the orb, not the window: the window is the desk
+    // the orb is drawn on and it stays where the desk is.
+    movable: false,
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -93,6 +109,13 @@ function createWindow() {
       webviewTag: false,
       // No second window may be conjured to run with different rules.
       nativeWindowOpen: false,
+      // Where this window is on the desk, handed to the page at load.
+      //
+      // The renderer has to convert screen coordinates into its own, and a
+      // sandboxed page cannot ask which display it is on. An argument is the
+      // narrowest way to tell it: it is read once, at startup, and there is no
+      // channel here for the page to ask a second question through.
+      additionalArguments: [`${STAGE_ARGUMENT}${JSON.stringify(stage)}`],
     },
   });
 
@@ -109,7 +132,11 @@ function createWindow() {
   window.loadFile(path.join(here, "index.html"));
   window.once("ready-to-show", () => window.showInactive());
 
-  return window;
+  // The stage travels out with the window because the drag handler needs the
+  // same origin the page was given. Two readings of the display could disagree
+  // after a monitor changed, and a face drawn against one origin and placed
+  // against another is a face in the wrong place for no visible reason.
+  return { window, stage };
 }
 
 function refuseEverything() {
@@ -134,7 +161,7 @@ function refuseEverything() {
 
 app.whenReady().then(() => {
   refuseEverything();
-  const window = createWindow();
+  const { window, stage } = createWindow();
 
   // The renderer knows what shape it painted; the shell owns the window. While
   // the pointer is over the orb the window takes clicks, and the moment it
@@ -145,17 +172,28 @@ app.whenReady().then(() => {
   });
 
   /*
-   * Dragging moves the window, and the shell is the half that can.
+   * Dragging moves the face, and the shell is the half that can say where.
    *
    * The page reports the distance the pointer has travelled since the press;
-   * everything else happens here, where the window's position and the shape of
-   * the desk are actually known. The origin is taken once, at the press, so a
-   * long drag accumulates no rounding error and a snap that pulls the window
-   * to an edge does not drag the cursor's frame of reference with it.
+   * everything else happens here, where the shape of the desk is actually
+   * known. What changed when the window became the stage is only the subject
+   * of the arithmetic: the orb moves inside a window that stays where the desk
+   * is, rather than the window moving under the compositor. The rule the page
+   * lives by did not change at all — it reports travel, never a position,
+   * because on a desk with three monitors it has no honest way to know one.
+   *
+   * The result is handed back in page coordinates, because the page is the
+   * thing that draws now. That is the one direction this seam gained, and it
+   * carries a place to draw rather than an answer about where the window is.
+   *
+   * The origin is taken once, at the press, so a long drag accumulates no
+   * rounding error and a snap that pulls the orb to an edge does not drag the
+   * cursor's frame of reference with it.
    *
    * The write happens on release only. A face persisted on every mousemove
    * would be a JSON file rewritten sixty times a second.
    */
+  let orb = stage.orb;
   let dragOrigin = null;
   ipcMain.on("widget:drag", (_event, request) => {
     if (window.isDestroyed()) return;
@@ -163,16 +201,23 @@ app.whenReady().then(() => {
     if (!drag) return;
 
     if (drag.phase === "begin") {
-      const [x, y] = window.getPosition();
-      dragOrigin = { x, y };
+      dragOrigin = { x: orb.x, y: orb.y };
       return;
     }
     if (!dragOrigin) return;
 
     const wanted = { x: dragOrigin.x + drag.dx, y: dragOrigin.y + drag.dy };
+    // Clamped and snapped against the display the hand is over, which is not
+    // always the display the stage is on — a face dragged towards a second
+    // monitor stops at the edge of the desk it is drawn on rather than
+    // half-existing on one it cannot reach.
     const display = screen.getDisplayNearestPoint(wanted);
     const placement = dragPlacement(display.workArea, wanted, drag.snap);
-    window.setPosition(placement.x, placement.y);
+    orb = { x: placement.x, y: placement.y };
+    window.webContents.send("widget:placed", {
+      x: placement.x - stage.x,
+      y: placement.y - stage.y,
+    });
 
     if (drag.phase === "end") {
       dragOrigin = null;

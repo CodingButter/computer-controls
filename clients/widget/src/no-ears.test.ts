@@ -5,7 +5,7 @@ import { describe, expect, test } from "vitest";
 // The shell's manners, importable without starting Electron. `main.js` itself
 // is read as text below rather than imported, because importing it would mean
 // this suite could only run on a machine with a display.
-import { GRANTED_PERMISSIONS, placeWindow } from "./window-shape.js";
+import { GRANTED_PERMISSIONS, HEIGHT, placeOrb, stageFor } from "./window-shape.js";
 import { hubEventsUrl, nextRetryDelay } from "./connection.js";
 import { dashboardUrl } from "./dashboard.js";
 
@@ -202,9 +202,17 @@ describe("the shell", () => {
     expect(required).toEqual(['"electron"']);
     // Handing the page `ipcRenderer` itself would give it every channel at
     // once, including ones added later by someone who never saw this file. So
-    // the object may reference it only to send on a named channel; it may not
-    // pass the thing along. Importing it is fine and unavoidable — the check
-    // is on how it is used, which is the part that could leak.
+    // the object may reference it only to send on a named channel, or to
+    // listen on one; it may not pass the thing along. Importing it is fine and
+    // unavoidable — the check is on how it is used, which is the part that
+    // could leak.
+    //
+    // Listening was added when the window became the whole display: the shell
+    // does the snapping and has to hand back somewhere to draw, and a page
+    // that cannot be told anything would have to guess. It is still a named
+    // channel and still one direction — the page cannot ask a question
+    // through it, and a bare `ipcRenderer.on` with no channel named right
+    // there fails this test exactly as a passed-along reference does.
     // Comments and imports are stripped first: this is a question about what
     // the code does, and prose that merely mentions the name is not a leak.
     // The CJS require destructure is the import, in the dialect a sandboxed
@@ -213,8 +221,10 @@ describe("the shell", () => {
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/^\s*(import|\/\/).*$/gm, "")
       .replace(/^\s*const\s*\{[^}]*\}\s*=\s*require\(.*$/gm, "");
-    const uses = [...body.matchAll(/ipcRenderer(.{0,7})/g)].map((match) => match[1] ?? "");
-    const passedAlong = uses.filter((after) => !after.startsWith(".send("));
+    const uses = [...body.matchAll(/ipcRenderer(.{0,12})/g)].map((match) => match[1] ?? "");
+    const passedAlong = uses.filter(
+      (after) => !after.startsWith(".send(") && !after.startsWith('.on("widget:'),
+    );
     expect(passedAlong, "ipcRenderer may only be used to send on a named channel").toEqual([]);
   });
 
@@ -223,19 +233,65 @@ describe("the shell", () => {
 
     // A face that appeared in the middle of the screen every time somebody
     // spoke would land on top of whatever they were reading.
-    const corner = placeWindow(area, "corner");
+    const corner = placeOrb(area, "corner");
     expect(corner.x).toBeGreaterThan(area.width / 2);
     expect(corner.y).toBeGreaterThan(area.height / 2);
 
-    const centre = placeWindow(area, "center");
+    const centre = placeOrb(area, "center");
     expect(centre.x).toBeLessThan(corner.x);
     expect(centre.y).toBeLessThan(corner.y);
 
-    // Both placements keep the whole window on the screen.
+    // Both placements keep the whole orb on the screen.
     for (const placement of [corner, centre]) {
       expect(placement.x).toBeGreaterThanOrEqual(0);
       expect(placement.y).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  test("covers one whole display and says where that display is", () => {
+    // A second monitor to the left, so the origin is not zero and a stage that
+    // quietly assumed it was would be caught here rather than by a scout drawn
+    // 1920 pixels from the thing it was pointing at.
+    // A panel at the top and a dock on the left, so the work area differs from
+    // the display on every axis: a stage that measured the wrong one would put
+    // the window somewhere the desktop is not, and every scout on it with it.
+    const display = {
+      bounds: { x: 1920, y: 0, width: 2560, height: 1440 },
+      workArea: { x: 1968, y: 32, width: 2512, height: 1408 },
+    };
+
+    const stage = stageFor(display, "corner");
+
+    // The window is the display. Anything smaller is a face that cannot point
+    // at the far side of the screen, which is the whole capability here.
+    expect({ x: stage.x, y: stage.y, width: stage.width, height: stage.height }).toEqual(
+      display.bounds,
+    );
+
+    // The orb still sits in the work area's corner, in screen coordinates —
+    // clear of a panel at the top and not at the window's own origin.
+    expect(stage.orb.x).toBeGreaterThan(display.bounds.x + display.bounds.width / 2);
+    expect(stage.orb.y).toBeGreaterThan(display.bounds.y + display.bounds.height / 2);
+    expect(stage.orb.y).toBeLessThanOrEqual(
+      display.workArea.y + display.workArea.height - HEIGHT,
+    );
+  });
+
+  test("the stage crosses to the page on one flag, spelled the same way twice", () => {
+    // The shell is a module and the preload is CommonJS by construction, so the
+    // flag's name is written in both files. A test compares them, because a
+    // rename in one place would otherwise ship a page that silently does not
+    // know where it is — and a page that does not know where it is draws no
+    // scouts at all.
+    const flag = "--comcon-stage=";
+    expect(read("main.js")).toContain(flag);
+    expect(read("preload.js")).toContain(flag);
+    expect(read("main.js")).toContain("additionalArguments");
+
+    // The stage is a measurement handed down, not a channel. The page reads it
+    // off its own arguments; there is no request it could make for more.
+    expect(read("preload.js")).toContain("process.argv");
+    expect(read("preload.js")).toContain("stage:");
   });
 });
 
@@ -332,7 +388,7 @@ describe("the dashboard", () => {
 });
 
 describe("the drag", () => {
-  test("the page reports a distance; the shell owns the window", () => {
+  test("the page reports a distance; the shell owns where it lands", () => {
     const preload = read("preload.js");
     const renderer = read("renderer.js");
     const main = read("main.js");
@@ -340,12 +396,26 @@ describe("the drag", () => {
     expect(preload).toContain('ipcRenderer.send("widget:drag"');
     expect(main).toContain('ipcMain.on("widget:drag"');
 
-    // Only the shell moves the window, and only after the request has been
-    // read as a drag — a NaN reaching setPosition would put the face somewhere
-    // nobody can find it.
+    // Only the shell decides where the face lands, and only after the request
+    // has been read as a drag — a NaN reaching the placement would put the
+    // face somewhere nobody can find it.
     expect(main).toContain("readDragRequest(request)");
-    expect(main).toContain("window.setPosition(placement.x, placement.y)");
+    expect(main).toContain("dragPlacement(display.workArea, wanted, drag.snap)");
+
+    // The window itself no longer moves. It is the whole display now, and a
+    // stage that slid around under the compositor would take the scouts with
+    // it — a face pointing at a button would point next to it instead. So the
+    // shell answers a drag with a place to draw rather than by moving
+    // anything, and neither half calls setPosition at all.
+    expect(main).not.toContain("setPosition");
     expect(renderer).not.toContain("setPosition");
+    expect(main).toContain('window.webContents.send("widget:placed"');
+
+    // And what comes back is in the page's own coordinates: the stage origin
+    // is taken off before it crosses, so the answer to "where do I draw" can
+    // never become an answer to "where is my window".
+    expect(main).toContain("x: placement.x - stage.x");
+    expect(renderer).toContain("window.widget.onPlaced");
 
     // The page never names a place, only a distance travelled since the press.
     // It cannot name one honestly: on a desk with three monitors it does not
@@ -364,8 +434,13 @@ describe("the drag", () => {
     expect(main).toMatch(/drag\.phase === "end"[\s\S]*writePlacement\(/);
 
     // And it is read back when the window opens, resolved against the display
-    // it is opening on rather than replayed as raw pixels.
+    // it is opening on rather than replayed as raw pixels. The resolving lives
+    // in the stage now, because the stored spot decides two things at once —
+    // which display to cover, and where on it the face starts — and they must
+    // be answered from the same reading or the face lands on the wrong desk.
     expect(main).toContain("readPlacement(placementFile())");
-    expect(main).toContain("restorePlacement(display.workArea, stored)");
+    expect(main).toContain("screen.getDisplayNearestPoint({ x: stored.x, y: stored.y })");
+    expect(main).toContain("stageFor(display, stored ??");
+    expect(read("window-shape.js")).toContain("restorePlacement(display.workArea, placement)");
   });
 });

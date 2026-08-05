@@ -7,7 +7,15 @@
  * no display.
  */
 
-/** The window is a little bigger than the orb so the caption has somewhere to go. */
+/**
+ * The orb's own box — a little bigger than the orb so the caption has somewhere
+ * to go.
+ *
+ * It used to be the window's size as well. It is not any more: the window is
+ * the whole display now, and this is the box the renderer places inside it. A
+ * face that only exists inside a 360-pixel rectangle cannot point at a button
+ * on the other side of the screen, and pointing is what the window grew for.
+ */
 export const WIDTH = 360;
 export const HEIGHT = 260;
 const MARGIN = 24;
@@ -24,17 +32,20 @@ const MARGIN = 24;
 export const GRANTED_PERMISSIONS = Object.freeze([]);
 
 /**
- * Where the widget sits when it has not been dragged.
+ * Where the orb sits when it has not been dragged.
  *
  * The user chooses corner or centre; corner is the default because a face that
  * appears in the middle of the screen every time somebody speaks is a face that
  * lands on top of whatever they were reading.
  *
+ * Measured against the work area rather than the whole display, so the default
+ * corner is not underneath a panel or a dock.
+ *
  * @param {{ width: number, height: number }} area
  * @param {string} placement
  * @returns {{ x: number, y: number }}
  */
-export function placeWindow(area, placement) {
+export function placeOrb(area, placement) {
   if (placement === "center") {
     return {
       x: Math.max(0, Math.round((area.width - WIDTH) / 2)),
@@ -63,7 +74,7 @@ export const SNAP_ZONE_PX = 64;
  * "Bottom right of the screen" survives a monitor being unplugged, a
  * resolution change, and a taskbar appearing; the coordinates that happened to
  * mean bottom-right last Tuesday do not. Each axis is independent because
- * hugging one edge leaves the other free — a widget snapped to the left edge
+ * hugging one edge leaves the other free — an orb snapped to the left edge
  * still sits at whatever height the user dragged it to.
  *
  * @typedef {{ h: "left" | "center" | "right" | null, v: "top" | "middle" | "bottom" | null }} SnapZone
@@ -72,7 +83,7 @@ export const SNAP_ZONE_PX = 64;
 /** Snapped to nothing: the position is exactly where the user let go. */
 export const FREE_ZONE = Object.freeze({ h: null, v: null });
 
-/** The window's top-left when it is pushed into each corner of a work area. */
+/** The orb's top-left when it is pushed into each corner of a work area. */
 function limits(area) {
   const originX = area.x ?? 0;
   const originY = area.y ?? 0;
@@ -89,10 +100,10 @@ function limits(area) {
 const near = (a, b) => Math.abs(a - b) <= SNAP_ZONE_PX;
 
 /**
- * Which snap zone, if any, a dragged window has landed in.
+ * Which snap zone, if any, a dragged orb has landed in.
  *
  * @param {{ x?: number, y?: number, width: number, height: number }} area work area, screen coordinates
- * @param {{ x: number, y: number }} point the window's top-left, screen coordinates
+ * @param {{ x: number, y: number }} point the orb's top-left, screen coordinates
  * @returns {SnapZone}
  */
 export function snapZoneFor(area, point) {
@@ -116,15 +127,16 @@ export function snapZoneFor(area, point) {
 }
 
 /**
- * Where the window actually goes: snapped on the axes that snapped, and
+ * Where the orb actually goes: snapped on the axes that snapped, and
  * clamped onto the work area on the axes that did not.
  *
- * The clamp is not decoration. A window dragged off the bottom of the screen
- * is a face the user cannot get back — it has no taskbar entry, no frame, and
- * never takes focus, so there is nothing left to grab.
+ * The clamp is not decoration, and it survived the window becoming the whole
+ * screen. An orb dragged off the bottom of a click-through stage is a face the
+ * user cannot get back — it has no taskbar entry, no frame, and never takes
+ * focus, so there is nothing left to grab.
  *
  * @param {{ x?: number, y?: number, width: number, height: number }} area
- * @param {{ x: number, y: number }} point the window's top-left, screen coordinates
+ * @param {{ x: number, y: number }} point the orb's top-left, screen coordinates
  * @param {SnapZone} [zone]
  * @returns {{ x: number, y: number }}
  */
@@ -151,10 +163,10 @@ export function placeInZone(area, point, zone = FREE_ZONE) {
 }
 
 /**
- * The end of a drag: where the window lands, and what that landing meant.
+ * The end of a drag: where the orb lands, and what that landing meant.
  *
  * @param {{ x?: number, y?: number, width: number, height: number }} area
- * @param {{ x: number, y: number }} point the window's top-left, screen coordinates
+ * @param {{ x: number, y: number }} point the orb's top-left, screen coordinates
  * @param {boolean} snapping whether shift was held
  * @returns {{ x: number, y: number, zone: SnapZone }}
  */
@@ -183,11 +195,13 @@ export function restorePlacement(area, stored) {
  * What the page is allowed to say about a drag.
  *
  * The renderer reports how far the pointer has travelled since the press and
- * whether shift is down; the shell owns the window and does the arithmetic.
- * Everything else is refused, including the shapes a broken page would send —
- * a NaN reaching `setPosition` would move the face somewhere nobody can find
- * it. Negative deltas are ordinary: a second monitor sits at negative
- * coordinates on most desks.
+ * whether shift is down; the shell owns the arithmetic. That division did not
+ * change when the window became the stage, and it matters more now, not less:
+ * the page is never told where its own window is, so travel-since-press is the
+ * only thing it can honestly report. Everything else is refused, including the
+ * shapes a broken page would send — a NaN reaching the placement would put the
+ * face somewhere nobody can find it. Negative deltas are ordinary: a second
+ * monitor sits at negative coordinates on most desks.
  *
  * @param {unknown} request
  * @returns {{ phase: "begin" | "move" | "end", dx: number, dy: number, snap: boolean } | null}
@@ -199,4 +213,56 @@ export function readDragRequest(request) {
   if (typeof dx !== "number" || typeof dy !== "number") return null;
   if (!Number.isFinite(dx) || !Number.isFinite(dy)) return null;
   return { phase, dx, dy, snap: snap === true };
+}
+
+/**
+ * The stage: the piece of desk the widget is drawing on.
+ *
+ * The window covers one whole display, transparent and click-through, and every
+ * position inside it is the renderer's to decide. That is what lets the face
+ * point at things: an element's rectangle arrives in screen coordinates, and a
+ * window that spans the screen can draw over it.
+ *
+ * One display, not all of them. A window stretched across a desk to cover every
+ * monitor would be a single surface whose transparency, scaling and refresh
+ * behaviour is at the mercy of the least capable screen on it, and the honest
+ * alternative is the rule this stage implies: a rectangle that is not on this
+ * display is not drawn at a wrong position, it is not drawn.
+ *
+ * The origin travels with it because it is what makes the two coordinate
+ * systems commensurable — the daemon speaks in screen pixels and a page speaks
+ * in pixels from its own top-left, and this is the difference between them.
+ *
+ * `orb` is where the face starts: a remembered placement resolved against this
+ * display's work area, or the default corner when there is nothing remembered.
+ * The window no longer moves when the face does, so this is the only thing a
+ * drag changes.
+ *
+ * @param {{ bounds: { x: number, y: number, width: number, height: number }, workArea: { x: number, y: number, width: number, height: number } }} display
+ * @param {string | { x: number, y: number, zone?: SnapZone }} placement a named default, or a remembered spot
+ * @returns {{ x: number, y: number, width: number, height: number, orb: { x: number, y: number } }}
+ */
+export function stageFor(display, placement) {
+  const orb =
+    typeof placement === "string"
+      ? (() => {
+          const placed = placeOrb(display.workArea, placement);
+          // `placeOrb` answers in work-area coordinates; everything else in
+          // this module is in screen coordinates, so it is lifted once here.
+          return {
+            x: (display.workArea.x ?? 0) + placed.x,
+            y: (display.workArea.y ?? 0) + placed.y,
+          };
+        })()
+      : restorePlacement(display.workArea, placement);
+  return {
+    x: display.bounds.x,
+    y: display.bounds.y,
+    width: display.bounds.width,
+    height: display.bounds.height,
+    // In screen coordinates, like everything else the widget is told about
+    // where things are. The renderer subtracts the stage origin once, in one
+    // place, rather than every consumer remembering which space it is in.
+    orb,
+  };
 }

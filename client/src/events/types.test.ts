@@ -36,6 +36,13 @@ test("test_a_skin_cannot_widen_the_socket_vocabulary", () => {
   expect(isGesture({ type: "drag", x: 1, y: 2, audio: "base64..." })).toBe(false);
   expect(isStateEvent({ type: "idle", audio: "base64..." })).toBe(false);
   expect(isStateEvent({ type: "caption", text: "hi", tool: "shell" })).toBe(false);
+  // A scout carries a rectangle and nothing about what is in it. A name, a
+  // role, or a value smuggled alongside would make the pointing word a
+  // reading word.
+  expect(
+    isStateEvent({ type: "touching", id: "call-1", x: 0, y: 0, width: 8, height: 8, name: "Password" }),
+  ).toBe(false);
+  expect(isStateEvent({ type: "released", id: "call-1", value: "hunter2" })).toBe(false);
 
   // Prototype pollution dressed as a gesture: `type` arriving from the
   // prototype chain rather than the object's own keys.
@@ -63,6 +70,40 @@ test("test_a_skin_cannot_widen_the_socket_vocabulary", () => {
   expect(isStateEvent({ type: "thinking" })).toBe(true);
   expect(isStateEvent({ type: "speaking" })).toBe(true);
   expect(isStateEvent({ type: "idle" })).toBe(true);
+  expect(isStateEvent({ type: "touching", id: "call-1", x: 12, y: 40, width: 96, height: 32 })).toBe(
+    true,
+  );
+  expect(isStateEvent({ type: "released", id: "call-1" })).toBe(true);
+});
+
+describe("pointing at what is being touched", () => {
+  test("refuses a rectangle that is not a place a scout could go", () => {
+    const at = (rect: Record<string, unknown>) => ({ type: "touching", id: "call-1", ...rect });
+    // No extent is not a place. An element reported at zero size is off-screen
+    // or not laid out, and an orb drawn over it would be an orb drawn over
+    // nothing while claiming otherwise.
+    expect(isStateEvent(at({ x: 0, y: 0, width: 0, height: 10 }))).toBe(false);
+    expect(isStateEvent(at({ x: 0, y: 0, width: 10, height: 0 }))).toBe(false);
+    expect(isStateEvent(at({ x: 0, y: 0, width: -10, height: 10 }))).toBe(false);
+    expect(isStateEvent(at({ x: Number.NaN, y: 0, width: 10, height: 10 }))).toBe(false);
+    expect(isStateEvent(at({ x: 0, y: Number.POSITIVE_INFINITY, width: 10, height: 10 }))).toBe(false);
+    expect(isStateEvent(at({ x: "12", y: "40", width: 10, height: 10 }))).toBe(false);
+  });
+
+  test("admits a rectangle on a monitor left of the primary one", () => {
+    // A second screen to the left has negative screen coordinates, and a face
+    // that refused them would refuse half of a two-monitor desk.
+    expect(
+      isStateEvent({ type: "touching", id: "call-1", x: -1920, y: -200, width: 40, height: 40 }),
+    ).toBe(true);
+  });
+
+  test("refuses a word that names no operation to point at or let go of", () => {
+    expect(isStateEvent({ type: "touching", id: "", x: 0, y: 0, width: 8, height: 8 })).toBe(false);
+    expect(isStateEvent({ type: "touching", id: 7, x: 0, y: 0, width: 8, height: 8 })).toBe(false);
+    expect(isStateEvent({ type: "released" })).toBe(false);
+    expect(isStateEvent({ type: "released", id: "" })).toBe(false);
+  });
 });
 
 describe("the guards", () => {

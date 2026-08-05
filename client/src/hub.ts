@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import { prepareAgentControllerMount, wireSessionConcerns } from "@mastra/code-sdk";
+import type { AgentControllerEvent } from "@mastra/core/agent-controller";
 
 import type { ClientStatus } from "./app.ts";
 import { createAgentTurn } from "./chat.ts";
@@ -41,6 +42,16 @@ export interface PrepareHubOptions {
    * same rule the desktop tools follow.
    */
   settings?: SettingsGate;
+
+  /**
+   * Told about every controller event of every turn.
+   *
+   * The touch lane is what this exists for: a face draws where the agent's
+   * hands are, and the hands belong to the hub rather than to whichever surface
+   * started the turn. Optional, and a hub without one behaves exactly as it did
+   * before — which is what every test that does not care about faces boots.
+   */
+  observe?: (event: AgentControllerEvent) => void;
 }
 
 export async function prepareHub(config: ClientConfig, options: PrepareHubOptions = {}) {
@@ -134,6 +145,7 @@ export async function prepareHub(config: ClientConfig, options: PrepareHubOption
     getSession,
     mode: THINKING_MODE,
     model: thinkingModel,
+    ...(options.observe ? { observe: options.observe } : {}),
   });
 
   /**

@@ -174,6 +174,54 @@ describe("where the face opens next time", () => {
   });
 });
 
+describe("the stage the face opens on", () => {
+  // The reconciliation between two features that arrived a day apart: the
+  // window became the whole display, and the face became something the user
+  // drags around. Both are true at once, and the stage is where they meet — it
+  // picks the desk and the spot on it from the same reading of the display.
+
+  test("a remembered spot opens on the display it is resolved against", () => {
+    const secondMonitor = {
+      bounds: { x: 1920, y: 0, width: 2560, height: 1440 },
+      workArea: { x: 1920, y: 32, width: 2560, height: 1408 },
+    };
+    const stored = { x: 2600, y: 700, zone: { h: null as null, v: null as null } };
+
+    const stage = stageFor(secondMonitor, stored);
+
+    // The window is still the whole display, and the face is where it was left
+    // rather than in the default corner.
+    expect({ x: stage.x, width: stage.width }).toEqual({ x: 1920, width: 2560 });
+    expect(stage.orb).toEqual({ x: 2600, y: 700 });
+  });
+
+  test("a remembered corner is still a corner on a different-sized desk", () => {
+    const smaller = {
+      bounds: { x: 0, y: 0, width: 1280, height: 720 },
+      workArea: { x: 0, y: 0, width: 1280, height: 720 },
+    };
+    const stored = { x: 3400, y: 1900, zone: { h: "right" as const, v: "bottom" as const } };
+
+    // Replayed as pixels this lands far off a 1280x720 screen. Resolved as an
+    // intention it is the bottom-right corner, which is what the user meant.
+    expect(stageFor(smaller, stored).orb).toEqual({ x: 1280 - WIDTH, y: 720 - HEIGHT });
+  });
+
+  test("nothing remembered is the default corner, in screen coordinates", () => {
+    const offset = {
+      bounds: { x: -1920, y: 0, width: 1920, height: 1080 },
+      workArea: { x: -1920, y: 0, width: 1920, height: 1080 },
+    };
+
+    // A monitor to the left of the primary sits at negative coordinates, and a
+    // default corner computed in work-area space and never lifted into screen
+    // space would put the face on the wrong monitor entirely.
+    const { orb } = stageFor(offset, "corner");
+    expect(orb.x).toBeLessThan(0);
+    expect(orb.x).toBe(-1920 + Math.max(0, 1920 - WIDTH - 24));
+  });
+});
+
 describe("remembering across a restart", () => {
   let dir: string;
   let file: string;
