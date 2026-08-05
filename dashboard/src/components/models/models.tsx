@@ -6,6 +6,8 @@ import { ProviderLogo } from "@/components/models/provider-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Field, Select } from "@/components/ui/select";
 import type { LoginFlow, ModelPack, ProviderFlow, VoiceProvider } from "@/lib/hub";
 import { cn } from "@/lib/utils";
 
@@ -34,13 +36,14 @@ function ApiKeyRow(props: { provider: ProviderFlow; onSaveKey: (key: string) => 
   const [key, setKey] = useState("");
   return (
     <div className="flex items-center gap-2">
-      <input
+      <Input
+        variant="pill"
         type="password"
         value={key}
         onChange={(event) => setKey(event.target.value)}
         placeholder="…or paste an API key"
         aria-label={`${props.provider.name} API key`}
-        className="w-56 rounded-full border border-border bg-well px-4 py-1.5 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+        className="w-56"
       />
       <Button
         variant="outline"
@@ -92,12 +95,13 @@ function FlowPanel(props: {
         </div>
       ) : (
         <div className="flex items-center gap-2">
-          <input
+          <Input
+            variant="pill"
             value={code}
             onChange={(event) => setCode(event.target.value)}
             placeholder="Paste the code from the authorization page"
             aria-label="Authorization code"
-            className="w-72 rounded-full border border-border bg-well px-4 py-1.5 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+            className="w-72"
           />
           <Button
             variant="outline"
@@ -113,9 +117,9 @@ function FlowPanel(props: {
           {error}
         </p>
       ) : null}
-      <button type="button" onClick={props.onCancel} className="self-start text-xs text-muted underline">
+      <Button variant="ghost" size="sm" className="self-start px-0 underline" onClick={props.onCancel}>
         Cancel
-      </button>
+      </Button>
     </div>
   );
 }
@@ -286,32 +290,20 @@ function RealtimeVoiceCard(props: { providers: readonly VoiceProvider[] }) {
           <p className="text-sm text-muted">Connect an account above to give the orb a voice.</p>
         ) : (
           <>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-muted">Provider</span>
-              <select
-                aria-label="Realtime voice provider"
-                disabled
-                value={current?.provider ?? ""}
-                className="rounded-lg border border-border bg-well px-3 py-1.5 text-sm text-foreground disabled:opacity-70"
-              >
+            <Field label="Provider">
+              <Select aria-label="Realtime voice provider" disabled value={current?.provider ?? ""}>
                 {realtime.map((entry) => (
                   <option key={entry.provider} value={entry.provider}>
                     {entry.name}
                   </option>
                 ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-muted">Voice</span>
-              <select
-                aria-label="Realtime voice"
-                disabled
-                value=""
-                className="rounded-lg border border-border bg-well px-3 py-1.5 text-sm text-foreground disabled:opacity-70"
-              >
+              </Select>
+            </Field>
+            <Field label="Voice">
+              <Select aria-label="Realtime voice" disabled value="">
                 <option value="">Provider default</option>
-              </select>
-            </label>
+              </Select>
+            </Field>
             {current && !current.usable ? (
               <p className="text-xs text-muted">{current.reason ?? "unavailable"}</p>
             ) : null}

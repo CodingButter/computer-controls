@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import type { PermissionRow, PermissionsView } from "@/lib/hub";
 import { cn } from "@/lib/utils";
@@ -163,13 +164,14 @@ export function PermissionsPanel(props: {
 
       <div className="flex items-center justify-between gap-4">
         <ModeControl mode={view.mode} />
-        <input
+        <Input
+          variant="pill"
           type="search"
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
           placeholder="Search applications…"
           aria-label="Search applications"
-          className="w-64 rounded-full border border-accent/40 bg-well px-4 py-1.5 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+          className="w-64"
         />
       </div>
 
