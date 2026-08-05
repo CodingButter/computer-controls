@@ -354,6 +354,28 @@ describe("test_a_signal_never_cuts_off_a_sentence_in_progress", () => {
     expect(session.texts).toEqual(["Progress update."]);
   });
 
+  it("keeps the lane open when one signal cannot be sent", async () => {
+    const { orb, session } = build();
+    const failing = vi
+      .fn<(text: string) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("socket wrote nothing"));
+    const original = session.sendText;
+    session.sendText = async (text: string) => {
+      if (failing.mock.calls.length === 0) {
+        await failing(text);
+        return;
+      }
+      await original(text);
+    };
+
+    // The first signal fails. It must not take the process down, and it must
+    // not poison the signal behind it.
+    await orb.announce("This one breaks.");
+    await orb.announce("This one still gets said.");
+
+    expect(session.texts).toEqual(["This one still gets said."]);
+  });
+
   it("speaks two signals in order rather than letting the second cut the first", async () => {
     const mouth = new Mouth();
     const session = fakeSession();

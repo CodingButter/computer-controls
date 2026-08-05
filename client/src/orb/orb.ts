@@ -216,11 +216,16 @@ export class Orb {
       () => this.#speakSignal(text),
       () => this.#speakSignal(text),
     );
-    this.#announcing = turn.then(
-      () => {},
-      () => {},
-    );
-    return turn;
+    // A signal that could not be sent is a line in the log, never an unhandled
+    // rejection: most callers fire and forget, and a notification failing is
+    // not a reason to take the process down. The lane carries on either way —
+    // one bad signal does not poison the ones behind it.
+    this.#announcing = turn.catch((error) => {
+      console.error(
+        `[orb] a signal could not be spoken: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+    return this.#announcing;
   }
 
   /**
@@ -235,7 +240,10 @@ export class Orb {
    */
   async #speakSignal(text: string): Promise<void> {
     await this.#mouth.whenIdle();
-    // The gap may have opened while this signal was waiting its turn.
+    // Waiting for a quiet mouth means the world may have moved on: the orb can
+    // have been dismissed, or the socket dropped, while this signal held its
+    // place in the queue.
+    if (this.#closed) return;
     if (!this.#session.connected) {
       this.#pendingAnnouncements.push(text);
       return;
