@@ -18,5 +18,8 @@
     "typescript": "^7.0.2",
     "vitest": "^4.1.10",
     "ws": "^8.21.2"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0"
   }
 }

@@ -1,22 +1,23 @@
 import { BrowserWindow, app, ipcMain, screen, session, shell } from "electron";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 /**
- * The shell: a window that draws, and a window that is refused everything else.
+ * The shell: a window that draws and listens, and is refused everything else.
  *
- * The issue's first ruling is that the widget is a face and never an ear, and
- * this file is where that stops being a promise. Two things enforce it. The
- * renderer runs with no Node integration and a context-isolated bridge that
- * exposes nothing, so the page has no filesystem, no child process, and no way
- * to reach the daemon. And every permission request from this window is denied
- * — not the microphone specifically, all of them.
+ * The widget grew ears, and this file is where the boundary of that stops
+ * being a promise. The permission surface is a scalpel, not a door: exactly
+ * one permission — `media`, audio only — for exactly one document, the
+ * widget's own page, and only while the tray has not disabled the widget.
+ * Everything else on the list is denied the way it always was, and display
+ * capture is refused in every handler permanently, because a transparent
+ * always-on-top window that could see the screen would be a keylogger with
+ * a nice animation.
  *
- * Denying the whole list rather than the microphone is deliberate. A widget
- * that blocked `media` and left `geolocation` open would be one interesting
- * feature away from a leak, and this process has no legitimate use for any
- * permission a browser can grant. The empty allowlist is the honest expression
- * of what a thing that draws needs.
+ * Denying by default and carving one named hole is deliberate. A widget that
+ * granted `media` broadly would hand its microphone to any document that
+ * ever rendered in this session; naming the page makes the grant an identity
+ * check, not a category.
  */
 
 import {
@@ -148,20 +149,49 @@ function createWindow({ startHidden = false } = {}) {
   return { window, stage };
 }
 
-function refuseEverything() {
+/** The one document the microphone may be granted to: the widget's own page. */
+const widgetPageUrl = () => pathToFileURL(path.join(here, "index.html")).href;
+
+/**
+ * Deny everything, then carve exactly one hole.
+ *
+ * @param {() => boolean} isDisabled — the tray's word on whether the ears are
+ *   allowed to exist right now. Read at decision time, not captured at setup,
+ *   so flipping the tray switch changes the answer without a restart.
+ */
+function guardPermissions(isDisabled) {
   const widgetSession = session.defaultSession;
 
-  // Asked politely: denied.
-  widgetSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  // Checked ahead of asking: also denied, so a feature-detect cannot find an
-  // open door that the request handler would have closed.
-  widgetSession.setPermissionCheckHandler(() => false);
-  // Asked for a specific microphone or camera by a page that got that far:
-  // there is nothing to hand back.
+  // The carve-out, applied identically to the ask and the feature-detect: the
+  // microphone (audio only, never video), for the widget's own page, while
+  // the widget is enabled. Anything that misses any clause is denied.
+  const micForOwnPage = (permission, requestingUrl, mediaTypes) => {
+    if (isDisabled()) return false;
+    if (permission !== "media") return false;
+    if (requestingUrl !== widgetPageUrl()) return false;
+    // Audio and nothing else. A request that also wants video is refused
+    // whole rather than trimmed: a caller asking for more than the design
+    // grants is a caller this handler does not negotiate with.
+    return mediaTypes.length > 0 && mediaTypes.every((type) => type === "audio");
+  };
+
+  // Asked politely: the one carve-out, else denied.
+  widgetSession.setPermissionRequestHandler((_contents, permission, callback, details) => {
+    callback(micForOwnPage(permission, details.requestingUrl, details.mediaTypes ?? []));
+  });
+  // Checked ahead of asking: the same answer, so a feature-detect can never
+  // find a door the request handler would have closed — or miss the one it
+  // would have opened.
+  widgetSession.setPermissionCheckHandler((_contents, permission, _origin, details) =>
+    micForOwnPage(permission, details.requestingUrl, details.mediaType ? [details.mediaType] : []),
+  );
+  // Asked for a specific device by id: there is still nothing to hand back.
+  // getUserMedia with the carve-out above reaches the default microphone;
+  // enumerating and claiming particular hardware is not a thing a face does.
   widgetSession.setDevicePermissionHandler(() => false);
   if (typeof widgetSession.setDisplayMediaRequestHandler === "function") {
-    // Screen capture is a permission too, and a transparent always-on-top
-    // window asking for it would be a keylogger with a nice animation.
+    // Screen capture is refused permanently, in every state, disabled or not.
+    // The ears carve-out changes nothing here and never will.
     widgetSession.setDisplayMediaRequestHandler((_request, callback) =>
       callback({ video: undefined, audio: undefined }),
     );
@@ -169,11 +199,11 @@ function refuseEverything() {
 }
 
 app.whenReady().then(() => {
-  refuseEverything();
-
   // How the user left things, restored before anything is drawn: a widget
   // disabled last run starts disabled, not visible-for-a-frame.
   let trayState = readTrayState(trayStateFile());
+
+  guardPermissions(() => trayState.disabled);
 
   const { window, stage } = createWindow({ startHidden: trayState.disabled });
 
@@ -297,6 +327,34 @@ app.whenReady().then(() => {
   // that rendered a settings page would have become a second application, and
   // this one is a face.
   ipcMain.on("widget:open-dashboard", openDashboard);
+
+  /*
+   * The token mint rides main: the renderer never learns the hub's port twice.
+   *
+   * The page already reaches the hub once, through the bridge's hubPort and
+   * the lane; giving it an HTTP client aimed at the same address would be a
+   * second copy of the same knowledge, and the copy is where drift starts.
+   * Main asks the mint and hands back exactly the fields the page needs — the
+   * hub's refusal sentences travel verbatim, because they are page states,
+   * not errors. Nothing here is logged: a token in a log file is a token.
+   */
+  ipcMain.handle("widget:mint-token", async () => {
+    if (trayState.disabled) {
+      return { error: "The widget is disabled, so no token was requested." };
+    }
+    try {
+      const response = await fetch(`http://127.0.0.1:${hubPort()}/api/orb/token`, {
+        method: "POST",
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return { error: body.error ?? `The token mint refused with status ${response.status}.` };
+      }
+      return { token: body.token, model: body.model, expiresAt: body.expiresAt };
+    } catch {
+      return { error: "The hub could not be reached, so no token was minted." };
+    }
+  });
 
   // A face the user asked to leave leaves. The process closes its own windows
   // and exits — never a kill from outside, always a semantic close.

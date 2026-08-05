@@ -11,5 +11,11 @@
 # the widget holds no microphone. Only `pnpm start` needs the binary.
 allowBuilds:
   electron: true
+  # transformers.js transitive deps. All three are for the NODE backend, and
+  # the widget's ear runs the WASM backend inside a sandboxed renderer — the
+  # native builds are dead weight and stay unbuilt on purpose.
+  onnxruntime-node: false
+  protobufjs: false
+  sharp: false
 minimumReleaseAgeExclude:
   - ws@8.21.2

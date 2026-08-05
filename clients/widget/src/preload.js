@@ -135,6 +135,22 @@ contextBridge.exposeInMainWorld("widget", {
   },
 
   /**
+   * A short-lived, constrained token for dialing Google directly.
+   *
+   * The renderer never learns the hub's port twice: the lane's address lives
+   * in `hubPort`, and this is the only other thing the page ever needs from
+   * the hub, so it rides main. What comes back is either the picked fields of
+   * a minted token or the hub's refusal sentence verbatim — never a stored
+   * credential, because main never sees one either; the mint's whole design
+   * is that the key stays home.
+   *
+   * @returns {Promise<{ token?: string, model?: string, expiresAt?: string, error?: string }>}
+   */
+  mintToken() {
+    return ipcRenderer.invoke("widget:mint-token");
+  },
+
+  /**
    * Show me the dashboard.
    *
    * No URL crosses this seam. The renderer asks for the one page the shell

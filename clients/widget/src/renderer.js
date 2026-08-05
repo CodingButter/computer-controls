@@ -9,6 +9,8 @@
  */
 
 import { connectToHub } from "./connection.js";
+import { plugDecision, startEars } from "./ears.js";
+import { openMouth } from "./mouth.js";
 import {
   isOverVisibleShape,
   paintCaption,
@@ -172,17 +174,118 @@ function rewindFade() {
 
 window.widget.onTrayState?.((next) => {
   autoHide = next.autoHide;
+  // Disable is the honest off: the ears die with the pixels, and the tray
+  // icon is what says so. Enable brings them back without a restart.
+  if (next.disabled) stopEars();
+  else void startListening();
   rewindFade();
 });
 
+// Whether the lane is up right now — the mouth checks before promising the
+// model an answer, because a promise made over a dead lane is an answer the
+// user waits for forever.
+let hubConnected = false;
+
 const hub = connectToHub({
   port: window.widget.hubPort,
+  onConnectionChange: (connected) => {
+    hubConnected = connected;
+    // A lane that dies takes the mouth with it: a session without the lane
+    // could still chat with the model but could never reach the hub.
+    if (!connected && mouth) closeMouth();
+  },
   onEvent: (event) => {
     state = reduce(state, event);
     paint();
     rewindFade();
+    // The mouth's own asks come back over the same socket the face watches.
+    mouth?.deliver(event);
+    // The arbitration Jamie named: another client's voice session plugs
+    // these ears; its close unplugs them.
+    const decision = plugDecision(event.type, mouthOpen);
+    if (decision === "plug") ears?.plug();
+    if (decision === "unplug") ears?.unplug();
   },
 });
+
+/*
+ * The ears and the mouth.
+ *
+ * The gate runs the hub's own wake chain against this page's microphone; the
+ * mouth opens when the gate does and closes when the gate goes quiet. The
+ * face is popped locally on wake rather than waiting for the hub to say
+ * something — the orb must be visible whenever it is listening, because it
+ * is the one indicator that things aren't frozen.
+ */
+let ears = null;
+let mouth = null;
+let mouthOpen = false;
+
+async function startListening() {
+  if (ears) return;
+  try {
+    ears = await startEars({
+      onOpen: (hearing) => {
+        mouthOpen = true;
+        state = reduce(state, { type: "wake_opened" });
+        paint();
+        rewindFade();
+        void openMouth({
+          lane: {
+            send: (frame) => hub.send(frame),
+            isOpen: () => hubConnected,
+          },
+          mintToken: () => window.widget.mintToken(),
+          transcript: hearing.transcript,
+          onCaption: (text) => {
+            state = reduce(state, { type: "caption", text });
+            paint();
+            rewindFade();
+          },
+          onState: () => rewindFade(),
+          onReason: () => closeMouth(),
+        }).then(
+          (opened) => {
+            // The gate may have gone quiet while the dial was in flight; a
+            // mouth that arrived after its conversation ended closes now.
+            if (!mouthOpen) return void opened.close();
+            mouth = opened;
+          },
+          () => {
+            // A refused mint or a failed dial: the face returns to rest.
+            // The wake chain is untouched — the next wake tries again.
+            mouthOpen = false;
+            state = reduce(state, { type: "idle" });
+            paint();
+            rewindFade();
+          },
+        );
+      },
+      onForward: (frame) => mouth?.forward(frame),
+      onIdle: () => closeMouth(),
+    });
+  } catch {
+    // A refused microphone is a widget without ears, not a broken face.
+    // Everything else — the lane, the gestures, the scouts — still works.
+    ears = null;
+  }
+}
+
+function closeMouth() {
+  mouthOpen = false;
+  const closing = mouth;
+  mouth = null;
+  if (closing) void closing.close();
+  state = reduce(state, { type: "idle" });
+  paint();
+  rewindFade();
+}
+
+function stopEars() {
+  closeMouth();
+  ears?.stop();
+  ears = null;
+}
 
 /**
  * Do it here, and tell the hub.

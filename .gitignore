@@ -49,3 +49,6 @@ dashboard/tsconfig.tsbuildinfo
 /PLAN-*.md
 .mastracode/*.md
 .playwright-mcp/
+
+# Widget ear assets (model weights + WASM) — reproduced by clients/widget/scripts/vendor-widget-ear.mjs
+clients/widget/src/vendor/ear/

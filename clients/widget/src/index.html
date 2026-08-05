@@ -3,13 +3,22 @@
   <head>
     <meta charset="utf-8" />
     <!--
-      The page may load nothing from anywhere. Everything it needs is beside it
-      on disk, so the policy that says exactly that costs nothing and closes the
-      door a skin author might otherwise be tempted to open.
+      The page may load nothing from anywhere except the two places the design
+      names. Everything it draws and runs is beside it on disk ('self'); the
+      two network doors are the hub's loopback lane and Google's realtime
+      endpoint, which the mouth dials with a hub-minted token. Each widening
+      here is deliberate and pinned by boundaries tests:
+
+      - worker-src 'self': the ear's transcription runs in a local worker.
+      - 'wasm-unsafe-eval': the worker's speech model is ONNX WASM; the term
+        is Chromium's name for "may compile WebAssembly", not an eval grant.
+      - wss://generativelanguage.googleapis.com: where the mouth talks. The
+        host is spelled out rather than wildcarded, because the CSP is the
+        page-side half of the promise that audio goes exactly one place.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'self'; script-src 'self'; connect-src ws://127.0.0.1:*"
+      content="default-src 'none'; style-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' ws://127.0.0.1:* wss://generativelanguage.googleapis.com"
     />
     <title>widget</title>
     <link rel="stylesheet" href="skin.css" />
@@ -18,9 +27,9 @@
       file beside this page, so the face ships as a 'self' script under the CSP
       and never reaches across the network for a dependency. The map is a local
       same-origin file, which is what script-src 'self' permits; the shader and
-      its three.module.js live under face/ (outside the top-level scan no-ears
-      reads) because three.module.js carries dead audio-path substrings the
-      widget never invokes.
+      its three.module.js live under face/ (outside the top-level scan the
+      boundaries suite reads) because three.module.js carries dead audio-path
+      substrings the widget never invokes.
     -->
     <script type="importmap" src="face/import-map.json"></script>
   </head>
