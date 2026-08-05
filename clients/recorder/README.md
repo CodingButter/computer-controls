@@ -161,6 +161,73 @@ occurrences and still hands back the issue it would have filed, so whether the
 bar holds is a question that can be answered by watching rather than by
 argument.
 
+## Writing down the way
+
+An episode is what happened once. A finding is a pattern somebody else should
+act on. Neither is what an agent needs at nine the next morning, which is
+simply *where the thing is* — and without it, every session re-derives every
+application from nothing, walks a list of forty-five anonymous rows, and
+sometimes answers that a conversation does not exist while it sits first in
+that list.
+
+A skill is the route: the task, the elements that anchor it by role and
+landmark name, the places the walk goes wrong, and the version it was last held
+against. Never element ids — a handle is issued for one session and dies with
+it, so a route written in handles is a route that has already expired.
+
+```python
+from episode_recorder import Anchor, Derivation, SkillLibrary
+
+library = SkillLibrary("~/.local/share/computer-controls/skills", agent.author)
+
+outcome = library.derive(Derivation(
+    application="Discord",
+    task="find a direct message by person",
+    version="1.0.151",
+    anchors=(
+        Anchor("frame", "Discord"),
+        Anchor("list", "Direct Messages", siblings=3),
+        Anchor("list item", "", siblings=45),   # the rows have no names
+        Anchor("link", person),                 # the name is three levels down
+    ),
+    bound=(person,),                            # what this run was looking for
+))
+```
+
+**A route derived once is a candidate.** Once is a coincidence with a good
+story. It is remembered — as shape and salted digests, never as names — and the
+second agent to walk the same way is what turns it into a file. Two independent
+derivations are also the only reason a landmark name can be written down in
+clear: agreement between two runs is the evidence that a string is a property
+of the application rather than something one agent happened to be reading.
+What the runs disagreed about becomes a hole in the route, marked as the thing
+that varies, which is usually the thing being looked for.
+
+**The skill warns about what the route implies.** There is no field for advice.
+That the identity sits below the row, that a stylized display name needs
+folding before it is matched, that the list ran past one screenful — each is
+read out of the agreed route, so a skill cannot warn about something two walks
+did not both see.
+
+**A route that breaks is amended, not abandoned.** The first failure marks the
+skill as not standing and says so on the page, because a map that is wrong is
+dangerous the moment it is wrong and the agent reading it between the breakage
+and the fix has to be told. The old route stays until a second derivation
+agrees on the new one, and then the amendment records what moved — *step 2 was
+a list and is now a tree*. A skill that can only rot is worse than no skill.
+
+Skills are advisory. Each step is verified against the live tree as it is
+walked, and an agent that finds the route has moved is the agent that amends
+it.
+
+The library is its own store, and `main` is a directory of skill files —
+`discord/find-a-direct-message-by-person/SKILL.md`, front matter and prose,
+readable by anything that reads skills. Candidates wait on a separate branch
+where nothing is checked out, so a route that has been seen once is remembered
+without being offered as advice. Nothing carries a date: the last commit to the
+file is when it was last verified, and a file that dated itself would be a
+second answer to a question git had already answered.
+
 ## Agents are public. Episodes are not.
 
 Git never forgets, so nothing sensitive may ever reach an object. The recorder
@@ -178,6 +245,18 @@ There is no field on a step for them, so there is nowhere for them to land.
 records real work over it, then reads back every object in the store —
 including packed, unreachable and unmerged ones — and goes looking. "We would
 have noticed" is not a safety property.
+
+A skill is held to a stricter line still, and for a different reason. An
+episode inherits a guarantee — it is written from results that already came
+through the service's value-egress point. A skill is written from names an
+agent read off the tree while it was working, which is where a person's name
+lives, and there is no egress point upstream of that. The protection is the
+design: a name seen once is stored as a salted digest, a name is written out
+only where a second derivation produced the same digest, and a value the run
+declared it was looking for is holed however often it recurs.
+`recorder_tests/test_nothing_derived_once_becomes_a_skill.py` puts a password,
+a person and a message where names go, then reads back every object in the
+skill store — including the branch where candidates wait — and goes looking.
 
 A filed issue leaves the machine, so it is held to the stricter line:
 `recorder_tests/test_nothing_sensitive_is_filed.py` seeds a password and a
