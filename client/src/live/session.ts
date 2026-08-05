@@ -28,6 +28,17 @@ import type {
 export const LIVE_ENDPOINT =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 
+/**
+ * Where an ephemeral token dials. A different endpoint on purpose: the
+ * constraints — model, system instruction, the one tool, both
+ * transcriptions — were locked into the token when the hub minted it, and
+ * this endpoint enforces them at connect. Proven live against Google on
+ * 2026-08-05 (segment 02's green leg): a hub-minted token opened a session
+ * here with nothing but the model name in the setup frame.
+ */
+export const CONSTRAINED_ENDPOINT =
+  "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained";
+
 /** What the orb is, to the voice that fronts it. */
 export const ORB_SYSTEM_INSTRUCTION =
   "You are the voice of this computer's assistant. Converse naturally and " +
@@ -207,7 +218,13 @@ export function geminiLiveProvider(
 ): RealtimeProvider {
   return {
     async connect(config: RealtimeConfig): Promise<RealtimeSession> {
-      const url = `${LIVE_ENDPOINT}?key=${encodeURIComponent(config.apiKey)}`;
+      // Token dials mint fresh per dial — a single-use token that opened one
+      // session has nothing left to open another with — so the URL is
+      // resolved inside dial(), not once out here.
+      const dialUrl = async (): Promise<string> =>
+        config.mintToken
+          ? `${CONSTRAINED_ENDPOINT}?access_token=${encodeURIComponent(await config.mintToken())}`
+          : `${LIVE_ENDPOINT}?key=${encodeURIComponent(config.apiKey)}`;
 
       let muted = true;
       /** True only when this side hung up. A server drop is not this. */
@@ -215,7 +232,7 @@ export function geminiLiveProvider(
       /** The socket that has completed setup, or undefined during a gap. */
       let current: SocketLike | undefined;
 
-      const setup = {
+      const fullSetup = {
         setup: {
           model: `models/${config.model}`,
           generationConfig: {
@@ -241,8 +258,15 @@ export function geminiLiveProvider(
         },
       };
 
-      const dial = (): Promise<void> =>
-        new Promise<void>((resolve, reject) => {
+      // A token dial repeats none of the constraints: they ride the token,
+      // minted server-side, and a second statement of them here would be a
+      // second place capability is described — drift between the two would
+      // surface as connect-time refusals a page cannot explain.
+      const setup = config.mintToken ? { setup: { model: `models/${config.model}` } } : fullSetup;
+
+      const dial = async (): Promise<void> => {
+        const url = await dialUrl();
+        return new Promise<void>((resolve, reject) => {
           const socket = socketFactory(url);
           if ("binaryType" in socket) socket.binaryType = "arraybuffer";
           let settled = false;
@@ -346,6 +370,7 @@ export function geminiLiveProvider(
             }
           });
         });
+      };
 
       /**
        * Resolving this skips whatever remains of the current backoff wait.

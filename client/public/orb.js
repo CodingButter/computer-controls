@@ -1,11 +1,12 @@
 // The orb page's browser half, served verbatim by `readUiAsset` and loaded by
 // `orb.html` as a module.
 //
-// This page is a face and nothing else. It holds no microphone: per issue #107
-// the ear chain — voice detection, the local Moonshine ear, the classifier —
-// lives in the hub process at the OS audio layer, so the privacy property is
-// enforced in one place and survives this tab being closed. What this file does
-// is render state as motion, show captions, and forward gestures.
+// This page is a face, and — since the voice moved to the client — on request
+// a mouth. The mouth is tap-to-talk only: the microphone opens on a press,
+// never on its own, and everything it captures dials Google directly with a
+// hub-minted single-use token (orb-mouth.js owns that lifecycle). With the
+// mouth closed this file is what it always was: render state as motion, show
+// captions, forward gestures.
 //
 // The seams above `init()` are exported and DOM-free so they can be tested
 // without a browser, the same way `app.js` splits its own decisions out.
@@ -136,6 +137,66 @@ function init() {
   };
 
   orb.addEventListener("click", () => void gesture("toggle"));
+
+  // The talk toggle: this device's own mouth. Loaded on first press so a
+  // page that is only ever a face never fetches the mouth at all. The mouth
+  // module owns the whole lifecycle; this wiring owns only the button state
+  // and where the mouth's words land on the page.
+  //
+  // Deliberately NOT gated on availability(): that verdict describes the
+  // hub's own voice, and the mouth does not need one — it needs the token
+  // mint, whose refusal arrives as its own complete sentence and is shown
+  // here verbatim. Ruling 5's principle (say why, don't present a dead
+  // control) is honored by the mint's sentence, not by hiding the button.
+  const talk = document.getElementById("talk");
+  let mouth = null;
+  let opening = false;
+  const setLive = (live) => {
+    talk.setAttribute("data-live", String(live));
+    talk.setAttribute("aria-pressed", String(live));
+    talk.textContent = live ? "Stop" : "Talk";
+  };
+  talk.addEventListener("click", async () => {
+    if (opening) return;
+    if (mouth) {
+      const closing = mouth;
+      mouth = null;
+      setLive(false);
+      await closing.close();
+      return;
+    }
+    opening = true;
+    try {
+      const { openMouth } = await import("./orb-mouth.js");
+      reason.hidden = true;
+      mouth = await openMouth({
+        onCaption: (text, speaker) => {
+          caption.textContent = text;
+          appendTurn(text, speaker === "user" ? "you" : "agent");
+        },
+        onState: (state) => {
+          if (ORB_STATES.includes(state)) setState(state);
+          if (state === "idle" && mouth) {
+            mouth = null;
+            setLive(false);
+          }
+        },
+        onReason: (text) => {
+          reason.textContent = text;
+          reason.hidden = false;
+        },
+      });
+      setLive(true);
+    } catch (error) {
+      // A refused mic and a keyless hub land here the same way: as a
+      // sentence the page shows, while everything else keeps working.
+      reason.textContent = error?.message ?? "The mouth could not be opened.";
+      reason.hidden = false;
+      setLive(false);
+    } finally {
+      opening = false;
+    }
+  });
 
   // Feature-detect WebGL. If the browser supports it, mount the shader sphere
   // and hide the DOM button. If not — or if the dynamic import fails for any

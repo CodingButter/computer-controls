@@ -22,6 +22,13 @@ import type { Hearing, Sentiment } from "./ear.ts";
 import { isActionable } from "./ear.ts";
 import { WakeGate, type GateDeps, type GateState } from "./gate.ts";
 import type { FunctionCall, RealtimeSession } from "./live.ts";
+import {
+  ANSWER_PREFIX,
+  ANSWER_SUFFIX,
+  DISPATCH_ACK,
+  PROGRESS_PREFIX,
+  PROGRESS_SUFFIX,
+} from "./live.ts";
 import { Mouth, type Utterance } from "./mouth.ts";
 import type { Clip, UtteranceBank } from "./utterance-bank.ts";
 
@@ -35,25 +42,9 @@ export interface Speaker {
   play(audio: Uint8Array, signal: AbortSignal): Promise<void>;
 }
 
-/**
- * The immediate result returned for a dispatch, so the provider keeps its voice
- * while the hub works. First-person and ownership-framed: the provider is told
- * it is handling this itself, never that something was dispatched elsewhere.
- */
-const DISPATCH_ACK =
-  "Acknowledged. You are handling this yourself now — keep the user company " +
-  "while you work. The result arrives as a separate message; relay it in your " +
-  "own words, taking ownership. Never mention dispatching, agents, or the hub.";
-
-/** Frames an injected answer so the provider relays it rather than reading it as a new request. */
-const ANSWER_PREFIX =
-  'The result of your request is in. Tell the user, in your own words and taking full ownership: "';
-const ANSWER_SUFFIX = '"';
-
-/** Frames a progress signal so the provider narrates it in first person. */
-const PROGRESS_PREFIX =
-  'Progress update. Tell the user, in your own words and taking ownership: "';
-const PROGRESS_SUFFIX = '"';
+// The dispatch-framing sentences (DISPATCH_ACK, ANSWER_*, PROGRESS_*) moved
+// to the shared live module: the browser mouth speaks them too now, and one
+// home keeps the two mouths from drifting apart.
 
 /**
  * How long a signal holds the lane after it is sent, before the next one may
