@@ -1,22 +1,26 @@
 /**
  * The proof-of-concept ear chain: enough ear to hold the seams open.
  *
- * The real tier-one ear — a local Moonshine transcriber — has not landed yet.
- * The proof of concept does not wait for it, because Jamie's ruling changed the
- * consent gesture: visiting the orb page IS the permission to listen, so the
- * gate is opened by the visit rather than by a wake phrase, and while the gate
- * is open the ear is never consulted. What this file supplies is the minimum
- * that keeps every interface honest in the meantime.
+ * The real tier-one ear — a local Moonshine transcriber — and the real Tier 0.5
+ * wake-word detector — openWakeWord configured for "Mastra" — have not landed
+ * yet. The proof of concept does not wait for them. What this file supplies is
+ * the minimum that keeps every interface honest in the meantime.
  *
- * The detector is real — a plain amplitude threshold, which is enough for the
- * gate's silence accounting. The ear is deliberately deaf: it transcribes
- * nothing, so the wake-word path CANNOT open the gate. That is not a gap, it is
- * the proof-of-concept's shape stated in code: the only way this gate opens is
- * the deliberate act of a person, and swapping in a real ear later widens
- * nothing silently.
+ * The VAD is real — a plain amplitude threshold, which is enough for the gate's
+ * silence accounting. The wake word and the ear are deliberately deaf: the name
+ * is never heard and nothing is transcribed, so the wake path CANNOT open the
+ * gate. That is not a gap, it is the proof-of-concept's shape stated in code:
+ * the only way this gate opens is the deliberate act of a person, and swapping
+ * in a real wake word and ear later widens nothing silently.
  */
 
-import type { AudioFrame, Classifier, LocalEar, VoiceActivityDetector } from "./ear.ts";
+import type {
+  AudioFrame,
+  Classifier,
+  LocalEar,
+  VoiceActivityDetector,
+  WakeWordDetector,
+} from "./ear.ts";
 import { createWakeWordClassifier } from "./ear.ts";
 
 /**
@@ -54,16 +58,47 @@ export const deafEar: LocalEar = {
   },
 };
 
+/**
+ * A wake-word detector that never hears the name, on purpose.
+ *
+ * A false negative on the wake word costs a repeated sentence; a false positive
+ * costs audio leaving the machine. So the safe placeholder never answers true:
+ * speech never reaches the ear from here, which is the closed direction. The real
+ * detector will run openWakeWord configured for "Mastra"; until it lands this
+ * keeps the seam honest.
+ */
+export const deafWakeWord: WakeWordDetector = {
+  heard(): boolean {
+    return false;
+  },
+  reset() {},
+};
+
+/**
+ * A wake-word detector that always hears the name — the test double for orbs
+ * that exercise the path past the wake tier. Production mounts the deaf word;
+ * tests that need the gate to open on speech mount this one so the wake tier
+ * stays transparent.
+ */
+export const alwaysWakeWord: WakeWordDetector = {
+  heard(): boolean {
+    return true;
+  },
+  reset() {},
+};
+
 export type PocEarChain = {
   vad: VoiceActivityDetector;
+  wakeWord: WakeWordDetector;
   ear: LocalEar;
   classifier: Classifier;
 };
 
-/** The chain the proof of concept mounts: real detector, deaf ear. */
+/** The chain the proof of concept mounts: real detector, deaf wake word, deaf ear. */
 export function pocEarChain(threshold?: number): PocEarChain {
   return {
     vad: createAmplitudeVad(threshold),
+    wakeWord: deafWakeWord,
     ear: deafEar,
     classifier: createWakeWordClassifier(),
   };

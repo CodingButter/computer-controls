@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createHubBrain } from "./brain.ts";
 import { createWakeWordClassifier, type AudioFrame, type LocalEar, type VoiceActivityDetector } from "./ear.ts";
+import { alwaysWakeWord } from "./ear-poc.ts";
 import type { RealtimeSession } from "./live.ts";
 import { Mouth } from "./mouth.ts";
 import { Orb, type OrbEvent, type Speaker } from "./orb.ts";
@@ -73,7 +74,7 @@ function build(options: { transcript?: string; answer?: string } = {}) {
   const vad = controllableVad();
   const ear: LocalEar = {
     languages: ["en"],
-    transcribe: async () => options.transcript ?? "computer open the browser",
+    transcribe: async () => options.transcript ?? "mastra open the browser",
   };
   const session = fakeSession();
   const played: string[] = [];
@@ -85,7 +86,7 @@ function build(options: { transcript?: string; answer?: string } = {}) {
   const ask = vi.fn(async (request: string) => options.answer ?? `did: ${request}`);
   const events: OrbEvent[] = [];
   const orb = new Orb({
-    gate: { vad, ear, classifier: createWakeWordClassifier() },
+    gate: { vad, ear, classifier: createWakeWordClassifier(), wakeWord: alwaysWakeWord },
     session,
     bank: bankHolding([
       { id: "acknowledge-0", class: "acknowledge", audio: new TextEncoder().encode("on it"), durationMs: 400 },
@@ -161,6 +162,7 @@ describe("test_actionable_requests_route_to_the_pack_brain_as_one_function_call"
     const failing = new Orb({
       gate: {
         vad: controllableVad(),
+        wakeWord: alwaysWakeWord,
         ear: { languages: ["en"], transcribe: async () => "" },
         classifier: createWakeWordClassifier(),
       },
@@ -240,7 +242,7 @@ describe("test_a_signal_injected_as_text_is_spoken_by_the_orb", () => {
 
 describe("test_a_filler_clip_plays_from_cache_and_never_from_a_live_synth_call", () => {
   it("plays the acknowledgement while the request is still in flight", async () => {
-    const { orb, vad, played } = build({ transcript: "computer open the browser" });
+    const { orb, vad, played } = build({ transcript: "mastra open the browser" });
 
     await say(orb, vad);
     await tick();
@@ -249,7 +251,7 @@ describe("test_a_filler_clip_plays_from_cache_and_never_from_a_live_synth_call",
   });
 
   it("says nothing at all before small talk", async () => {
-    const { orb, vad, played } = build({ transcript: "computer nice to see you" });
+    const { orb, vad, played } = build({ transcript: "mastra nice to see you" });
 
     await say(orb, vad);
     await tick();
@@ -258,7 +260,7 @@ describe("test_a_filler_clip_plays_from_cache_and_never_from_a_live_synth_call",
   });
 
   it("covers a reconnect gap with a thinking clip instead of dead air", async () => {
-    const { orb, session, vad, played } = build({ transcript: "computer open the browser" });
+    const { orb, session, vad, played } = build({ transcript: "mastra open the browser" });
     session.connected = false;
 
     await say(orb, vad);
@@ -284,13 +286,13 @@ describe("the orb's own state, as the faces see it", () => {
   });
 
   it("captions the user's own words from the local transcript", async () => {
-    const { orb, vad, events } = build({ transcript: "computer open the browser" });
+    const { orb, vad, events } = build({ transcript: "mastra open the browser" });
 
     await say(orb, vad);
 
     expect(events).toContainEqual({
       type: "caption",
-      text: "computer open the browser",
+      text: "mastra open the browser",
       speaker: "user",
     });
   });
@@ -301,6 +303,7 @@ describe("the orb's own state, as the faces see it", () => {
     const orb = new Orb({
       gate: {
         vad: controllableVad(),
+        wakeWord: alwaysWakeWord,
         ear: { languages: ["en"], transcribe: async () => "" },
         classifier: createWakeWordClassifier(),
       },

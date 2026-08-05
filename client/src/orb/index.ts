@@ -19,7 +19,7 @@ import { Hono } from "hono";
 import type { AgentTurn } from "../chat.ts";
 import { createHubBrain } from "./brain.ts";
 import { isRefusal, resolveOrbCredential } from "./credentials.ts";
-import type { Classifier, LocalEar, VoiceActivityDetector } from "./ear.ts";
+import type { Classifier, LocalEar, VoiceActivityDetector, WakeWordDetector } from "./ear.ts";
 import { realtimeConfig, type RealtimeProvider } from "./live.ts";
 import { Mouth } from "./mouth.ts";
 import { Orb, type OrbEvent, type Speaker } from "./orb.ts";
@@ -39,13 +39,14 @@ export { OrbFaceSource, chooseFaceSource, toStateEvent } from "./face-source.ts"
 
 export type { OrbEvent, OrbState, Speaker, HubBrain } from "./orb.ts";
 export type { OrbFaceDeps, LiveOrbMount } from "./face-source.ts";
-export type { AudioFrame, LocalEar, VoiceActivityDetector, Classifier, IntentClass, Hearing } from "./ear.ts";
+export type { AudioFrame, LocalEar, VoiceActivityDetector, WakeWordDetector, Classifier, IntentClass, Hearing } from "./ear.ts";
 export type { RealtimeProvider, RealtimeSession, FunctionCall } from "./live.ts";
 export type { Clip, ClipStore, ClipSynthesizer } from "./utterance-bank.ts";
 
 /** The parts of the ear chain a machine has to supply for the orb to run. */
 export type EarChain = {
   vad: VoiceActivityDetector;
+  wakeWord: WakeWordDetector;
   ear: LocalEar;
   classifier: Classifier;
 };
@@ -60,14 +61,15 @@ export type OrbMountOptions = {
   /** Absent until OS-level capture lands with the widget work. */
   earChain?: EarChain;
   threadId?: () => string | undefined;
-  /** Overrides the gate's quiet period. The PoC holds it open for a sitting. */
+  /** Overrides the gate's quiet period (how long it stays open after speech ends). */
   quietPeriodMs?: number;
   /**
    * Told how many faces are watching, every time the number changes.
    *
-   * This is the proof-of-concept's consent seam: a face arriving is the
-   * deliberate act that opens the microphone, and the last face leaving is
-   * what closes it. The caller wires the microphone; this lane only counts.
+   * This is the capture-lifecycle seam: a face arriving is what starts local
+   * microphone capture, and the last face leaving is what stops it. The gate
+   * itself is not opened here — that is the wake word's job. The caller wires
+   * the microphone; this lane only counts.
    */
   onFaceCount?: (count: number) => void;
 };
@@ -80,8 +82,8 @@ export type OrbMount = {
   /**
    * Watch the orb's event stream. Present only when the orb is live.
    *
-   * Each subscription counts as a face for `onFaceCount` — the consent seam
-   * that opens and closes the microphone — so the face source proxies each
+   * Each subscription counts as a face for `onFaceCount` — the capture-lifecycle
+   * seam that opens and closes the microphone — so the face source proxies each
    * face's subscribe through this rather than holding a permanent listener,
    * which would keep the machine listening after the last face left.
    */

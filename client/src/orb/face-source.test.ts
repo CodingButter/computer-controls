@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Gesture, StateEvent } from "../events/types.ts";
 import { ScriptedEventSource } from "../events/source.ts";
 import { createWakeWordClassifier, type AudioFrame, type LocalEar, type VoiceActivityDetector } from "./ear.ts";
+import { alwaysWakeWord } from "./ear-poc.ts";
 import type { RealtimeSession } from "./live.ts";
 import { Mouth } from "./mouth.ts";
 import { Orb, type OrbEvent, type Speaker } from "./orb.ts";
@@ -261,7 +262,7 @@ function buildLiveOrb(options: { transcript?: string } = {}) {
   const vad = controllableVad();
   const ear: LocalEar = {
     languages: ["en"],
-    transcribe: async () => options.transcript ?? "computer open the browser",
+    transcribe: async () => options.transcript ?? "mastra open the browser",
   };
   const session = fakeSession();
   const played: string[] = [];
@@ -273,7 +274,7 @@ function buildLiveOrb(options: { transcript?: string } = {}) {
   const ask = vi.fn(async (request: string) => `did: ${request}`);
 
   const orb = new Orb({
-    gate: { vad, ear, classifier: createWakeWordClassifier() },
+    gate: { vad, ear, classifier: createWakeWordClassifier(), wakeWord: alwaysWakeWord },
     session,
     bank: bankHolding([
       { id: "acknowledge-0", class: "acknowledge", audio: new TextEncoder().encode("on it"), durationMs: 400 },
@@ -327,7 +328,7 @@ describe("OrbFaceSource over a real orb", () => {
     await tick();
 
     // The wake word transcript crossed as a caption — text intact, speaker gone.
-    expect(received).toContainEqual({ type: "caption", text: "computer open the browser" });
+    expect(received).toContainEqual({ type: "caption", text: "mastra open the browser" });
 
     // closeGate fires onQuiet, which emits a mood event alongside the idle
     // state. The mood must produce no frame — only idle arrives.

@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createWakeWordClassifier, type AudioFrame, type LocalEar, type VoiceActivityDetector } from "./ear.ts";
+import {
+  createWakeWordClassifier,
+  type AudioFrame,
+  type LocalEar,
+  type VoiceActivityDetector,
+  type WakeWordDetector,
+} from "./ear.ts";
 import { WakeGate } from "./gate.ts";
 
 const SAMPLE_RATE = 16_000;
@@ -31,17 +37,38 @@ function earHearing(transcript: string, languages: readonly string[] = ["en"]): 
   return { languages, transcribe: vi.fn(async () => transcript) };
 }
 
-function build(ear: LocalEar, options: { quietPeriodMs?: number } = {}) {
+/**
+ * A wake-word detector the test drives directly.
+ *
+ * Defaults to hearing the name, so existing open-path tests pass without each
+ * caller wiring it; a test that wants speech-without-the-name flips wakeHeard.
+ */
+function controllableWakeWord(): WakeWordDetector & { wakeHeard: boolean } {
+  return {
+    wakeHeard: true,
+    heard(this: { wakeHeard: boolean }) {
+      return this.wakeHeard;
+    },
+    reset: vi.fn(),
+  };
+}
+
+function build(
+  ear: LocalEar,
+  options: { quietPeriodMs?: number; wakeWord?: WakeWordDetector } = {},
+) {
   const vad = controllableVad();
+  const wakeWord = options.wakeWord ?? controllableWakeWord();
   const events = { onOpen: vi.fn(), onIdle: vi.fn(), onForward: vi.fn() };
   const gate = new WakeGate({
     vad,
+    wakeWord,
     ear,
     classifier: createWakeWordClassifier(),
     events,
     ...(options.quietPeriodMs === undefined ? {} : { quietPeriodMs: options.quietPeriodMs }),
   });
-  return { gate, events, vad };
+  return { gate, events, vad, wakeWord };
 }
 
 /** Speech frames, then the silence that ends an utterance and triggers the ear. */
@@ -71,7 +98,7 @@ describe("test_idle_mode_sends_no_audio_off_the_machine", () => {
   });
 
   it("never troubles the ear when the room is simply silent", async () => {
-    const ear = earHearing("computer open the browser");
+    const ear = earHearing("mastra open the browser");
     const { gate, events, vad } = build(ear);
 
     vad.speaking = false;
@@ -99,7 +126,7 @@ describe("test_idle_mode_sends_no_audio_off_the_machine", () => {
   });
 
   it("drops an endlessly talking room instead of buffering it or transcribing it", async () => {
-    const ear = earHearing("computer open the browser");
+    const ear = earHearing("mastra open the browser");
     const { gate, events, vad } = build(ear);
 
     // 200 frames of unbroken speech is 20s — past the ceiling, and never ended
@@ -125,7 +152,7 @@ describe("test_idle_mode_sends_no_audio_off_the_machine", () => {
 
 describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
   it("opens when the ear hears the assistant addressed", async () => {
-    const ear = earHearing("computer open the browser");
+    const ear = earHearing("mastra open the browser");
     const { gate, events, vad } = build(ear);
 
     await say(gate, vad);
@@ -138,7 +165,7 @@ describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
   });
 
   it("forwards audio only after the ear said yes, never before", async () => {
-    const ear = earHearing("computer what time is it");
+    const ear = earHearing("mastra what time is it");
     const vad = controllableVad();
     // Ordering, not counting, is the property: once the gate is open, silence
     // frames forward too, so the honest assertion is that nothing was forwarded
@@ -146,6 +173,7 @@ describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
     const log: ("open" | "forward")[] = [];
     const gate = new WakeGate({
       vad,
+      wakeWord: controllableWakeWord(),
       ear,
       classifier: createWakeWordClassifier(),
       events: {
@@ -175,7 +203,7 @@ describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
   });
 
   it("classifies a bare wake word apart from a request", async () => {
-    const ear = earHearing("computer");
+    const ear = earHearing("mastra");
     const { gate, events, vad } = build(ear);
 
     await say(gate, vad);
@@ -185,7 +213,7 @@ describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
   });
 
   it("drops back to idle after the quiet period and stops forwarding", async () => {
-    const ear = earHearing("computer open the browser");
+    const ear = earHearing("mastra open the browser");
     const { gate, events, vad } = build(ear, { quietPeriodMs: 300 });
 
     await say(gate, vad);
@@ -204,7 +232,7 @@ describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
   });
 
   it("does not re-decide mid-sentence once it has opened", async () => {
-    const ear = earHearing("computer open the browser");
+    const ear = earHearing("mastra open the browser");
     const { gate, events, vad } = build(ear);
 
     await say(gate, vad);
@@ -220,6 +248,77 @@ describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
     expect(ear.transcribe).not.toHaveBeenCalled();
   });
 
+  it("carries the licensed languages of whatever ear is installed", () => {
+    const { gate } = build(earHearing("", ["en"]));
+    expect(gate.languages).toEqual(["en"]);
+  });
+});
+
+describe("test_speech_that_is_not_the_name_stays_home", () => {
+  it("never reaches the ear when speech does not contain the wake word", async () => {
+    const ear = earHearing("what a nice afternoon it is");
+    const wakeWord = controllableWakeWord();
+    wakeWord.wakeHeard = false;
+    const { gate, events, vad } = build(ear, { wakeWord });
+
+    await say(gate, vad);
+
+    // The wake word was checked but answered no, so the ear was never consulted
+    // and nothing left the machine.
+    expect(ear.transcribe).not.toHaveBeenCalled();
+    expect(events.onForward).not.toHaveBeenCalled();
+    expect(events.onOpen).not.toHaveBeenCalled();
+    expect(gate.state).toBe("idle");
+  });
+});
+
+describe("test_the_name_opens_the_gate", () => {
+  it("opens the gate when the name is heard and the speech is addressed to us", async () => {
+    const ear = earHearing("mastra what time is it");
+    const { gate, events, vad } = build(ear);
+
+    await say(gate, vad);
+
+    expect(events.onOpen).toHaveBeenCalledWith(
+      expect.objectContaining({ addressed: true, intent: "question" }),
+    );
+    expect(gate.isOpen).toBe(true);
+
+    // Frames forward while the gate is open.
+    const forwardsBefore = events.onForward.mock.calls.length;
+    vad.speaking = true;
+    await gate.push(frame());
+    expect(events.onForward.mock.calls.length).toBeGreaterThan(forwardsBefore);
+  });
+});
+
+describe("test_talking_about_mastra_is_not_talking_to_mastra", () => {
+  it("stays closed for talk about Mastra, opens for talk to Mastra", async () => {
+    const transcripts = ["i was showing caleb how mastra works", "mastra what time is it"];
+    let call = 0;
+    const ear: LocalEar = {
+      languages: ["en"],
+      transcribe: vi.fn(async () => transcripts[call++] ?? ""),
+    };
+    const { gate, events, vad } = build(ear);
+
+    // First utterance: talking ABOUT Mastra. The name appears mid-sentence, not
+    // as a vocative at the start, so the classifier does not count it as addressed.
+    await say(gate, vad);
+    expect(ear.transcribe).toHaveBeenCalledTimes(1);
+    expect(events.onOpen).not.toHaveBeenCalled();
+    expect(gate.isOpen).toBe(false);
+
+    // Second utterance: talking TO Mastra. The name leads, as a vocative.
+    await say(gate, vad);
+    expect(events.onOpen).toHaveBeenCalledWith(
+      expect.objectContaining({ addressed: true, intent: "question" }),
+    );
+    expect(gate.isOpen).toBe(true);
+  });
+});
+
+describe("test_a_tap_still_opens_the_gate_by_hand", () => {
   it("opens by hand when a person taps the orb, which is not idle by definition", () => {
     const { gate, events } = build(earHearing(""));
 
@@ -229,10 +328,5 @@ describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
     expect(events.onOpen).toHaveBeenCalledWith(
       expect.objectContaining({ addressed: true, transcript: "" }),
     );
-  });
-
-  it("carries the licensed languages of whatever ear is installed", () => {
-    const { gate } = build(earHearing("", ["en"]));
-    expect(gate.languages).toEqual(["en"]);
   });
 });

@@ -24,6 +24,7 @@ import type {
   Hearing,
   LocalEar,
   VoiceActivityDetector,
+  WakeWordDetector,
 } from "./ear.ts";
 import { DEFAULT_SENTIMENT } from "./ear.ts";
 
@@ -72,6 +73,7 @@ export type GateEvents = {
 
 export type GateDeps = {
   vad: VoiceActivityDetector;
+  wakeWord: WakeWordDetector;
   ear: LocalEar;
   classifier: Classifier;
   events: GateEvents;
@@ -114,6 +116,7 @@ export class WakeGate {
   #hearing: Promise<void> = Promise.resolve();
 
   readonly #vad: VoiceActivityDetector;
+  readonly #wakeWord: WakeWordDetector;
   readonly #ear: LocalEar;
   readonly #classifier: Classifier;
   readonly #events: GateEvents;
@@ -122,6 +125,7 @@ export class WakeGate {
 
   constructor(deps: GateDeps) {
     this.#vad = deps.vad;
+    this.#wakeWord = deps.wakeWord;
     this.#ear = deps.ear;
     this.#classifier = deps.classifier;
     this.#events = deps.events;
@@ -179,13 +183,18 @@ export class WakeGate {
   }
 
   /**
-   * Ask the cheap ear about a buffered utterance, and open only on a yes.
+   * Ask the wake word and the cheap ear about a buffered utterance, and open only
+   * on a yes from both.
    *
-   * A transcription failure is a closed gate. The alternative — opening when the
-   * ear could not answer — would turn every crash in a small local model into
-   * audio on the network, which inverts the point of having the model.
+   * The wake word is checked first because it is cheaper than the ear: speech
+   * without the name never reaches transcription. A transcription failure is a
+   * closed gate. The alternative — opening when the ear could not answer — would
+   * turn every crash in a small local model into audio on the network, which
+   * inverts the point of having the model.
    */
   async #consider(utterance: AudioFrame): Promise<void> {
+    if (!this.#wakeWord.heard(utterance)) return;
+
     let transcript: string;
     try {
       transcript = await this.#ear.transcribe(utterance);
@@ -208,6 +217,7 @@ export class WakeGate {
     this.#state = "idle";
     this.#resetBuffer();
     this.#vad.reset();
+    this.#wakeWord.reset();
     this.#events.onIdle();
   }
 
@@ -237,6 +247,7 @@ export class WakeGate {
     this.#resetBuffer();
     this.#state = "idle";
     this.#vad.reset();
+    this.#wakeWord.reset();
   }
 
   #resetBuffer(): void {

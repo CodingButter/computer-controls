@@ -42,6 +42,22 @@ export interface VoiceActivityDetector {
 }
 
 /**
+ * Tier 0.5. Decides whether a buffered utterance contains the wake word.
+ *
+ * Cheaper than the ear, so it runs first: speech that is not the name never
+ * reaches transcription. The name alone never opens the gate — the classifier
+ * still decides addressed — but speech without the name never even asks. A real
+ * implementation runs openWakeWord configured for "Mastra"; the proof-of-concept
+ * answers false, which is the closed direction and therefore the safe one.
+ */
+export interface WakeWordDetector {
+  /** True when the wake word was heard in this utterance. */
+  heard(utterance: AudioFrame): boolean;
+  /** Forget any cross-frame state. Called whenever the gate resets. */
+  reset(): void;
+}
+
+/**
  * Tier 1. Turns a completed utterance into text, locally.
  *
  * `languages` is declared rather than assumed so the licence constraint is
@@ -123,7 +139,7 @@ export interface Classifier {
  * false positive costs audio leaving the machine, which is the one failure this
  * design exists to prevent.
  */
-export const WAKE_WORDS: readonly string[] = ["computer", "hey computer", "orb"];
+export const WAKE_WORDS: readonly string[] = ["mastra", "hey mastra"];
 
 const COMMAND_VERBS = [
   "open",
