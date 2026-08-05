@@ -64,6 +64,13 @@ export type AppDeps = {
    * first device on the list.
    */
   devices?: Hono;
+  /**
+   * The read and write door onto the user's desktop configuration, which the
+   * Settings page's three depths are lenses over. Optional like the rest so a
+   * test that is not about settings can boot without one; the entry module
+   * always supplies it.
+   */
+  desktopConfig?: Hono;
 };
 
 /**
@@ -121,6 +128,7 @@ export function buildApp(deps: AppDeps): Hono {
   if (deps.permissions) app.route("/", deps.permissions);
   if (deps.audit) app.route("/", deps.audit);
   if (deps.devices) app.route("/", deps.devices);
+  if (deps.desktopConfig) app.route("/", deps.desktopConfig);
 
   app.get("*", (c) => {
     // The hub's own static root answers first — chat, the orb, the vendored

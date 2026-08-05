@@ -12,6 +12,7 @@ import { createProviderAuth } from "./auth/index.ts";
 import { cureChromiumApps, type CureReport } from "./curing/curing.ts";
 import { resolveClientConfig } from "./config.ts";
 import { buildDevicesApp } from "./devices/index.ts";
+import { buildDesktopConfigApp } from "./desktop-config/routes.ts";
 import { attachEventSocket } from "./events/index.ts";
 import { prepareHub } from "./hub.ts";
 import { wrapTurnWithPermissionAwareness } from "./permissions/aware-turn.ts";
@@ -177,6 +178,12 @@ const app = buildApp({
   permissions: buildPermissionsApp(permissionRegistry, appIconSource, cureNow),
   audit: buildAuditApp(defaultAuditPath()),
   devices,
+  /**
+   * No path is passed, so it edits the file the daemon actually reads. The hub
+   * runs as the user and rewrites the user's own file; nothing here reaches the
+   * daemon socket, which remains unable to author its own ceiling.
+   */
+  desktopConfig: buildDesktopConfigApp(),
 });
 
 // Cure at boot, once, and never fatally: a launcher that could not be
