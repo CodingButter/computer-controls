@@ -17,6 +17,8 @@ export type DesktopEntryApp = {
   desktopId: string;
   /** The Exec= line, kept for Chromium detection when curing arrives. */
   exec?: string;
+  /** The Icon= value — a theme icon name or an absolute path, per the spec. */
+  icon?: string;
 };
 
 export const SYSTEM_APPLICATIONS_DIR = "/usr/share/applications";
@@ -63,10 +65,13 @@ export function scanDesktopEntries(dirs: string[]): DesktopEntryApp[] {
  * permission toggle for an application the user has never seen in a menu
  * would be noise pretending to be choice.
  */
-function parseDesktopEntry(text: string): { name: string; exec?: string } | undefined {
+function parseDesktopEntry(
+  text: string,
+): { name: string; exec?: string; icon?: string } | undefined {
   let inEntry = false;
   let name: string | undefined;
   let exec: string | undefined;
+  let icon: string | undefined;
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
     if (trimmed.startsWith("[")) {
@@ -76,8 +81,9 @@ function parseDesktopEntry(text: string): { name: string; exec?: string } | unde
     if (!inEntry) continue;
     if (trimmed.startsWith("Name=") && name === undefined) name = trimmed.slice(5).trim();
     else if (trimmed.startsWith("Exec=") && exec === undefined) exec = trimmed.slice(5).trim();
+    else if (trimmed.startsWith("Icon=") && icon === undefined) icon = trimmed.slice(5).trim();
     else if (trimmed === "NoDisplay=true" || trimmed === "Hidden=true") return undefined;
   }
   if (!name) return undefined;
-  return { name, ...(exec ? { exec } : {}) };
+  return { name, ...(exec ? { exec } : {}), ...(icon ? { icon } : {}) };
 }

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 
+import type { IconSource } from "./icons.ts";
 import { MalformedConfigError, type PermissionRegistry } from "./registry.ts";
 
 /**
@@ -13,8 +14,20 @@ import { MalformedConfigError, type PermissionRegistry } from "./registry.ts";
  * consent design exists to prevent, so the route that changes things only
  * knows how to edit a file the user already owns.
  */
-export function buildPermissionsApp(registry: PermissionRegistry): Hono {
+export function buildPermissionsApp(registry: PermissionRegistry, iconFor?: IconSource): Hono {
   const app = new Hono();
+
+  // The page's row icons, resolved from the machine's own icon themes. The
+  // parameter is a desktop-file id matched against entries the hub scanned
+  // itself — it never becomes a filesystem path. A missing icon is a 404 the
+  // page answers with an initial-letter avatar, not an error.
+  app.get("/api/permissions/icon/:desktopId", (c) => {
+    const icon = iconFor?.(c.req.param("desktopId"));
+    if (!icon) return c.text("no icon", 404);
+    c.header("content-type", icon.contentType);
+    c.header("cache-control", "max-age=3600");
+    return c.body(new Uint8Array(icon.body));
+  });
 
   app.get("/api/permissions", async (c) => {
     try {

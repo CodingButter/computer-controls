@@ -56,6 +56,9 @@ test("the design chrome is present: heading, mode control, search, banner, detai
   // The detail panel opens on the first running row by default — Discord —
   // showing real facts, not invented ones.
   expect(html).toContain("On the accessibility bus");
+  // Rows with a launcher entry ask the hub for the real icon; rows without
+  // one fall back to the initial avatar.
+  expect(html).toContain('src="/api/permissions/icon/discord.desktop"');
 });
 
 test("open mode explains the transition the first toggle will make", () => {

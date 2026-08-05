@@ -145,3 +145,29 @@ test("a PUT without a boolean is a 400, not a guess", async () => {
   }
   expect(fs.existsSync(configPath)).toBe(false);
 });
+
+test("the icon route streams a resolved icon and 404s honestly otherwise", async () => {
+  const withIcons = buildPermissionsApp(
+    createPermissionRegistry({
+      configPath,
+      readCensus: async () => census,
+      scanInstalled: () => installed,
+    }),
+    (desktopId) =>
+      desktopId === "discord.desktop"
+        ? { body: Buffer.from("PNGBYTES"), contentType: "image/png" }
+        : undefined,
+  );
+
+  const hit = await withIcons.request("/api/permissions/icon/discord.desktop");
+  expect(hit.status).toBe(200);
+  expect(hit.headers.get("content-type")).toBe("image/png");
+  expect(await hit.text()).toBe("PNGBYTES");
+
+  const miss = await withIcons.request("/api/permissions/icon/gimp.desktop");
+  expect(miss.status).toBe(404);
+
+  // Without an icon source at all, the route still answers rather than throws.
+  const none = await app().request("/api/permissions/icon/discord.desktop");
+  expect(none.status).toBe(404);
+});

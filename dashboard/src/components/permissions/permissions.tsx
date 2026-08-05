@@ -16,9 +16,29 @@ import { cn } from "@/lib/utils";
  * what the design looks like.
  */
 
-/** The design's leading icon slot. Real launcher icons are a follow-up; until
- * then the slot holds the application's initial so the row reads the same. */
-function AppAvatar(props: { name: string; className?: string }) {
+/**
+ * The design's leading icon slot: the application's real launcher icon,
+ * served by the hub from the machine's own icon themes. An app with no
+ * launcher entry — or whose icon the hub cannot find — falls back to its
+ * initial, so the row always reads the same shape.
+ */
+function AppAvatar(props: { name: string; desktopId?: string; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  const src = props.desktopId
+    ? `/api/permissions/icon/${encodeURIComponent(props.desktopId)}`
+    : undefined;
+  if (src && !failed) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- same-origin runtime asset; next/image has no place in a static export
+      <img
+        src={src}
+        alt=""
+        aria-hidden
+        onError={() => setFailed(true)}
+        className={cn("h-8 w-8 shrink-0 rounded-lg object-contain", props.className)}
+      />
+    );
+  }
   return (
     <span
       aria-hidden
@@ -80,7 +100,7 @@ function DetailPanel(props: { row: PermissionRow; onToggle: (app: string, permit
   return (
     <Card className="h-fit w-72 shrink-0">
       <CardHeader className="flex-row items-center gap-3">
-        <AppAvatar name={row.name} className="h-10 w-10 text-base" />
+        <AppAvatar name={row.name} desktopId={row.desktopId} className="h-10 w-10 text-base" />
         <CardTitle className="text-lg text-foreground">{row.name}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -189,7 +209,7 @@ export function PermissionsPanel(props: {
                     : "border-border hover:border-accent/30",
                 )}
               >
-                <AppAvatar name={row.name} />
+                <AppAvatar name={row.name} desktopId={row.desktopId} />
                 <span className="flex-1 truncate font-medium">{row.name}</span>
                 <Switch
                   checked={row.permitted}

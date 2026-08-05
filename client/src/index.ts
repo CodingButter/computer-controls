@@ -17,6 +17,7 @@ import {
   scanDesktopEntries,
   userApplicationsDir,
 } from "./permissions/desktop-entries.ts";
+import { createIconSource, defaultIconDirs } from "./permissions/icons.ts";
 import { createPermissionRegistry } from "./permissions/registry.ts";
 import { buildPermissionsApp } from "./permissions/routes.ts";
 import { commandSpeaker, startMicrophone, type Microphone } from "./orb/audio-host.ts";
@@ -45,12 +46,14 @@ const hub = await prepareHub(config);
  * yet" context. brain, app and hub stay untouched — the signal is a wrapper,
  * not a rewrite.
  */
+const scanInstalled = () =>
+  scanDesktopEntries([SYSTEM_APPLICATIONS_DIR, userApplicationsDir(os.homedir())]);
 const permissionRegistry = createPermissionRegistry({
   configPath: defaultConfigPath(),
   readCensus: () => readCensus(findDaemonSocket()),
-  scanInstalled: () =>
-    scanDesktopEntries([SYSTEM_APPLICATIONS_DIR, userApplicationsDir(os.homedir())]),
+  scanInstalled,
 });
+const appIconSource = createIconSource(scanInstalled, defaultIconDirs(os.homedir()));
 const chat = wrapTurnWithPermissionAwareness(hub.chat, permissionRegistry);
 
 /**
@@ -151,7 +154,7 @@ const app = buildApp({
   auth: providerAuth.app,
   voice,
   orb,
-  permissions: buildPermissionsApp(permissionRegistry),
+  permissions: buildPermissionsApp(permissionRegistry, appIconSource),
 });
 
 let announce: (url: string) => void;
