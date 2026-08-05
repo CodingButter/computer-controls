@@ -100,7 +100,10 @@ export async function openMouth({ onCaption, onState, onReason }) {
   }
 
   const closers = [() => stream.getTracks().forEach((track) => track.stop())];
+  const pendingAsks = new Set();
   const close = async () => {
+    // Stale ids must not match a late answer on some future mouth's lane.
+    pendingAsks.clear();
     for (const closer of closers.splice(0).reverse()) {
       try {
         await closer();
@@ -133,6 +136,15 @@ export async function openMouth({ onCaption, onState, onReason }) {
     // A closed tab must not deafen the widget until the socket-death rule
     // notices: say voice_close on the way out when there is time to.
     addEventListener("pagehide", hangUp, { once: true });
+    // And the other direction: a lane that dies takes the mouth with it.
+    // A session without the lane could still chat with the model but could
+    // never reach the hub — a mouth that promises answers it cannot fetch.
+    lane.addEventListener("close", () => {
+      if (closers.length) {
+        onReason?.("The hub's event lane closed, so the mouth closed with it.");
+        void close();
+      }
+    });
 
     // The audio graph. Two contexts because the two directions run at the
     // rates the protocol names: the contexts do the resampling, which keeps
@@ -179,7 +191,6 @@ export async function openMouth({ onCaption, onState, onReason }) {
     // every redial — mints fresh, because the tokens are single-use.
     const first = await mintToken();
     let banked = first.token;
-    const pendingAsks = new Set();
 
     const session = await geminiLiveProvider().connect(
       realtimeConfig({
@@ -206,6 +217,16 @@ export async function openMouth({ onCaption, onState, onReason }) {
             }
           },
           onFunctionCall: (call) => {
+            // The lane is checked BEFORE the acknowledgement: DISPATCH_ACK
+            // promises the model a result is coming, and a promise made over
+            // a dead lane is an answer the user waits for forever.
+            if (lane.readyState !== WebSocket.OPEN) {
+              void session.sendFunctionResult(
+                call.id,
+                "The hub could not be reached, so nothing was done. Tell the user that plainly.",
+              );
+              return;
+            }
             void session.sendFunctionResult(call.id, DISPATCH_ACK);
             pendingAsks.add(call.id);
             lane.send(

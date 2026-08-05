@@ -153,6 +153,26 @@ describe("what the shipped mouth source promises", () => {
     expect(mouth).toContain('"pagehide"');
   });
 
+  it("notices the lane dying and closes with it", () => {
+    expect(mouth).toContain('lane.addEventListener("close"');
+  });
+
+  it("checks the lane before promising the model an answer", () => {
+    // DISPATCH_ACK tells the model a result is coming; the readyState check
+    // must come first in the function-call handler, or a dead lane turns
+    // every ask into an answer the user waits for forever.
+    const handler = mouth.slice(mouth.indexOf("onFunctionCall"), mouth.indexOf("onRefusal"));
+    const ack = handler.indexOf("sendFunctionResult(call.id, DISPATCH_ACK)");
+    expect(handler.length).toBeGreaterThan(100);
+    expect(ack).toBeGreaterThan(-1);
+    expect(handler.indexOf("readyState")).toBeGreaterThan(-1);
+    expect(handler.indexOf("readyState")).toBeLessThan(ack);
+  });
+
+  it("forgets pending asks on close, so a stale id cannot match late", () => {
+    expect(mouth).toContain("pendingAsks.clear()");
+  });
+
   it("is wired into the page the browser actually loads", () => {
     expect(html).toContain('id="talk"');
     expect(page).toContain('getElementById("talk")');

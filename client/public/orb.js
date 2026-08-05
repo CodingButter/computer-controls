@@ -142,6 +142,12 @@ function init() {
   // page that is only ever a face never fetches the mouth at all. The mouth
   // module owns the whole lifecycle; this wiring owns only the button state
   // and where the mouth's words land on the page.
+  //
+  // Deliberately NOT gated on availability(): that verdict describes the
+  // hub's own voice, and the mouth does not need one — it needs the token
+  // mint, whose refusal arrives as its own complete sentence and is shown
+  // here verbatim. Ruling 5's principle (say why, don't present a dead
+  // control) is honored by the mint's sentence, not by hiding the button.
   const talk = document.getElementById("talk");
   let mouth = null;
   let opening = false;
