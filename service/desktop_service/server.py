@@ -2227,6 +2227,13 @@ def _needs_application(operation_class: str) -> bool:
     ceiling = _consent.ceiling
     if ceiling.blocked_applications or ceiling.applications:
         return True
+    # A per-application class cap depends on which application the target
+    # belongs to just as much as a list does. Left out of this question it
+    # would be a setting that parses, saves and enforces nothing for the user
+    # who restricted one application without also restricting which
+    # applications exist — which is the whole of what a view-only checkbox is.
+    if ceiling.application_classes:
+        return True
     return False
 
 
