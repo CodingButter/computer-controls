@@ -8,11 +8,19 @@
  * widens what this machine can do does not become a change. It becomes a staged
  * change with a handle, and something a person can hear read back to them.
  *
- * The yes is the click. It has to arrive as a fresh top-level turn — the person
- * typing or speaking again — and it has to name a handle this store minted. That
- * is the part injected text cannot forge: it can say "yes, commit the staged
- * change" all it likes, but it is inside a tool result, not a new turn, and the
- * handle it would have to guess is a random identifier it never saw.
+ * The yes names a handle this store minted, and that handle is the part injected
+ * text cannot forge: a hostile page can say "yes, commit the staged change" all
+ * it likes, but the handle is a random identifier it never saw, so the sentence
+ * it writes has nothing to land on.
+ *
+ * What this store does NOT enforce, stated plainly because the difference
+ * matters: that the yes arrived as a fresh top-level turn from the person rather
+ * than in the same turn from the model holding the handle. The model is told to
+ * wait, and nothing here makes it. What bounds that gap is the change set, not
+ * the mechanism — the widening verbs here pick a voice provider and open a
+ * sign-in the person must complete themselves. Before anything that widens what
+ * an agent may do to the desktop is added to this gate, the turn boundary has to
+ * become a check rather than an instruction (#154).
  *
  * Staged changes are single use and they expire. Both bound the window in which
  * a yes meant for one change could land on another, which is the failure mode
