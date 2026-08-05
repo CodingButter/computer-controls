@@ -60,8 +60,13 @@ test("the sign-in surface serves through the booted hub, not just its own module
   const flows = await fetch(`${baseUrl}/api/oauth/flows`);
   expect(flows.status).toBe(200);
   const body = (await flows.json()) as { providers: Array<{ provider: string }> };
-  const providers = body.providers.map((p) => p.provider).sort();
-  expect(providers).toEqual(["anthropic", "google", "openai"]);
+  const providers = body.providers.map((p) => p.provider);
+  // The offer is the runtime's own provider registry, not a hand-written
+  // shortlist: anything this hub can route a model to can be given a key here.
+  // The three the product signs into lead it.
+  expect(providers.slice(0, 3)).toEqual(["anthropic", "openai", "google"]);
+  expect(providers).toContain("deepseek");
+  expect(providers.length).toBeGreaterThan(3);
 
   const settings = await fetch(`${baseUrl}/settings/accounts`);
   expect(settings.status).toBe(200);
