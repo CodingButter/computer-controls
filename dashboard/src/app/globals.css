@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+/*
+ * The palette. These values are duplicated as named constants in src/theme.ts,
+ * and src/theme.test.ts fails the build the day the two files disagree.
+ * Dark is the only theme in wave 1 — there is no light mode to toggle to.
+ */
+:root {
+  --background: #101b2d;
+  --card: #132033;
+  --well: #0a1626;
+  --foreground: #e7f3f6;
+  --muted: #8ba3bb;
+  --accent: #0de6f9;
+  --success: #2fd573;
+  --warning: #e8b93e;
+  --danger: #ff5c5c;
+  --purple: #a978f0;
+  --border: #1e3048;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-card: var(--card);
+  --color-well: var(--well);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-purple: var(--purple);
+  --color-border: var(--border);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
