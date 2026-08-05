@@ -1,9 +1,9 @@
 /**
  * The one page this process will ever ask a browser to open.
  *
- * The dashboard is the hub's settings page, and opening it is a shell-level
- * action: it hands a loopback URL to the desktop's browser and forgets about
- * it. It does not travel the hub socket, because the socket carries the closed
+ * The dashboard is the hub's own page, served at the hub's root, and opening
+ * it is a shell-level action: it hands a loopback URL to the desktop's browser
+ * and forgets about it. It does not travel the hub socket, because the socket carries the closed
  * gesture vocabulary and "show me a web page" is not one of the things a face
  * asks the hub for.
  *
@@ -16,7 +16,7 @@
  */
 
 const HUB_HOST = "127.0.0.1";
-const DASHBOARD_PATH = "/settings/accounts";
+const DASHBOARD_PATH = "/";
 
 /**
  * @param {number} port

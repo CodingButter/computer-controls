@@ -119,7 +119,7 @@ test("test_idle_audio_never_leaves_the_machine_with_the_widget_running", () => {
   // traffic reaches.
   expect(hubEventsUrl(4111)).toBe("ws://127.0.0.1:4111/events");
   expect(hubEventsUrl(9999)).toContain("127.0.0.1");
-  expect(dashboardUrl(4111)).toBe("http://127.0.0.1:4111/settings/accounts");
+  expect(dashboardUrl(4111)).toBe("http://127.0.0.1:4111/");
   expect(dashboardUrl(9999)).toContain("http://127.0.0.1:");
   // A port that is not a port opens nothing at all, rather than an address
   // assembled out of whatever was in the environment.
