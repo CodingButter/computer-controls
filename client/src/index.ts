@@ -5,6 +5,7 @@ import { Mastra } from "@mastra/core/mastra";
 import { buildApp } from "./app.ts";
 import { createProviderAuth } from "./auth/index.ts";
 import { resolveClientConfig } from "./config.ts";
+import { buildDevicesApp } from "./devices/index.ts";
 import { attachEventSocket } from "./events/index.ts";
 import { prepareHub } from "./hub.ts";
 import { commandSpeaker, startMicrophone } from "./orb/audio-host.ts";
@@ -104,6 +105,17 @@ if (orbLive && orb.orb) {
   });
 }
 
+/**
+ * The device list reads the live socket rather than a snapshot.
+ *
+ * The socket cannot exist yet — it attaches to a server that has not been
+ * created — so the count is asked for through a closure instead of passed in.
+ * By the time any request reaches this route the module has finished
+ * evaluating, and the answer is whatever is attached at that moment, which is
+ * the only answer worth giving about who is connected.
+ */
+const devices = buildDevicesApp({ faces: () => eventSocket.faceCount });
+
 const app = buildApp({
   chat: hub.chat,
   uiRoot: config.uiRoot,
@@ -111,6 +123,7 @@ const app = buildApp({
   auth: providerAuth.app,
   voice,
   orb,
+  devices,
 });
 
 let announce: (url: string) => void;

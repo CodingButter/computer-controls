@@ -45,6 +45,12 @@ export type AppDeps = {
    * keeps working regardless.
    */
   orb?: { app: Hono; reason?: string };
+  /**
+   * What is talking to this hub. No reason arm: unlike voice and the orb, this
+   * one cannot be refused — a hub that is answering the request is itself the
+   * first device on the list.
+   */
+  devices?: Hono;
 };
 
 /**
@@ -97,6 +103,7 @@ export function buildApp(deps: AppDeps): Hono {
   if (deps.auth) app.route("/", deps.auth);
   if (deps.voice) app.route("/", deps.voice.app);
   if (deps.orb) app.route("/", deps.orb.app);
+  if (deps.devices) app.route("/", deps.devices);
 
   app.get("*", (c) => {
     const asset = readUiAsset(deps.uiRoot, c.req.path);
