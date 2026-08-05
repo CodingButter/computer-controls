@@ -55,9 +55,9 @@ export function freedesktopPlatform(env: NodeJS.ProcessEnv = process.env): HubPl
     supports: {
       installedScan: true,
       icons: true,
-      // The `.desktop` override mechanics are real on this platform; the
-      // curing itself lands with #115 and flips this on.
-      shortcutCuring: false,
+      // The `.desktop` override is how a launcher is cured here, and #115
+      // shipped the curing that uses it.
+      shortcutCuring: true,
       autostart: true,
     },
   };

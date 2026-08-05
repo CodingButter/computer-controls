@@ -4,13 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildAuditApp } from "./routes.ts";
-import {
-  DEFAULT_LIMIT,
-  MAX_LIMIT,
-  TAIL_WINDOW_BYTES,
-  defaultAuditPath,
-  readAuditTail,
-} from "./log.ts";
+import { DEFAULT_LIMIT, MAX_LIMIT, TAIL_WINDOW_BYTES, readAuditTail } from "./log.ts";
 
 const dirs: string[] = [];
 
@@ -39,17 +33,6 @@ const record = (n: number) =>
     clientId: `c${n}`,
     decision: "allowed",
   });
-
-describe("the audit path", () => {
-  it("mirrors the daemon's XDG resolution", () => {
-    expect(defaultAuditPath({ XDG_STATE_HOME: "/tmp/state" } as NodeJS.ProcessEnv)).toBe(
-      "/tmp/state/mastracode-desktop/audit.jsonl",
-    );
-    expect(defaultAuditPath({} as NodeJS.ProcessEnv)).toBe(
-      path.join(os.homedir(), ".local", "state", "mastracode-desktop", "audit.jsonl"),
-    );
-  });
-});
 
 describe("reading the tail", () => {
   it("returns the last records, newest last, adding nothing", () => {

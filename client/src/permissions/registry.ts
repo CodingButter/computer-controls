@@ -5,8 +5,8 @@ import {
   writePermissions,
   type PermissionsMode,
 } from "./config-file.ts";
+import type { ScanInstalled } from "../platform/index.ts";
 import type { Census } from "./daemon.ts";
-import type { DesktopEntryApp } from "./desktop-entries.ts";
 
 export { MalformedConfigError };
 
@@ -71,7 +71,8 @@ export type PermissionsView = {
 export type RegistryDeps = {
   configPath: string;
   readCensus: () => Promise<Census>;
-  scanInstalled: () => DesktopEntryApp[];
+  /** The platform adapter's scan. Which OS it reads is not this module's business. */
+  scanInstalled: ScanInstalled;
 };
 
 /**
@@ -89,16 +90,14 @@ function matches(name: string, entries: string[]): boolean {
   });
 }
 
-/** "org.gnome.Nautilus.desktop" → "org.gnome.Nautilus" — the id without its suffix. */
-function desktopIdStem(desktopId: string | undefined): string | undefined {
-  if (!desktopId) return undefined;
-  return desktopId.endsWith(".desktop") ? desktopId.slice(0, -".desktop".length) : desktopId;
-}
-
 /**
- * Every name this row is known by: the launcher's, the desktop-file id's stem,
+ * Every name this row is known by: the launcher's, the platform's id for it,
  * and the census's when the daemon uses a different one. One application, one
  * toggle — un-permitting it must remove them all.
+ *
+ * The id is carried, never parsed: its spelling belongs to the adapter that
+ * issued it, and a core that trimmed a suffix off it would be guessing at
+ * another OS's vocabulary.
  */
 function identitiesOf(row: {
   name: string;
@@ -106,8 +105,7 @@ function identitiesOf(row: {
   censusName?: string;
 }): string[] {
   const names = new Set<string>([row.name]);
-  const stem = desktopIdStem(row.desktopId);
-  if (stem) names.add(stem);
+  if (row.desktopId) names.add(row.desktopId);
   if (row.censusName) names.add(row.censusName);
   return [...names];
 }
@@ -127,25 +125,22 @@ function predictionNamesOf(row: {
 }): string[] {
   if (row.censusName) return [row.censusName];
   const names = new Set<string>([row.name]);
-  const stem = desktopIdStem(row.desktopId);
-  if (stem) names.add(stem);
+  if (row.desktopId) names.add(row.desktopId);
   return [...names];
 }
 
 /**
  * The names worth writing to the allowlist for one permitted row: the name
- * the daemon actually uses when it can be known (the census's), else the id
- * stem alongside the launcher name — the stem is what GNOME apps stand on the
- * bus as, and writing only the friendly name would permit an application the
- * ceiling then fails to recognise when it starts.
+ * the daemon actually uses when it can be known (the census's), else the
+ * platform's id alongside the launcher name — the id is what GNOME apps stand
+ * on the bus as, and writing only the friendly name would permit an application
+ * the ceiling then fails to recognise when it starts.
  */
 function writeNamesFor(row: PermissionRow): string[] {
   if (row.censusName) return [row.censusName];
   if (row.running) return [row.name];
-  const stem = desktopIdStem(row.desktopId);
-  return stem && stem.toLowerCase() !== row.name.toLowerCase()
-    ? [row.name, stem]
-    : [row.name];
+  const id = row.desktopId;
+  return id && id.toLowerCase() !== row.name.toLowerCase() ? [row.name, id] : [row.name];
 }
 
 export function derivePermitted(
@@ -265,15 +260,15 @@ export function createPermissionRegistry(deps: RegistryDeps): PermissionRegistry
   const merge = async (): Promise<PermissionsView> => {
     const scopes = readScopesConfig(deps.configPath);
     const census = await deps.readCensus();
-    const installed = deps.scanInstalled();
+    const installed = await deps.scanInstalled();
 
-    // Merged by casefolded name AND by desktop-file id stem: the census's
-    // names are the daemon's, the launcher's are the desktop file's, and the
-    // two frequently disagree about the same application — GNOME's launcher
-    // says "Files" where the bus says "org.gnome.Nautilus", and the id stem
+    // Merged by casefolded name AND by the platform's application id: the
+    // census's names are the daemon's, the launcher's are the desktop file's,
+    // and the two frequently disagree about the same application — GNOME's
+    // launcher says "Files" where the bus says "org.gnome.Nautilus", and the id
     // is the thread connecting them. When any handle agrees, they are one row.
     const rows = new Map<string, PermissionRow>();
-    const byStem = new Map<string, PermissionRow>();
+    const byId = new Map<string, PermissionRow>();
     for (const app of installed) {
       const row: PermissionRow = {
         name: app.name,
@@ -281,16 +276,15 @@ export function createPermissionRegistry(deps: RegistryDeps): PermissionRegistry
         access: "off",
         running: false,
         readable: false,
-        desktopId: app.desktopId,
+        desktopId: app.id,
       };
       rows.set(app.name.toLowerCase(), row);
-      const stem = desktopIdStem(app.desktopId);
-      if (stem) byStem.set(stem.toLowerCase(), row);
+      byId.set(app.id.toLowerCase(), row);
     }
     if (census.reachable) {
       for (const app of census.applications) {
         const folded = app.name.toLowerCase();
-        const existing = rows.get(folded) ?? byStem.get(folded);
+        const existing = rows.get(folded) ?? byId.get(folded);
         if (existing) {
           existing.running = true;
           existing.readable = app.readable;

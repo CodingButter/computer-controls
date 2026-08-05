@@ -89,8 +89,9 @@ test("the running hub names the OS adapter it booted with", async () => {
   // installed.
   expect(health.platform.supports.installedScan).toBe(true);
   expect(health.platform.supports.icons).toBe(true);
-  // Curing is #115's to turn on, and claiming it now would be a lie.
-  expect(health.platform.supports.shortcutCuring).toBe(false);
+  // Curing shipped with #115, and this is the platform whose `.desktop`
+  // override makes it possible at all.
+  expect(health.platform.supports.shortcutCuring).toBe(true);
 });
 
 test("the sign-in surface serves through the booted hub, not just its own module", async () => {

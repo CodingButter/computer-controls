@@ -27,7 +27,6 @@ import {
   OPERATION_CLASSES,
   PERMISSIONS_MODES,
   SETTINGS_KEYS,
-  defaultConfigPath,
   mergeSettings,
   readConfigFile,
   writeConfigFile,
@@ -38,12 +37,15 @@ export const DESKTOP_CONFIG_PATH = "/api/desktop-config";
 
 export type DesktopConfigMount = {
   /**
-   * Which file to read and write. Injectable so the tests exercise the real
+   * Which file to read and write. Passed in rather than resolved here: where
+   * this machine keeps a config directory is the platform adapter's answer, and
+   * a route that worked it out for itself would be a second opinion about the
+   * one file the daemon reads. It also lets the tests exercise the real
    * read-merge-write path against a temporary directory rather than a mock —
    * the atomicity and the unknown-key preservation are the whole feature, and
    * neither can be proven against a fake filesystem.
    */
-  file?: string;
+  file: string;
 };
 
 /**
@@ -83,9 +85,9 @@ const DAEMON_DEFAULTS: DesktopConfigView["defaults"] = {
   audit: true,
 };
 
-export function buildDesktopConfigApp(mount: DesktopConfigMount = {}): Hono {
+export function buildDesktopConfigApp(mount: DesktopConfigMount): Hono {
   const app = new Hono();
-  const file = mount.file ?? defaultConfigPath();
+  const { file } = mount;
 
   app.get(DESKTOP_CONFIG_PATH, async (c) => {
     try {
