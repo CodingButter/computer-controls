@@ -71,6 +71,24 @@ describe("resolveIcon", () => {
   it("a missing icon is honestly nothing", () => {
     expect(resolveIcon("no-such-icon", dirs)).toBeUndefined();
   });
+
+  it("finds stock icons outside apps/ — categories, devices, status", () => {
+    plant("icons/hicolor/64x64/categories/preferences-system-network.png");
+    plant("icons/hicolor/64x64/devices/input-keyboard.png");
+    plant("icons/hicolor/64x64/status/dialog-information.png");
+
+    expect(resolveIcon("preferences-system-network", dirs)?.contentType).toBe("image/png");
+    expect(resolveIcon("input-keyboard", dirs)?.contentType).toBe("image/png");
+    expect(resolveIcon("dialog-information", dirs)?.contentType).toBe("image/png");
+  });
+
+  it("an application's own icon outranks a stock lookalike of the same name", () => {
+    plant("icons/hicolor/64x64/categories/clash.png", Buffer.from("STOCK"));
+    plant("icons/hicolor/48x48/apps/clash.png", Buffer.from("APP"));
+
+    // apps/ wins across every size before any other context is consulted.
+    expect(resolveIcon("clash", dirs)?.body.toString()).toBe("APP");
+  });
 });
 
 describe("createIconSource", () => {
