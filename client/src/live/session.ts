@@ -96,11 +96,19 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-function base64ToBytes(data: string): Uint8Array {
-  const binary = atob(data);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
+function base64ToBytes(data: string): Uint8Array | undefined {
+  // Total, never throwing: atob rejects malformed base64 where the Buffer it
+  // replaced was lenient, and this runs inside the message listener — a frame
+  // that does not decode is a frame we never saw, same as one that does not
+  // parse. Throwing here would let one bad blob take down the whole session.
+  try {
+    const binary = atob(data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  } catch {
+    return undefined;
+  }
 }
 
 const utf8 = new TextDecoder();
@@ -271,7 +279,8 @@ export function geminiLiveProvider(
               for (const part of content.modelTurn?.parts ?? []) {
                 const inline = part.inlineData;
                 if (inline?.data && (inline.mimeType ?? "").startsWith("audio/pcm")) {
-                  config.events.onAudio(base64ToBytes(inline.data));
+                  const bytes = base64ToBytes(inline.data);
+                  if (bytes) config.events.onAudio(bytes);
                 }
               }
               if (content.inputTranscription?.text) {
