@@ -95,7 +95,9 @@ describe("the chain is the hub's own gate around this ear", () => {
       },
     });
 
-    // A loud utterance, then enough silence to end it.
+    // A loud utterance — two frames, because one 100ms frame is a blip and
+    // the gate's speech floor exists to drop blips — then silence to end it.
+    await gate.push(frame(1000));
     await gate.push(frame(1000));
     const settling = gate.push(frame(0, CAPTURE_RATE)); // a full second of silence
     // The consideration is queued on a microtask; one turn of the loop later
@@ -123,6 +125,7 @@ describe("the chain is the hub's own gate around this ear", () => {
       events: { onOpen: (hearing: unknown) => opened.push(hearing), onIdle: () => {}, onForward: () => {} },
     });
 
+    await gate.push(frame(1000));
     await gate.push(frame(1000));
     const settling = gate.push(frame(0, CAPTURE_RATE));
     await new Promise((resolve) => setTimeout(resolve, 0));

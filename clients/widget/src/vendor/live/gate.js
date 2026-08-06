@@ -35,6 +35,18 @@ export const DEFAULT_UTTERANCE_SILENCE_MS = 600;
  * that nobody addressed to us is exactly the thing the gate is for.
  */
 export const MAX_UTTERANCE_MS = 15_000;
+/**
+ * The least actual speech an utterance needs before it is worth transcribing.
+ *
+ * Shorter than the shortest word anyone wakes a machine with. An amplitude
+ * detector opens on a chair creak or a keyboard click, and the buffer that
+ * follows is one loud frame plus the silence that closed it — handing that to
+ * the ear wastes a model run at best, and at worst feeds a conv encoder an
+ * input below its minimum. Measured against speech frames only, not buffer
+ * length: the interior pauses an utterance legitimately carries do not count
+ * toward being a word.
+ */
+export const MIN_SPEECH_MS = 150;
 function frameDurationMs(frame) {
     return (frame.samples.length / frame.sampleRate) * 1000;
 }
@@ -60,6 +72,7 @@ export class WakeGate {
     #state = "idle";
     #buffer = [];
     #bufferedMs = 0;
+    #speechMs = 0;
     #silenceMs = 0;
     #openedSilenceMs = 0;
     /** Serialises the ear so two utterances can never be transcribed at once. */
@@ -109,17 +122,37 @@ export class WakeGate {
             this.#state = "hearing";
             this.#buffer.push(frame);
             this.#bufferedMs += durationMs;
+            this.#speechMs += durationMs;
             this.#silenceMs = 0;
             if (this.#bufferedMs >= MAX_UTTERANCE_MS)
                 this.#discard();
             return this.#hearing;
         }
         if (this.#state === "hearing") {
+            // A pause is part of the utterance until it is long enough to end it.
+            // Buffering only the frames the detector called speech would hand the
+            // ear the loud parts of a word concatenated with the gaps cut out —
+            // time-compressed audio no speech model was trained on. Live QA watched
+            // exactly that: "Mastra" transcribing as "A" because the pauses between
+            // syllables had been removed from the waveform.
+            this.#buffer.push(frame);
+            this.#bufferedMs += durationMs;
             this.#silenceMs += durationMs;
+            if (this.#bufferedMs >= MAX_UTTERANCE_MS) {
+                this.#discard();
+                return this.#hearing;
+            }
             if (this.#silenceMs >= this.#utteranceSilenceMs) {
                 const utterance = concatFrames(this.#buffer);
+                const speechMs = this.#speechMs;
                 this.#resetBuffer();
                 this.#state = "idle";
+                // A blip is not a word. An utterance whose actual speech content is
+                // shorter than the shortest word never reaches the ear — below this
+                // floor the buffer is mostly the silence that closed it, and a small
+                // conv encoder handed near-nothing has crashed on it before.
+                if (speechMs < MIN_SPEECH_MS)
+                    return this.#hearing;
                 this.#hearing = this.#hearing.then(() => this.#consider(utterance));
             }
         }
@@ -194,6 +227,7 @@ export class WakeGate {
     #resetBuffer() {
         this.#buffer = [];
         this.#bufferedMs = 0;
+        this.#speechMs = 0;
         this.#silenceMs = 0;
     }
     /** The languages the installed ear may hear, surfaced for health and the UI. */
