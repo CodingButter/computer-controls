@@ -10,7 +10,12 @@
  */
 
 :root {
-  --orb-size: 80px;
+  /*
+   * Sized to read as the same presence as the hub's orb page (180px there).
+   * 80px made it a desk ornament; at 160px the shader's smoke shell and the
+   * M inside are actually legible from a normal sitting distance.
+   */
+  --orb-size: 160px;
   --fade: 420ms;
 }
 
@@ -107,11 +112,31 @@ body {
 }
 
 #orb {
+  /* The M sits absolutely inside this box, so the box anchors it. */
+  position: relative;
   width: var(--orb-size);
   height: var(--orb-size);
   border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #cfe4ff, #4a7dff 55%, #1e3a8a);
   box-shadow: 0 0 24px rgba(74, 125, 255, 0.55);
+}
+
+/*
+ * The Mastra M, resting inside the orb — same proportions and glow as the
+ * hub's orb page (72px of 180px there, 40% here). It ignores the pointer so
+ * every click still lands on the orb beneath it.
+ */
+#orb-m {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 40%;
+  height: auto;
+  pointer-events: none;
+  color: #f5ecff;
+  filter: drop-shadow(0 0 5px rgba(233, 213, 255, 0.95))
+    drop-shadow(0 0 16px rgba(192, 132, 252, 0.8))
+    drop-shadow(0 0 36px rgba(147, 51, 234, 0.55));
 }
 
 /*

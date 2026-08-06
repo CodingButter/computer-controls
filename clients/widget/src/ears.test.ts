@@ -38,8 +38,8 @@ describe("the worker ear speaks the LocalEar seam", () => {
     const ear = createWorkerEar(worker);
     const answer = ear.transcribe(frame(1000));
     expect(worker.posted).toHaveLength(1);
-    worker.emit({ kind: "transcript", id: worker.posted[0].id, text: "mastra open the door" });
-    await expect(answer).resolves.toBe("mastra open the door");
+    worker.emit({ kind: "transcript", id: worker.posted[0].id, text: "hey mastra open the door" });
+    await expect(answer).resolves.toBe("hey mastra open the door");
   });
 
   test("two in flight cannot swap answers: the id is the routing", async () => {
@@ -104,12 +104,12 @@ describe("the chain is the hub's own gate around this ear", () => {
     // the buffered utterance has reached the worker, and the test transcribes it.
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(worker.posted).toHaveLength(1);
-    worker.emit({ kind: "transcript", id: worker.posted[0].id, text: "mastra, what time is it?" });
+    worker.emit({ kind: "transcript", id: worker.posted[0].id, text: "hey mastra, what time is it?" });
     await settling;
 
     expect(gate.isOpen).toBe(true);
     expect(opened).toHaveLength(1);
-    expect((opened[0] as { transcript: string }).transcript).toBe("mastra, what time is it?");
+    expect((opened[0] as { transcript: string }).transcript).toBe("hey mastra, what time is it?");
 
     // Open gate forwards; nothing was forwarded before it opened.
     expect(forwarded).toHaveLength(0);
