@@ -334,7 +334,13 @@ void main() {
  * @returns {Promise<{ setState: (s: string) => void, setLevel: (l: number) => void, setMood: (c: string) => void, tick: (now: number) => void, dispose: () => void }>}
  */
 export async function mountWebGlOrb({ canvas, reducedMotion = false }) {
-  const THREE = await import("three");
+  // A relative specifier, not the bare "three": both pages that wear this face
+  // keep the vendored build at ./vendor/ beside this file, and a relative path
+  // needs no import map. The bare specifier did — and the widget's page loaded
+  // its map from an external file, which Chromium silently ignores, so the
+  // shader never mounted there and nobody was told. One spelling that works
+  // everywhere beats a mapping that has to be carried correctly by every page.
+  const THREE = await import("./vendor/three.module.js");
 
   const motionScale = reducedMotion ? 0.2 : 1.0;
 

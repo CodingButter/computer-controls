@@ -235,10 +235,8 @@
     </aside>
 
     <!-- three.js r169 — vendored as an ES module, served by the hub at
-         /vendor/three.module.js. No bundler, no runtime CDN fetch (#103). -->
-    <script type="importmap">
-      { "imports": { "three": "/vendor/three.module.js" } }
-    </script>
+         /vendor/three.module.js and imported by orb-webgl.js with a relative
+         specifier. No import map, no bundler, no runtime CDN fetch (#103). -->
     <script type="module" src="/orb.js"></script>
   </body>
 </html>

@@ -160,13 +160,15 @@ describe("mood color mapping", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Acceptance test 3: the vendored three module is served by the hub and named
-// in the import map. readUiAsset serves /vendor/three.module.js from
-// public/vendor/ with zero code change — this test verifies the file exists on
-// disk and that orb.html's import map resolves "three" to that path.
+// Acceptance test 3: the vendored three module is served by the hub and
+// reached by a relative import. readUiAsset serves /vendor/three.module.js
+// from public/vendor/ with zero code change — this test verifies the file
+// exists on disk and that no page carries an import map for it. Import maps
+// are how the widget's face silently broke: its page loaded the map from an
+// external file, which Chromium ignores, and the shader never mounted.
 // ---------------------------------------------------------------------------
 
-describe("test_the_vendored_three_module_is_served_by_the_hub_and_named_in_the_import_map", () => {
+describe("test_the_vendored_three_module_is_served_by_the_hub_and_reached_relatively", () => {
   const publicDir = resolve(__dirname, "../../public");
 
   it("places three.module.js under public/vendor/", () => {
@@ -175,12 +177,9 @@ describe("test_the_vendored_three_module_is_served_by_the_hub_and_named_in_the_i
     expect(content.length).toBeGreaterThan(10000); // real build, not a stub
   });
 
-  it("maps \"three\" to /vendor/three.module.js in orb.html's import map", () => {
+  it("carries no import map in orb.html — the relative import made it dead weight", () => {
     const html = readFileSync(resolve(publicDir, "orb.html"), "utf-8");
-    const match = html.match(/<script[^>]*type="importmap"[^>]*>([\s\S]*?)<\/script>/);
-    expect(match, "orb.html must contain a type=importmap script").not.toBeNull();
-    const map = JSON.parse(match![1].trim());
-    expect(map.imports.three).toBe("/vendor/three.module.js");
+    expect(html).not.toMatch(/type="importmap"/);
   });
 });
 
@@ -210,9 +209,10 @@ describe("test_the_page_ships_no_bundler_and_no_runtime_cdn_fetch", () => {
     }
   });
 
-  it("imports three from the bare specifier \"three\", resolved by the import map", () => {
+  it("imports three by relative path — the one spelling that works on every page that wears this face", () => {
     const webgl = readFileSync(resolve(publicDir, "orb-webgl.js"), "utf-8");
-    expect(webgl).toMatch(/import\("three"\)/);
+    expect(webgl).toMatch(/import\("\.\/vendor\/three\.module\.js"\)/);
+    expect(webgl).not.toMatch(/import\("three"\)/);
     expect(webgl).not.toMatch(/https?:\/\//); // no absolute URL imports
   });
 });

@@ -23,15 +23,14 @@
     <title>widget</title>
     <link rel="stylesheet" href="skin.css" />
     <!--
-      The bare `three` specifier inside the vendored shader resolves to a local
-      file beside this page, so the face ships as a 'self' script under the CSP
-      and never reaches across the network for a dependency. The map is a local
-      same-origin file, which is what script-src 'self' permits; the shader and
-      its three.module.js live under face/ (outside the top-level scan the
-      boundaries suite reads) because three.module.js carries dead audio-path
-      substrings the widget never invokes.
+      The shader and its three.module.js live under face/ (outside the
+      top-level scan the boundaries suite reads) because three.module.js
+      carries dead audio-path substrings the widget never invokes. The shader
+      imports it by relative path — no import map. There used to be one here,
+      loaded from an external file, and Chromium silently ignores external
+      import maps: the shader never mounted and the widget wore the CSS
+      fallback while every suite stayed green.
     -->
-    <script type="importmap" src="face/import-map.json"></script>
   </head>
   <body>
     <!--
