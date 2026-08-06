@@ -98,7 +98,7 @@ describe("test_idle_mode_sends_no_audio_off_the_machine", () => {
   });
 
   it("never troubles the ear when the room is simply silent", async () => {
-    const ear = earHearing("mastra open the browser");
+    const ear = earHearing("hey mastra open the browser");
     const { gate, events, vad } = build(ear);
 
     vad.speaking = false;
@@ -126,7 +126,7 @@ describe("test_idle_mode_sends_no_audio_off_the_machine", () => {
   });
 
   it("drops an endlessly talking room instead of buffering it or transcribing it", async () => {
-    const ear = earHearing("mastra open the browser");
+    const ear = earHearing("hey mastra open the browser");
     const { gate, events, vad } = build(ear);
 
     // 200 frames of unbroken speech is 20s — past the ceiling, and never ended
@@ -152,7 +152,7 @@ describe("test_idle_mode_sends_no_audio_off_the_machine", () => {
 
 describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
   it("opens when the ear hears the assistant addressed", async () => {
-    const ear = earHearing("mastra open the browser");
+    const ear = earHearing("hey mastra open the browser");
     const { gate, events, vad } = build(ear);
 
     await say(gate, vad);
@@ -165,7 +165,7 @@ describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
   });
 
   it("forwards audio only after the ear said yes, never before", async () => {
-    const ear = earHearing("mastra what time is it");
+    const ear = earHearing("hey mastra what time is it");
     const vad = controllableVad();
     // Ordering, not counting, is the property: once the gate is open, silence
     // frames forward too, so the honest assertion is that nothing was forwarded
@@ -203,7 +203,7 @@ describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
   });
 
   it("classifies a bare wake word apart from a request", async () => {
-    const ear = earHearing("mastra");
+    const ear = earHearing("hey mastra");
     const { gate, events, vad } = build(ear);
 
     await say(gate, vad);
@@ -213,7 +213,7 @@ describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
   });
 
   it("drops back to idle after the quiet period and stops forwarding", async () => {
-    const ear = earHearing("mastra open the browser");
+    const ear = earHearing("hey mastra open the browser");
     const { gate, events, vad } = build(ear, { quietPeriodMs: 300 });
 
     await say(gate, vad);
@@ -232,7 +232,7 @@ describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
   });
 
   it("does not re-decide mid-sentence once it has opened", async () => {
-    const ear = earHearing("mastra open the browser");
+    const ear = earHearing("hey mastra open the browser");
     const { gate, events, vad } = build(ear);
 
     await say(gate, vad);
@@ -274,7 +274,7 @@ describe("test_speech_that_is_not_the_name_stays_home", () => {
 
 describe("test_the_name_opens_the_gate", () => {
   it("opens the gate when the name is heard and the speech is addressed to us", async () => {
-    const ear = earHearing("mastra what time is it");
+    const ear = earHearing("hey mastra what time is it");
     const { gate, events, vad } = build(ear);
 
     await say(gate, vad);
@@ -294,7 +294,7 @@ describe("test_the_name_opens_the_gate", () => {
 
 describe("test_talking_about_mastra_is_not_talking_to_mastra", () => {
   it("stays closed for talk about Mastra, opens for talk to Mastra", async () => {
-    const transcripts = ["i was showing caleb how mastra works", "mastra what time is it"];
+    const transcripts = ["i was showing caleb how mastra works", "so anyway, hey mastra, what time is it"];
     let call = 0;
     const ear: LocalEar = {
       languages: ["en"],
@@ -302,14 +302,17 @@ describe("test_talking_about_mastra_is_not_talking_to_mastra", () => {
     };
     const { gate, events, vad } = build(ear);
 
-    // First utterance: talking ABOUT Mastra. The name appears mid-sentence, not
-    // as a vocative at the start, so the classifier does not count it as addressed.
+    // First utterance: talking ABOUT Mastra. The bare name is mentioned, but the
+    // wake is the phrase "hey mastra" — nobody says that about the product, only
+    // to it — so the classifier does not count a mention as addressed.
     await say(gate, vad);
     expect(ear.transcribe).toHaveBeenCalledTimes(1);
     expect(events.onOpen).not.toHaveBeenCalled();
     expect(gate.isOpen).toBe(false);
 
-    // Second utterance: talking TO Mastra. The name leads, as a vocative.
+    // Second utterance: talking TO Mastra. The phrase appears mid-sentence and
+    // still counts: utterance boundaries come from an amplitude detector, not
+    // from grammar, so the phrase is honored wherever it lands.
     await say(gate, vad);
     expect(events.onOpen).toHaveBeenCalledWith(
       expect.objectContaining({ addressed: true, intent: "question" }),

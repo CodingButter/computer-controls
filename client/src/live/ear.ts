@@ -132,25 +132,29 @@ export interface Classifier {
 }
 
 /**
- * The names this assistant answers to.
+ * The phrase this assistant answers to: "hey Mastra", heard anywhere.
  *
  * A wake word is a blunt instrument and deliberately so: the gate's job is to be
  * wrong in the cheap direction. A false negative costs a repeated sentence; a
  * false positive costs audio leaving the machine, which is the one failure this
  * design exists to prevent.
  *
+ * Two live findings shaped this list. First, requiring the name to START the
+ * utterance failed in the field: the amplitude detector's utterance boundaries
+ * do not line up with sentence starts, so a clean "hey Mastra" routinely arrived
+ * with other words in front of it and never matched. The phrase now matches
+ * anywhere in the transcript. Second, a bare name matched anywhere would wake
+ * on every mention of Mastra near the mic — so the wake is the two-word phrase,
+ * which nobody says about the product, only to it.
+ *
  * "Mastra" is not an English word, and the English-only local ear writes down
  * what it knows: live testing showed Moonshine transcribing the spoken name as
- * "Master". The list therefore carries the model's spellings of the one name,
- * not extra names — each entry is still required to START the utterance, which
- * is what keeps "master bedroom" muttered across the room from opening a gate.
+ * "Master" or "Mastro". The list carries the model's spellings of the one
+ * phrase, not extra names.
  */
 export const WAKE_WORDS: readonly string[] = [
-  "mastra",
   "hey mastra",
-  "master",
   "hey master",
-  "mastro",
   "hey mastro",
 ];
 
@@ -280,16 +284,25 @@ export function readSentiment(transcript: string): Sentiment {
 export function createWakeWordClassifier(
   wakeWords: readonly string[] = WAKE_WORDS,
 ): Classifier {
-  const words = [...wakeWords].sort((a, b) => b.length - a.length);
+  // Longest phrase first, and each phrase becomes a pattern that tolerates the
+  // punctuation a transcript puts between words: "hey, master" is the same
+  // phrase. The boundaries on either side keep "masterful" from being "master".
+  const patterns = [...wakeWords]
+    .sort((a, b) => b.length - a.length)
+    .map((word) => new RegExp(`(?:^|[\\s,.!?])${word.split(" ").join("[\\s,]+")}(?=$|[\\s,.!?])`));
 
   return {
     classify(transcript: string): Hearing {
       const text = transcript.trim().toLowerCase();
-      const matched = words.find(
-        (word) => text === word || text.startsWith(`${word} `) || text.startsWith(`${word}, `),
-      );
+      let matchEnd = -1;
+      for (const pattern of patterns) {
+        const hit = pattern.exec(text);
+        if (!hit) continue;
+        matchEnd = hit.index + hit[0].length;
+        break;
+      }
 
-      if (!matched) {
+      if (matchEnd === -1) {
         // Not addressed to us, so nothing is read from it. Sentiment is only
         // ever inferred about somebody who chose to talk to this machine —
         // reading the mood of a conversation happening near it is not a thing
@@ -298,9 +311,11 @@ export function createWakeWordClassifier(
         return { addressed: false, intent: "small-talk", transcript, sentiment: DEFAULT_SENTIMENT };
       }
 
-      // The wake word is not part of how somebody sounds, so the tone is read
-      // from what they actually said after it.
-      const remainder = text.slice(matched.length).replace(/^[\s,.!?]+/, "");
+      // The wake phrase is not part of how somebody sounds, so the tone is read
+      // from what they actually said after it. Words BEFORE the phrase are
+      // dropped too: "so anyway, hey mastra, open a terminal" is a command,
+      // and the preamble was not addressed to us.
+      const remainder = text.slice(matchEnd).replace(/^[\s,.!?]+/, "");
       const sentiment = readSentiment(remainder);
 
       if (!remainder) {
