@@ -137,6 +137,36 @@ function paint() {
   paintScouts();
   shaderState = shaderStateFor(state);
   webglOrb?.setState(shaderState);
+  reportHitShapes();
+}
+
+/*
+ * Tell the shell what is touchable right now.
+ *
+ * On Linux the shell cannot forward mouse events through an ignoring window,
+ * so it polls the cursor itself — against these shapes. They are re-reported
+ * after every paint because a paint is the only time they can change, and
+ * deduplicated so a face repainting the same frame is not a message stream.
+ * A face that is not visible reports null: an invisible orb claiming a click
+ * would be the transparent window quietly stealing part of the user's desk.
+ */
+let lastHitShapes = "";
+function reportHitShapes() {
+  let shapes = null;
+  if (state.presence === "visible") {
+    const orb = orbElement.getBoundingClientRect();
+    const caption = state.caption ? captionElement.getBoundingClientRect() : null;
+    shapes = {
+      orb: { cx: orb.left + orb.width / 2, cy: orb.top + orb.height / 2, radius: orb.width / 2 },
+      caption: caption
+        ? { x: caption.left, y: caption.top, width: caption.width, height: caption.height }
+        : null,
+    };
+  }
+  const said = JSON.stringify(shapes);
+  if (said === lastHitShapes) return;
+  lastHitShapes = said;
+  window.widget.setHitShapes?.(shapes);
 }
 
 // The shell answers every drag with a place to draw. Nothing else moves the
@@ -263,6 +293,9 @@ async function startListening() {
       },
       onForward: (frame) => mouth?.forward(frame),
       onIdle: () => closeMouth(),
+      // The gate's quiet clock does not run while the mouth is playing the
+      // model's answer: a user listening in silence is not a user who left.
+      hold: () => mouth?.speaking() ?? false,
     });
   } catch {
     // A refused microphone is a widget without ears, not a broken face.

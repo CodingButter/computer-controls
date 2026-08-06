@@ -157,6 +157,22 @@ export async function openMouth({ onCaption, onState, onReason }) {
 
     let playCursor = 0;
     const playing = new Set();
+
+    // Lane words that arrived while the model was speaking. Sending text into
+    // a live session mid-generation is a barge: Gemini abandons the sentence
+    // it was saying to obey the new turn. Live QA heard exactly that — answers
+    // cut off by their own progress updates. So while audio is playing, lane
+    // words queue here and flush when the playback drains.
+    // `session` is declared below; nothing can play — so nothing can drain —
+    // before the dial that creates it resolves.
+    const heldWords = [];
+    const flushHeldWords = () => {
+      while (heldWords.length) {
+        const held = heldWords.shift();
+        void session.sendText(frameForVoice(held.kind, held.text));
+      }
+    };
+
     const speak = (bytes) => {
       const samples = floatFromPcm16(bytes);
       if (!samples.length) return;
@@ -169,7 +185,10 @@ export async function openMouth({ onCaption, onState, onReason }) {
       source.start(at);
       playCursor = at + buffer.duration;
       playing.add(source);
-      source.onended = () => playing.delete(source);
+      source.onended = () => {
+        playing.delete(source);
+        if (playing.size === 0) flushHeldWords();
+      };
       onState?.("speaking");
     };
     const bargeIn = () => {
@@ -253,7 +272,20 @@ export async function openMouth({ onCaption, onState, onReason }) {
       // Only this mouth's own asks are spoken; the lane broadcasts, and a
       // mouth relaying another mouth's answers would speak twice.
       if (!meaning || !pendingAsks.has(meaning.id)) return;
-      if (meaning.kind === "answer") pendingAsks.delete(meaning.id);
+      if (meaning.kind === "answer") {
+        pendingAsks.delete(meaning.id);
+        // An answer supersedes the progress it outran: a queued "working on
+        // it" spoken after the result would be the mouth narrating backwards.
+        for (let i = heldWords.length - 1; i >= 0; i -= 1) {
+          if (heldWords[i].kind === "progress" && heldWords[i].id === meaning.id) {
+            heldWords.splice(i, 1);
+          }
+        }
+      }
+      if (playing.size > 0) {
+        heldWords.push(meaning);
+        return;
+      }
       void session.sendText(frameForVoice(meaning.kind, meaning.text));
     });
 

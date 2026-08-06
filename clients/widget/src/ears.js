@@ -72,13 +72,25 @@ export function createWorkerEar(worker) {
     transcribe(utterance) {
       if (dead) return Promise.reject(new Error(dead));
       const id = `t${++seq}`;
+      console.log(
+        `[ear-debug] utterance ${id}: ${utterance.samples.length} samples (${(utterance.samples.length / utterance.sampleRate).toFixed(2)}s)`,
+      );
       return new Promise((resolve, reject) => {
         pending.set(id, { resolve, reject });
         // Sliced first so the transfer donates a copy's buffer, never the
         // gate's own: the utterance the gate handed over is still its to keep.
         const samples = utterance.samples.slice();
         worker.postMessage({ id, samples: samples.buffer }, [samples.buffer]);
-      });
+      }).then(
+        (text) => {
+          console.log(`[ear-debug] ${id} transcript: ${JSON.stringify(text)}`);
+          return text;
+        },
+        (error) => {
+          console.log(`[ear-debug] ${id} FAILED: ${error?.message ?? error}`);
+          throw error;
+        },
+      );
     },
   };
 }
@@ -94,7 +106,7 @@ export function createWorkerEar(worker) {
  *   quietPeriodMs?: number,
  * }} deps
  */
-export function createEarChain({ ear, events, vad, wakeWord, quietPeriodMs }) {
+export function createEarChain({ ear, events, vad, wakeWord, quietPeriodMs, hold }) {
   return new WakeGate({
     vad: vad ?? createAmplitudeVad(),
     wakeWord: wakeWord ?? alwaysWakeWord,
@@ -102,6 +114,7 @@ export function createEarChain({ ear, events, vad, wakeWord, quietPeriodMs }) {
     classifier: createWakeWordClassifier(),
     events,
     quietPeriodMs,
+    hold,
   });
 }
 
@@ -137,11 +150,11 @@ export function plugDecision(eventType, mouthOpen) {
  *
  * @param {{
  *   onOpen: Function, onIdle: Function, onForward: Function,
- *   quietPeriodMs?: number,
+ *   quietPeriodMs?: number, hold?: () => boolean,
  * }} events
  * @returns {Promise<{ gate: WakeGate, plug: () => void, unplug: () => void, stop: () => void }>}
  */
-export async function startEars({ onOpen, onIdle, onForward, quietPeriodMs }) {
+export async function startEars({ onOpen, onIdle, onForward, quietPeriodMs, hold }) {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true },
   });
@@ -151,6 +164,7 @@ export async function startEars({ onOpen, onIdle, onForward, quietPeriodMs }) {
     ear: createWorkerEar(worker),
     events: { onOpen, onIdle, onForward },
     quietPeriodMs,
+    hold,
   });
 
   const capture = new AudioContext({ sampleRate: CAPTURE_RATE });

@@ -173,6 +173,21 @@ describe("what the shipped mouth source promises", () => {
     expect(mouth).toContain("pendingAsks.clear()");
   });
 
+  it("a lane word never barges the model mid-speech — it queues until playback drains", () => {
+    // Sending text into a live session while audio is playing is a barge:
+    // Gemini abandons the sentence it was saying. Live QA heard answers cut
+    // off by their own progress updates. The lane handler must check the
+    // playing set before sendText, and the drain path must flush the queue.
+    const laneHandler = mouth.slice(mouth.indexOf('lane.addEventListener("message"'));
+    expect(laneHandler.indexOf("playing.size > 0")).toBeGreaterThan(-1);
+    expect(laneHandler.indexOf("playing.size > 0")).toBeLessThan(
+      laneHandler.indexOf("session.sendText"),
+    );
+    expect(mouth).toContain("if (playing.size === 0) flushHeldWords()");
+    // An answer purges the queued progress it outran.
+    expect(laneHandler).toContain('heldWords[i].kind === "progress"');
+  });
+
   it("is wired into the page the browser actually loads", () => {
     expect(html).toContain('id="talk"');
     expect(page).toContain('getElementById("talk")');

@@ -93,6 +93,16 @@ export type GateDeps = {
   events: GateEvents;
   quietPeriodMs?: number;
   utteranceSilenceMs?: number;
+  /**
+   * The quiet period does not run while this answers true.
+   *
+   * A conversation is not over because one side of it is quiet: while the
+   * mouth is playing the model's answer, the user is listening, and eight
+   * seconds of listening is not abandonment. Live QA watched the alternative —
+   * a long answer cut off mid-sentence because the person receiving it had
+   * the manners not to talk over it.
+   */
+  hold?: () => boolean;
   /** Injected so tests drive time rather than wait for it. */
   now?: () => number;
 };
@@ -136,6 +146,7 @@ export class WakeGate {
   readonly #classifier: Classifier;
   readonly #events: GateEvents;
   readonly #quietPeriodMs: number;
+  readonly #hold: () => boolean;
   readonly #utteranceSilenceMs: number;
 
   constructor(deps: GateDeps) {
@@ -145,6 +156,7 @@ export class WakeGate {
     this.#classifier = deps.classifier;
     this.#events = deps.events;
     this.#quietPeriodMs = deps.quietPeriodMs ?? DEFAULT_QUIET_PERIOD_MS;
+    this.#hold = deps.hold ?? (() => false);
     this.#utteranceSilenceMs = deps.utteranceSilenceMs ?? DEFAULT_UTTERANCE_SILENCE_MS;
   }
 
@@ -171,7 +183,11 @@ export class WakeGate {
       // Forwarding is the only thing that happens here. The gate has already
       // decided; re-deciding on every frame would cut a person off mid-sentence.
       this.#events.onForward(frame);
-      this.#openedSilenceMs = speech ? 0 : this.#openedSilenceMs + durationMs;
+      // The quiet clock does not run while the gate is held: the mouth is
+      // playing the model's answer and the user is listening, not gone. It
+      // starts from zero when the hold lifts, so the quiet period after an
+      // answer ends is always a full one.
+      this.#openedSilenceMs = speech || this.#hold() ? 0 : this.#openedSilenceMs + durationMs;
       if (this.#openedSilenceMs >= this.#quietPeriodMs) this.close();
       return this.#hearing;
     }

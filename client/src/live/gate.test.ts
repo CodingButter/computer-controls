@@ -55,7 +55,7 @@ function controllableWakeWord(): WakeWordDetector & { wakeHeard: boolean } {
 
 function build(
   ear: LocalEar,
-  options: { quietPeriodMs?: number; wakeWord?: WakeWordDetector } = {},
+  options: { quietPeriodMs?: number; wakeWord?: WakeWordDetector; hold?: () => boolean } = {},
 ) {
   const vad = controllableVad();
   const wakeWord = options.wakeWord ?? controllableWakeWord();
@@ -67,6 +67,7 @@ function build(
     classifier: createWakeWordClassifier(),
     events,
     ...(options.quietPeriodMs === undefined ? {} : { quietPeriodMs: options.quietPeriodMs }),
+    ...(options.hold === undefined ? {} : { hold: options.hold }),
   });
   return { gate, events, vad, wakeWord };
 }
@@ -229,6 +230,38 @@ describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
     const forwardsWhileOpen = events.onForward.mock.calls.length;
     await gate.push(frame());
     expect(events.onForward).toHaveBeenCalledTimes(forwardsWhileOpen);
+  });
+
+  it("stays open through the quiet period while held — a listener is not gone", async () => {
+    const ear = earHearing("hey mastra open the browser");
+    let mouthSpeaking = true;
+    const { gate, events, vad } = build(ear, {
+      quietPeriodMs: 300,
+      hold: () => mouthSpeaking,
+    });
+
+    await say(gate, vad);
+    expect(gate.isOpen).toBe(true);
+
+    // Silence long past the quiet period, but the mouth is mid-answer: the
+    // user is listening, and the gate must not hang up on its own voice.
+    vad.speaking = false;
+    for (let i = 0; i < 10; i += 1) await gate.push(frame());
+    expect(gate.isOpen).toBe(true);
+    expect(events.onIdle).not.toHaveBeenCalled();
+
+    // The answer ends. The quiet period that follows is a FULL one — the
+    // clock restarted at the last hold, so two more frames of silence are
+    // not enough to close the gate...
+    mouthSpeaking = false;
+    await gate.push(frame());
+    await gate.push(frame());
+    expect(gate.isOpen).toBe(true);
+
+    // ...but a full quiet period of silence after the answer is.
+    await gate.push(frame());
+    expect(gate.state).toBe("idle");
+    expect(events.onIdle).toHaveBeenCalled();
   });
 
   it("does not re-decide mid-sentence once it has opened", async () => {

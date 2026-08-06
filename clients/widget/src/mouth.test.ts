@@ -133,4 +133,17 @@ describe("the disciplines, pinned in the source", () => {
     const deliver = mouthSource.slice(mouthSource.indexOf("deliver(frame)"));
     expect(deliver).toContain("pendingAsks.has(meaning.id)");
   });
+
+  test("a lane word never barges the model mid-speech — it queues until playback drains", () => {
+    // Sending text into a live session while audio is playing is a barge:
+    // Gemini abandons the sentence it was saying. Live QA heard answers cut
+    // off by their own progress updates. The deliver path must check the
+    // playing set before sendText, and the drain path must flush the queue.
+    const deliver = mouthSource.slice(mouthSource.indexOf("deliver(frame)"));
+    expect(deliver.indexOf("playing.size > 0")).toBeGreaterThan(-1);
+    expect(deliver.indexOf("playing.size > 0")).toBeLessThan(deliver.indexOf("session.sendText"));
+    expect(mouthSource).toContain("if (playing.size === 0) flushHeldWords()");
+    // An answer purges the queued progress it outran.
+    expect(deliver).toContain('heldWords[i].kind === "progress"');
+  });
 });
