@@ -243,6 +243,10 @@ body {
 }
 
 #caption {
+  /* Toggled off for now (Jamie, 2026-08-05): a long caption grows a scroll
+     bar, and a scroll bar on a face looks terrible. The element stays — the
+     state machine still writes it — the skin just declines to draw it. */
+  display: none;
   margin: 14px 0 0;
   max-width: 320px;
   max-height: 96px;
