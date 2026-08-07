@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 
+import { NAV_ENTRIES as HUB_ENTRIES } from "@hub/nav/entries";
 import { NAV_ENTRIES, isActive } from "./nav";
 import { Sidebar } from "./sidebar";
 
@@ -48,4 +49,22 @@ test("the visitor's page gets the pill and only that page", () => {
   expect(activeMarks).toHaveLength(1);
   const activeRegion = html.slice(html.indexOf('data-active="true"'));
   expect(activeRegion).toContain(">Audit<");
+});
+
+test("the sidebar carries no second hand-maintained list — it reads the hub's one source", () => {
+  // The labels, hrefs, external flags, and order come from @hub/nav/entries.
+  // If someone re-introduces a local copy, this test breaks because the two
+  // would no longer be the same array.
+  expect(NAV_ENTRIES.map((e) => e.label)).toEqual(HUB_ENTRIES.map((e) => e.label));
+  expect(NAV_ENTRIES.map((e) => e.href)).toEqual(HUB_ENTRIES.map((e) => e.href));
+  expect(NAV_ENTRIES.map((e) => e.external)).toEqual(HUB_ENTRIES.map((e) => e.external));
+});
+
+test("every hub link wears an icon — none drifts in without its face", () => {
+  // A new link added to the hub source without a matching icon here is the
+  // one way this design can still drift. This guard makes it a test failure,
+  // not a silent undefined in the sidebar.
+  for (const entry of NAV_ENTRIES) {
+    expect(entry.icon, `no icon wired for ${entry.href}`).toBeDefined();
+  }
 });

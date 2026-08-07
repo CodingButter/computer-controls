@@ -225,6 +225,8 @@
       <p id="reason" hidden></p>
     </main>
 
+    <div id="nav-drawer-root"></div>
+
     <button id="drawer-toggle" type="button" aria-expanded="false">Log</button>
     <aside id="drawer" data-open="false" aria-label="Conversation">
       <div id="log"></div>
@@ -238,5 +240,9 @@
          /vendor/three.module.js and imported by orb-webgl.js with a relative
          specifier. No import map, no bundler, no runtime CDN fetch (#103). -->
     <script type="module" src="/orb.js"></script>
+    <script type="module">
+      import { initNavDrawer } from "/nav-drawer.js";
+      initNavDrawer({ mount: document.getElementById("nav-drawer-root") });
+    </script>
   </body>
 </html>

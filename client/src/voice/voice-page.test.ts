@@ -21,10 +21,13 @@ describe("the browser half of the client", () => {
     expect(read("./index.ts")).not.toContain("push-to-talk");
 
     // What is left ships: the page loads the module this file imports, and it
-    // carries no second copy of the logic inline.
+    // carries no second copy of the logic inline. The nav-drawer script (#167)
+    // is a separate concern — it fetches /api/nav for the way-back links; it
+    // carries no voice logic.
     const page = read("../../public/chat.html");
     expect(page).toContain('<script type="module" src="/app.js"></script>');
-    expect(page.match(/<script\b/g)).toHaveLength(1);
+    expect(page.match(/<script\b/g)).toHaveLength(2);
+    expect(page).toContain("/nav-drawer.js");
     expect(page).not.toContain("VOICE_BASE");
 
     // And the module is a real served asset, not a source file the server

@@ -44,6 +44,7 @@
     </style>
   </head>
   <body>
+    <div id="nav-drawer-root"></div>
     <header>
       <strong>computer controls</strong>
       <span id="scope">connecting…</span>
@@ -55,5 +56,9 @@
       <button id="send" type="submit">Send</button>
     </form>
     <script type="module" src="/app.js"></script>
+    <script type="module">
+      import { initNavDrawer } from "/nav-drawer.js";
+      initNavDrawer({ mount: document.getElementById("nav-drawer-root") });
+    </script>
   </body>
 </html>
