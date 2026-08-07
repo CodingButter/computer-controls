@@ -169,3 +169,238 @@ describe("the stream a page actually reads", () => {
     expect((await res.json()).error).toBe("The orb needs a Google account.");
   });
 });
+
+/**
+ * The MJPEG stream route: the hub's read path to a single window's daemon
+ * capture, repeated at a low frame cap while the page watches. These tests pin
+ * the contract that matters for a policy-gated live stream — the door refuses
+ * before any pixels, the stream emits correctly-framed parts while it runs, a
+ * mid-stream refusal closes cleanly without a redacted frame, and a new viewer
+ * replaces the active one.
+ */
+
+/** A tiny 1×1 PNG, base64. Enough to prove framing is byte-accurate. */
+const PNG_PIXEL = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+const PNG_BYTES = new Uint8Array(Buffer.from(PNG_PIXEL, "base64"));
+
+/** A second distinct payload, so a test can tell two frames apart. */
+const PNG_ALT = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwAEoA/BC+0PAAAAAElFTkSuQmCC";
+const PNG_ALT_BYTES = new Uint8Array(Buffer.from(PNG_ALT, "base64"));
+
+function captureMount(captureFrame: (windowId: string) => Promise<unknown>) {
+  const live = liveMount(0);
+  return { ...live, mount: { ...live.mount, captureFrame: captureFrame as never } };
+}
+
+/**
+ * Read the raw bytes of a stream response until at least `partCount`
+ * multipart boundaries have arrived (or the stream ends), then return the
+ * individual image part payloads parsed from the boundary delimiters.
+ *
+ * Works entirely in raw bytes — the image payloads are PNG binary, so a
+ * text decode/encode round-trip would corrupt non-ASCII bytes.
+ */
+const BOUNDARY = new TextEncoder().encode("--orbstream");
+const HEADER_SEP = new TextEncoder().encode("\r\n\r\n");
+
+async function streamParts(res: Response, partCount: number): Promise<Uint8Array[]> {
+  const reader = res.body!.getReader();
+  const chunks: Uint8Array[] = [];
+  let boundaryHits = 0;
+  while (boundaryHits < partCount) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    boundaryHits += countBytes(value, BOUNDARY);
+  }
+  await reader.cancel();
+  return splitParts(concat(chunks));
+}
+
+function countBytes(haystack: Uint8Array, needle: Uint8Array): number {
+  let count = 0;
+  let i = 0;
+  while ((i = indexOfBytes(haystack, needle, i)) !== -1) {
+    count++;
+    i += needle.length;
+  }
+  return count;
+}
+
+function indexOfBytes(haystack: Uint8Array, needle: Uint8Array, from: number): number {
+  outer: for (let i = from; i <= haystack.length - needle.length; i++) {
+    for (let j = 0; j < needle.length; j++) {
+      if (haystack[i + j] !== needle[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
+}
+
+function concat(parts: Uint8Array[]): Uint8Array {
+  const total = parts.reduce((n, p) => n + p.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
+}
+
+/** Split a multipart/x-mixed-replace body into its image part payloads (raw bytes). */
+function splitParts(body: Uint8Array): Uint8Array[] {
+  const parts: Uint8Array[] = [];
+  let search = 0;
+  while (true) {
+    const boundaryAt = indexOfBytes(body, BOUNDARY, search);
+    if (boundaryAt === -1) break;
+    const nextBoundary = indexOfBytes(body, BOUNDARY, boundaryAt + BOUNDARY.length);
+    const partEnd = nextBoundary === -1 ? body.length : nextBoundary;
+    const headerSep = indexOfBytes(body, HEADER_SEP, boundaryAt);
+    if (headerSep !== -1 && headerSep < partEnd) {
+      let payloadStart = headerSep + HEADER_SEP.length;
+      let payloadEnd = partEnd;
+      // Trim the \r\n that precedes the next boundary delimiter.
+      if (payloadEnd >= 2 && body[payloadEnd - 2] === 0x0d && body[payloadEnd - 1] === 0x0a) {
+        payloadEnd -= 2;
+      }
+      if (payloadEnd > payloadStart) {
+        parts.push(body.slice(payloadStart, payloadEnd));
+      }
+    }
+    search = boundaryAt + BOUNDARY.length;
+  }
+  return parts;
+}
+
+describe("the MJPEG window stream", () => {
+  it("a hub without a capture path answers 404, not a broken stream", async () => {
+    const { mount } = liveMount(0);
+    const res = await buildOrbApp(mount).request("/api/orb/stream/win1");
+
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe("No desktop capture available on this hub.");
+  });
+
+  it("a refused orb refuses the stream at the door", async () => {
+    const res = await buildOrbApp({ reason: "The orb needs a Google account." }).request(
+      "/api/orb/stream/win1",
+    );
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("The orb needs a Google account.");
+  });
+
+  it("a blocked window refuses at the door with no image parts ever sent", async () => {
+    const captureFrame = async () => ({ refused: true, reason: "No frame available for this window." });
+    const { mount } = captureMount(captureFrame);
+
+    const res = await buildOrbApp(mount).request("/api/orb/stream/win1");
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("No frame available for this window.");
+    // No multipart headers were ever committed — the refusal is plain JSON.
+    expect(res.headers.get("content-type")).toContain("application/json");
+  });
+
+  it("a capture error at the door answers 503, never a partial stream", async () => {
+    const captureFrame = async () => {
+      throw new Error("connection refused");
+    };
+    const { mount } = captureMount(captureFrame);
+
+    const res = await buildOrbApp(mount).request("/api/orb/stream/win1");
+
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("The desktop service is unavailable.");
+  });
+
+  it("emits correctly-framed multipart PNG parts while the window is watchable", async () => {
+    let calls = 0;
+    const payloads = [PNG_PIXEL, PNG_ALT, PNG_PIXEL];
+    const expectedBytes = [PNG_BYTES, PNG_ALT_BYTES, PNG_BYTES];
+    const captureFrame = async (_windowId: string) => {
+      const image = payloads[calls] ?? payloads[payloads.length - 1];
+      calls++;
+      return { refused: false, image, format: "png" as const };
+    };
+    const { mount } = captureMount(captureFrame);
+
+    const res = await buildOrbApp(mount).request("/api/orb/stream/win1");
+
+    expect(res.headers.get("content-type")).toBe("multipart/x-mixed-replace; boundary=orbstream");
+    expect(res.headers.get("cache-control")).toBe("no-cache");
+
+    const parts = await streamParts(res, 3);
+    expect(parts.length).toBeGreaterThanOrEqual(2);
+    // The opening frame is the first pull's image, before the interval loop.
+    expect(parts[0]).toEqual(expectedBytes[0]);
+    // Subsequent frames follow the capture sequence.
+    expect(parts[1]).toEqual(expectedBytes[1]);
+  });
+
+  it("a mid-stream refusal closes the stream cleanly, never a redacted frame", async () => {
+    let calls = 0;
+    const captureFrame = async (_windowId: string) => {
+      calls++;
+      if (calls > 2) return { refused: true, reason: "blocked mid-stream" };
+      return { refused: false, image: PNG_PIXEL, format: "png" as const };
+    };
+    const { mount } = captureMount(captureFrame);
+
+    const res = await buildOrbApp(mount).request("/api/orb/stream/win1");
+    const parts = await streamParts(res, 99);
+
+    // Two frames (the door pull + one interval pull), then the refusal closes.
+    expect(parts.length).toBe(2);
+    expect(parts.every((p) => p.length > 0)).toBe(true);
+    // The refusal reason never reaches the stream as image bytes.
+    expect(Buffer.concat(parts).includes("blocked mid-stream")).toBe(false);
+  });
+
+  it("a new viewer replaces the active stream", async () => {
+    const captureFrame = async (_windowId: string) => {
+      return { refused: false, image: PNG_PIXEL, format: "png" as const };
+    };
+    const { mount } = captureMount(captureFrame);
+    const app = buildOrbApp(mount);
+
+    const first = await app.request("/api/orb/stream/win1");
+    const firstReader = first.body!.getReader();
+    // Confirm the first stream is live.
+    const { done: openingDone } = await firstReader.read();
+    expect(openingDone).toBe(false);
+
+    // Open a second stream — the single-stream cap replaces the first.
+    const second = await app.request("/api/orb/stream/win2");
+    expect(second.headers.get("content-type")).toBe("multipart/x-mixed-replace; boundary=orbstream");
+
+    // Drain the first stream; it must terminate because the cap closed it.
+    let firstEnded = false;
+    for (let i = 0; i < 100; i++) {
+      const { done } = await firstReader.read();
+      if (done) {
+        firstEnded = true;
+        break;
+      }
+    }
+    expect(firstEnded).toBe(true);
+    await second.body!.getReader().cancel();
+  });
+
+  it("passes the window id from the path to each capture pull", async () => {
+    const seen: string[] = [];
+    const captureFrame = async (windowId: string) => {
+      seen.push(windowId);
+      return { refused: false, image: PNG_PIXEL, format: "png" as const };
+    };
+    const { mount } = captureMount(captureFrame);
+
+    const res = await buildOrbApp(mount).request("/api/orb/stream/special-window-42");
+    await streamParts(res, 2);
+
+    expect(seen.length).toBeGreaterThanOrEqual(2);
+    expect(seen.every((id) => id === "special-window-42")).toBe(true);
+  });
+});

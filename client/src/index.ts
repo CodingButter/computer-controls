@@ -31,6 +31,7 @@ import { findDaemonSocket, readCensus } from "./permissions/daemon.ts";
 import { createPermissionRegistry } from "./permissions/registry.ts";
 import { buildPermissionsApp } from "./permissions/routes.ts";
 import { createHubBrain, createLaneFaceSource, mountOrb } from "./orb/index.ts";
+import { createDesktopCapture } from "./desktop-capture.ts";
 import { applicationDirs, scanDesktopEntries } from "./platform/freedesktop/entries.ts";
 import { FileSettingsAudit } from "./settings/audit.ts";
 import { SettingsGate } from "./settings/gate.ts";
@@ -209,6 +210,7 @@ const orb = await mountOrb({
   credentials: storage,
   settingsPath: path.join(config.root, config.configDir, "settings.json"),
   faces: { mouths: faces.mouths, subscribe: faces.subscribeFace },
+  captureFrame: createDesktopCapture(),
 });
 
 /**

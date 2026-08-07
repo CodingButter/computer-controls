@@ -20,6 +20,7 @@ import { isRefusal, resolveOrbCredential } from "./credentials.ts";
 import { buildRealtimeSettingsApp } from "./realtime-settings.ts";
 import { buildTokenMintApp } from "./token-mint.ts";
 import { buildOrbApp } from "./routes.ts";
+import type { CaptureFrame } from "./routes.ts";
 
 export { ORB_BASE_PATH, GESTURES, parseGesture, buildOrbApp, toPageEvent } from "./routes.ts";
 export {
@@ -40,7 +41,7 @@ export type { RealtimeProviderId, RealtimeProviderDescriptor } from "./providers
 export { createHubBrain } from "./brain.ts";
 export { createLaneFaceSource } from "./face-source.ts";
 
-export type { OrbEvent, OrbState, OrbStatus } from "./routes.ts";
+export type { OrbEvent, OrbState, OrbStatus, CaptureFrame, CaptureFrameResult } from "./routes.ts";
 export type { HubBrain } from "./brain.ts";
 export type { LaneFaceSource } from "./face-source.ts";
 
@@ -61,6 +62,13 @@ export type OrbMountOptions = {
     mouths(): number;
     subscribe(listener: (event: StateEvent) => void): () => void;
   };
+  /**
+   * A read path to the desktop daemon's window capture, policy-gated. Absent
+   * when the hub has no desktop; present, the orb's stream route pulls frames
+   * from it. Provided by the hub, not imported inside this pure module, so the
+   * route stays unit-testable with a stub.
+   */
+  captureFrame?: CaptureFrame;
 };
 
 export type OrbMount = {
@@ -105,7 +113,11 @@ export async function mountOrb(options: OrbMountOptions): Promise<OrbMount> {
   const faces = options.faces ?? { mouths: () => 0, subscribe: () => () => {} };
   return {
     app: composeSettings(
-      buildOrbApp({ mouths: () => faces.mouths(), subscribe: (listener) => faces.subscribe(listener) }),
+      buildOrbApp({
+        mouths: () => faces.mouths(),
+        subscribe: (listener) => faces.subscribe(listener),
+        ...(options.captureFrame ? { captureFrame: options.captureFrame } : {}),
+      }),
     ),
   };
 }
