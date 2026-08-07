@@ -166,6 +166,11 @@ export async function openMouth({ onCaption, onState, onReason }) {
     // `session` is declared below; nothing can play — so nothing can drain —
     // before the dial that creates it resolves.
     const heldWords = [];
+    // Set when the user interrupts, cleared when the model speaks again.
+    // Emptying `playing` is what lets a lane word through, so a barge-in
+    // would otherwise open the faucet at the worst possible moment: the
+    // user finally has the floor and tool #7 talks over them.
+    let userHasFloor = false;
     const flushHeldWords = () => {
       while (heldWords.length) {
         const held = heldWords.shift();
@@ -176,6 +181,9 @@ export async function openMouth({ onCaption, onState, onReason }) {
     const speak = (bytes) => {
       const samples = floatFromPcm16(bytes);
       if (!samples.length) return;
+      // The model is talking, which means the user's interruption has been
+      // answered. Narration may resume.
+      userHasFloor = false;
       const buffer = playback.createBuffer(1, samples.length, 24000);
       buffer.copyToChannel(samples, 0);
       const source = playback.createBufferSource();
@@ -192,6 +200,21 @@ export async function openMouth({ onCaption, onState, onReason }) {
       onState?.("speaking");
     };
     const bargeIn = () => {
+      // The user talking is the most significant signal there is, so the
+      // queued narration dies here. Dropped, not deferred: these words
+      // describe steps that have already finished, and stopping the sources
+      // below fires `onended` — which drains `playing` and would flush this
+      // very queue. Left in place, an interruption is the exact thing that
+      // unloads stale narration at the person who interrupted.
+      //
+      // Answers survive, for the same reason the purge above spares them:
+      // an id is struck from `pendingAsks` when its answer is queued, so a
+      // dropped answer is a result the user asked for and never receives.
+      for (let i = heldWords.length - 1; i >= 0; i -= 1) {
+        if (heldWords[i].kind === "progress") heldWords.splice(i, 1);
+      }
+      // The floor belongs to the user until the model has answered them.
+      userHasFloor = true;
       for (const source of playing) {
         try {
           source.stop();
@@ -282,6 +305,8 @@ export async function openMouth({ onCaption, onState, onReason }) {
           }
         }
       }
+      // Narration waits while the user holds the floor; their result does not.
+      if (meaning.kind === "progress" && userHasFloor) return;
       if (playing.size > 0) {
         heldWords.push(meaning);
         return;
