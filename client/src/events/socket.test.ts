@@ -34,7 +34,9 @@ let url: string;
 const open: WebSocket[] = [];
 
 /** The brain, played by a hand: every ask recorded, every answer scripted. */
-let asked: { request: string; onProgress?: (signal: string) => void }[];
+type Ask = { request: string; onProgress?: (signal: string) => void };
+let askedFeed: Ledger<Ask>;
+let asked: Ask[];
 let answerWith: (request: string) => Promise<string>;
 
 /**
@@ -43,12 +45,16 @@ let answerWith: (request: string) => Promise<string>;
  * SSE face learns the conversation moved — so the pins below are what keep
  * a deaf hub's faces honest.
  */
+let observedFeed: Ledger<string>;
 let observed: string[];
 
 beforeEach(async () => {
   source = new ScriptedEventSource();
-  asked = [];
-  observed = [];
+  collected = [];
+  askedFeed = ledger<Ask>();
+  asked = askedFeed.entries;
+  observedFeed = ledger<string>();
+  observed = observedFeed.entries;
   answerWith = async () => "Done.";
   // A bare HTTP server standing in for the hub's: this module attaches to an
   // upgrade listener, and Hono is not part of that contract.
@@ -59,15 +65,15 @@ beforeEach(async () => {
   socket = attachEventSocket(server, source, {
     brain: {
       ask: (request, onProgress) => {
-        asked.push({ request, ...(onProgress ? { onProgress } : {}) });
+        askedFeed.push({ request, ...(onProgress ? { onProgress } : {}) });
         return answerWith(request);
       },
     },
     observer: {
-      voiceCount: (count) => observed.push(`voice:${count}`),
-      askStarted: () => observed.push("ask"),
-      answerDelivered: () => observed.push("answer"),
-      caption: (text) => observed.push(`caption:${text}`),
+      voiceCount: (count) => observedFeed.push(`voice:${count}`),
+      askStarted: () => observedFeed.push("ask"),
+      answerDelivered: () => observedFeed.push("answer"),
+      caption: (text) => observedFeed.push(`caption:${text}`),
     },
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -123,19 +129,113 @@ async function shutFace(client: WebSocket, how: "close" | "terminate" = "close")
   await seen;
 }
 
-/** Everything a face hears, collected as it arrives. */
-function collect(client: WebSocket): StateEvent[] {
-  const heard: StateEvent[] = [];
-  client.on("message", (raw) => heard.push(JSON.parse(String(raw)) as StateEvent));
-  return heard;
+/**
+ * A growing record that can be waited on by length.
+ *
+ * The waiting is the point. A test that sleeps is betting the hub finishes
+ * inside the nap; a ledger resolves on the arrival itself, so the same test
+ * is correct on a machine that happens to be slower than the bet.
+ */
+type Ledger<T> = {
+  /** The entries so far, handed out directly so assertions read the live array. */
+  readonly entries: T[];
+  push(entry: T): void;
+  /** Resolves once the nth entry has landed — immediately if it already has. */
+  atLeast(n: number): Promise<T[]>;
+};
+
+function ledger<T>(): Ledger<T> {
+  const entries: T[] = [];
+  const waiting: { wanted: number; release: () => void }[] = [];
+  return {
+    entries,
+    push(entry) {
+      entries.push(entry);
+      // Walked backwards so releasing one waiter cannot skip the next.
+      for (let index = waiting.length - 1; index >= 0; index -= 1) {
+        const waiter = waiting[index];
+        if (waiter && entries.length >= waiter.wanted) {
+          waiting.splice(index, 1);
+          waiter.release();
+        }
+      }
+    },
+    atLeast(n) {
+      if (entries.length >= n) return Promise.resolve(entries);
+      return new Promise((resolve) => {
+        waiting.push({ wanted: n, release: () => resolve(entries) });
+      });
+    },
+  };
 }
 
-/** Let the event loop carry whatever is in flight to the other end. */
-const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+/** The transcript behind each collected face, keyed by the client reading it. */
+const transcripts = new WeakMap<WebSocket, Ledger<StateEvent>>();
+/** Every face being collected from in the current test, for barriers to sweep. */
+let collected: { client: WebSocket; transcript: Ledger<StateEvent> }[] = [];
+
+/** Everything a face hears, collected as it arrives. */
+function collect(client: WebSocket): StateEvent[] {
+  const heard = ledger<StateEvent>();
+  transcripts.set(client, heard);
+  collected.push({ client, transcript: heard });
+  client.on("message", (raw) => heard.push(JSON.parse(String(raw)) as StateEvent));
+  return heard.entries;
+}
+
+/** Waits until a face has heard `n` events, then hands back its transcript. */
+async function heard(client: WebSocket, n: number): Promise<StateEvent[]> {
+  const transcript = transcripts.get(client);
+  if (!transcript) throw new Error("face is not being collected from");
+  return transcript.atLeast(n);
+}
+
+/**
+ * Proves the hub has finished everything this face said before now.
+ *
+ * Silence cannot be waited for by counting — there is no nth event coming.
+ * So the face says something the lane is required to say straight back, and
+ * hearing it back means everything sent earlier has already been handled.
+ * The returned count is the transcript length including the barrier's own
+ * frame, so a caller can assert on what did *not* arrive before it.
+ *
+ * A caption is broadcast to every face, so the wait covers all of them and
+ * each transcript then has the marker removed. That leaves every assertion
+ * reading only what the hub said of its own accord, and makes the barrier a
+ * proof that the whole broadcast is done rather than just this one socket.
+ * The observer is still told, so this does not belong in a test counting
+ * captions on the observer.
+ */
+let barriers = 0;
+async function barrier(client: WebSocket): Promise<void> {
+  if (!transcripts.has(client)) throw new Error("face is not being collected from");
+  barriers += 1;
+  const mark = `barrier-${barriers}`;
+  const audience = collected.filter((face) => face.client.readyState === WebSocket.OPEN);
+  const marked = audience.map((face) => ({
+    ...face,
+    expected: face.transcript.entries.length + 1,
+  }));
+  client.send(JSON.stringify({ type: "caption", text: mark }));
+  await Promise.all(marked.map((face) => face.transcript.atLeast(face.expected)));
+  for (const face of marked) {
+    const at = face.transcript.entries.findIndex(
+      (entry) => entry.type === "caption" && entry.text === mark,
+    );
+    if (at === -1) throw new Error(`barrier caption never reached a face: ${mark}`);
+    face.transcript.entries.splice(at, 1);
+  }
+}
+
+/** Waits until the brain has been asked `n` times. */
+const brainAsked = (n: number) => askedFeed.atLeast(n);
+
+/** Waits until the observer has been told `n` things. */
+const reported = (n: number) => observedFeed.atLeast(n);
 
 test("test_the_event_socket_carries_state_out_and_gestures_in_and_nothing_else", async () => {
   const face = await connectFace();
-  const heard = collect(face);
+  const faceHeard = collect(face);
 
   // Out: every state word the hub has, in the order a turn produces them.
   source.emitAll([
@@ -145,8 +245,8 @@ test("test_the_event_socket_carries_state_out_and_gestures_in_and_nothing_else",
     { type: "speaking" },
     { type: "idle" },
   ]);
-  await settle();
-  expect(heard).toEqual([
+  await heard(face, 5);
+  expect(faceHeard).toEqual([
     { type: "wake_opened" },
     { type: "caption", text: "what is on my calendar" },
     { type: "thinking" },
@@ -158,7 +258,9 @@ test("test_the_event_socket_carries_state_out_and_gestures_in_and_nothing_else",
   face.send(JSON.stringify({ type: "mute" }));
   face.send(JSON.stringify({ type: "drag", x: 400, y: 120 }));
   face.send(JSON.stringify({ type: "dismiss" }));
-  await settle();
+  // Gestures travel inward and produce no frame to count, so the wait is on
+  // the hub having drained this face's queue rather than on an arrival.
+  await barrier(face);
   expect(source.received).toEqual([
     { type: "mute" },
     { type: "drag", x: 400, y: 120 },
@@ -173,27 +275,29 @@ test("test_the_event_socket_carries_state_out_and_gestures_in_and_nothing_else",
   face.send(JSON.stringify({ type: "mute", alsoRunShell: "rm -rf /" }));
   face.send(JSON.stringify({ type: "wake_opened" })); // a face may not announce state
   face.send("not json at all");
-  await settle();
+  await barrier(face);
   expect(source.received).toHaveLength(before);
 
   // Refusal is silent: no error frame came back that would tell a caller which
   // of its guesses parsed, and the connection is still up.
-  expect(heard).toHaveLength(5);
+  expect(faceHeard).toHaveLength(5);
   expect(face.readyState).toBe(WebSocket.OPEN);
 });
 
 test("test_idle_audio_never_leaves_the_machine_with_the_widget_running", async () => {
   const face = await connectFace();
-  const heard: unknown[] = [];
   const binaryHeard: unknown[] = [];
   face.on("message", (raw, isBinary) => {
-    (isBinary ? binaryHeard : heard).push(raw);
+    if (isBinary) binaryHeard.push(raw);
   });
+  const textHeard = collect(face);
 
   // The hub sits idle with a face attached — the exact condition the privacy
-  // claim is about. A wake never opens, so nothing is said.
-  await settle();
-  expect(heard).toHaveLength(0);
+  // claim is about. A wake never opens, so nothing is said. The barrier is
+  // what gives the silence teeth: the hub has demonstrably been round-tripped
+  // and still volunteered nothing.
+  await barrier(face);
+  expect(textHeard).toHaveLength(0);
   expect(binaryHeard).toHaveLength(0);
 
   // Now a whole turn happens. Even mid-conversation, what crosses is text the
@@ -205,13 +309,13 @@ test("test_idle_audio_never_leaves_the_machine_with_the_widget_running", async (
     { type: "speaking" },
     { type: "idle" },
   ]);
-  await settle();
+  await heard(face, 4);
   expect(binaryHeard).toHaveLength(0);
-  for (const frame of heard) {
-    const parsed = JSON.parse(String(frame)) as Record<string, unknown>;
+  for (const frame of textHeard) {
     // A caption carries the transcript the hub already produced. Nothing else
     // carries a payload at all.
-    expect(Object.keys(parsed).every((key) => key === "type" || key === "text")).toBe(true);
+    const keys = Object.keys(frame as unknown as Record<string, unknown>);
+    expect(keys.every((key) => key === "type" || key === "text")).toBe(true);
   }
 
   // The other direction is the one that would actually leak a room: a face
@@ -220,7 +324,7 @@ test("test_idle_audio_never_leaves_the_machine_with_the_widget_running", async (
   face.send(Buffer.from([0x52, 0x49, 0x46, 0x46, 0x00, 0x01, 0x02]));
   face.send(JSON.stringify({ type: "audio", pcm: [0, 1, 2, 3] }));
   face.send(JSON.stringify({ type: "mute", audio: "UklGRg==" }));
-  await settle();
+  await barrier(face);
   expect(source.received).toHaveLength(0);
 });
 
@@ -235,7 +339,9 @@ describe("the socket", () => {
 
     source.emit({ type: "wake_opened" });
     source.emit({ type: "caption", text: "both of you" });
-    await settle();
+    // Both faces are waited on: one having caught up says nothing about the
+    // other, and the claim here is that they are served alike.
+    await Promise.all([heard(orb, 2), heard(widget, 2)]);
 
     expect(orbHeard).toEqual(widgetHeard);
     expect(orbHeard).toHaveLength(2);
@@ -247,7 +353,6 @@ describe("the socket", () => {
     // accepts nothing, and a publisher that keeps buffering into it is how a
     // long-lived stream eats a machine.
     const face = await connectFace();
-    await settle();
     expect(source.watcherCount).toBe(1);
 
     // Stand in for a reader that stopped: the send buffer is what the hub can
@@ -255,25 +360,29 @@ describe("the socket", () => {
     const [served] = socket.faces;
     Object.defineProperty(served!, "bufferedAmount", { get: () => 8 * 1024 * 1024 });
 
+    // The hang-up is two steps that do not land together: the module drops its
+    // subscription synchronously, then terminates. Claimed before the socket
+    // has actually gone, faceCount is still 1 — so the close is waited for
+    // rather than assumed.
+    const hungUp = once(served!, "close");
     source.emit({ type: "caption", text: "into a window that froze" });
-    await settle();
+    expect(source.watcherCount).toBe(0);
+    await hungUp;
 
     // Hung up on, and fully forgotten — no handler left writing into it.
-    expect(source.watcherCount).toBe(0);
     expect(socket.faceCount).toBe(0);
 
     // The hub is unharmed and still serving whoever else is watching. This is
     // the property that matters: one bad face is not an outage.
     const replacement = await connectFace();
-    const heard = collect(replacement);
+    const replacementHeard = collect(replacement);
     source.emit({ type: "idle" });
-    await settle();
-    expect(heard).toEqual([{ type: "idle" }]);
+    await heard(replacement, 1);
+    expect(replacementHeard).toEqual([{ type: "idle" }]);
   });
 
   test("forgets a face that closes, so a shut widget leaves nothing behind", async () => {
     const face = await connectFace();
-    await settle();
     expect(source.watcherCount).toBe(1);
 
     await shutFace(face);
@@ -349,27 +458,32 @@ describe("the voice set", () => {
     // The first opener transitions the set: one broadcast, to everyone. The
     // page that caused it hears it too — hearing voice_opened right after
     // your own open is how a client knows its open was first.
+    // Each step is waited on before the next is sent. Two sends racing from
+    // two connections arrive in either order, so a test that only waited at
+    // the end would be asserting a sequence the hub never promised.
     page.send(JSON.stringify({ type: "voice_open" }));
-    await settle();
+    await Promise.all([heard(widget, 1), heard(page, 1)]);
     expect(widgetHeard).toEqual([{ type: "voice_opened" }]);
     expect(pageHeard).toEqual([{ type: "voice_opened" }]);
 
     // A joiner is not a transition. This silence is load-bearing: a widget
     // that heard a second voice_opened could not tell "someone else was
-    // already talking" from "my open caused this".
+    // already talking" from "my open caused this". Nothing is broadcast, so
+    // the membership change itself — which the observer is always told about —
+    // is what proves the hub got this far.
     widget.send(JSON.stringify({ type: "voice_open" }));
-    await settle();
+    await reported(2);
     expect(widgetHeard).toHaveLength(1);
     expect(pageHeard).toHaveLength(1);
 
     // The first closer leaves a non-empty set: still no broadcast.
     page.send(JSON.stringify({ type: "voice_close" }));
-    await settle();
+    await reported(3);
     expect(widgetHeard).toHaveLength(1);
 
     // The last closer empties it: one voice_closed, to everyone.
     widget.send(JSON.stringify({ type: "voice_close" }));
-    await settle();
+    await Promise.all([heard(widget, 2), heard(page, 2)]);
     expect(widgetHeard).toEqual([{ type: "voice_opened" }, { type: "voice_closed" }]);
     expect(pageHeard).toEqual([{ type: "voice_opened" }, { type: "voice_closed" }]);
 
@@ -382,10 +496,15 @@ describe("the voice set", () => {
     const bystander = await connectFace();
     const widget = await connectFace();
     const widgetHeard = collect(widget);
+    const bystanderHeard = collect(bystander);
 
+    // A no-op leaves no trace to wait for anywhere — not a frame, not even an
+    // observer note — so the proof is a round trip through the same socket
+    // that sent the close: the hub has handled it and said nothing.
     bystander.send(JSON.stringify({ type: "voice_close" }));
-    await settle();
+    await barrier(bystander);
     expect(widgetHeard).toHaveLength(0);
+    expect(bystanderHeard).toHaveLength(0);
   });
 
   test("a socket that dies without saying voice_close counts as having said it", async () => {
@@ -397,12 +516,12 @@ describe("the voice set", () => {
     const widgetHeard = collect(widget);
 
     page.send(JSON.stringify({ type: "voice_open" }));
-    await settle();
+    await heard(widget, 1);
     expect(widgetHeard).toEqual([{ type: "voice_opened" }]);
 
     await shutFace(page, "terminate");
     // The hub has noticed the death; the widget still has to hear about it.
-    await settle();
+    await heard(widget, 2);
     expect(widgetHeard).toEqual([{ type: "voice_opened" }, { type: "voice_closed" }]);
   });
 
@@ -412,21 +531,27 @@ describe("the voice set", () => {
     const second = await connectFace();
     const widgetHeard = collect(widget);
 
+    // Both opens must be in before the crash, or the set may hold only one
+    // owner when it lands and the death would empty it — the test would then
+    // be watching a different story than the one it claims to tell. Only the
+    // first open broadcasts, so the second is waited for at the observer,
+    // which is told of every membership change.
     first.send(JSON.stringify({ type: "voice_open" }));
+    await reported(1);
     second.send(JSON.stringify({ type: "voice_open" }));
-    await settle();
+    await reported(2);
     expect(widgetHeard).toEqual([{ type: "voice_opened" }]);
 
     // One of two owners dies: the set is still occupied, so nothing is said.
     // Waiting for the hub to notice is what gives this claim teeth — asserting
     // silence before the death has landed would pass even if it emptied the set.
     await shutFace(first, "terminate");
-    await settle();
+    await reported(3);
     expect(widgetHeard).toHaveLength(1);
 
     // The survivor closing is what empties it.
     second.send(JSON.stringify({ type: "voice_close" }));
-    await settle();
+    await heard(widget, 2);
     expect(widgetHeard).toEqual([{ type: "voice_opened" }, { type: "voice_closed" }]);
   });
 });
@@ -446,20 +571,22 @@ describe("the conversation", () => {
       });
 
     mouth.send(JSON.stringify({ type: "ask", id: "call-1", request: "what is on my calendar" }));
-    await settle();
+    // The ask produces no frame — it reaches the brain, which is where the
+    // arrival can be waited for.
+    await brainAsked(1);
     expect(asked).toHaveLength(1);
     expect(asked[0]!.request).toBe("what is on my calendar");
     sendProgress = asked[0]!.onProgress!;
 
     // Progress lands mid-flight, on the asker, carrying the asker's own id.
     sendProgress("You are now working on: calendar.");
-    await settle();
+    await heard(mouth, 1);
     expect(mouthHeard).toEqual([
       { type: "progress", id: "call-1", text: "You are now working on: calendar." },
     ]);
 
     finish("Two meetings, both before noon.");
-    await settle();
+    await heard(mouth, 2);
     expect(mouthHeard).toEqual([
       { type: "progress", id: "call-1", text: "You are now working on: calendar." },
       { type: "answer", id: "call-1", text: "Two meetings, both before noon." },
@@ -480,7 +607,7 @@ describe("the conversation", () => {
     };
 
     mouth.send(JSON.stringify({ type: "ask", id: "call-2", request: "do the thing" }));
-    await settle();
+    await heard(mouth, 1);
     expect(mouthHeard).toEqual([{ type: "answer", id: "call-2", text: ASK_FAILED }]);
     // The error's text stayed on the hub. A stranger's ears get a sentence,
     // not a stack trace naming internal hosts.
@@ -499,10 +626,14 @@ describe("the conversation", () => {
       });
 
     mouth.send(JSON.stringify({ type: "ask", id: "call-3", request: "slow thing" }));
-    await settle();
+    // The ask has to be in flight before the mouth dies, or the answer being
+    // dropped proves nothing about addressing.
+    await brainAsked(1);
     await shutFace(mouth, "terminate");
     finish("Too late.");
-    await settle();
+    // The answer goes nowhere, so there is no arrival to wait for. The barrier
+    // proves the hub has since handled traffic and still said nothing.
+    await barrier(bystander);
     expect(bystanderHeard).toHaveLength(0);
   });
 
@@ -513,7 +644,7 @@ describe("the conversation", () => {
     const widgetHeard = collect(widget);
 
     mouth.send(JSON.stringify({ type: "caption", text: "turn the lights down" }));
-    await settle();
+    await Promise.all([heard(mouth, 1), heard(widget, 1)]);
     // Every face, the sender included — a mouth hearing its own caption back
     // is confirmation, not an echo problem. It arrives as the state word,
     // indistinguishable from a caption the hub produced itself.
@@ -534,10 +665,13 @@ describe("the conversation", () => {
 
     try {
       const mouth = await connectFace(`ws://127.0.0.1:${address.port}${EVENTS_PATH}`);
-      const heard = collect(mouth);
+      const mouthHeard = collect(mouth);
       mouth.send(JSON.stringify({ type: "ask", id: "call-1", request: "anyone home" }));
-      await settle();
-      expect(heard).toHaveLength(0);
+      // An ignored ask leaves no trace at all, so the proof is a round trip:
+      // this lane relays captions with or without a brain, and the ask that
+      // went before it produced nothing.
+      await barrier(mouth);
+      expect(mouthHeard).toHaveLength(0);
       expect(mouth.readyState).toBe(WebSocket.OPEN);
     } finally {
       await bareSocket.close();
@@ -724,14 +858,17 @@ describe("what the observer is told", () => {
     const first = await connectFace();
     const second = await connectFace();
 
+    // Each report is waited for before the next gesture is sent. The sequence
+    // is the claim, and two connections sending without a wait between them
+    // arrive in whichever order the event loop picks.
     first.send(JSON.stringify({ type: "voice_open" }));
-    await settle();
+    await reported(1);
     second.send(JSON.stringify({ type: "voice_open" }));
-    await settle();
+    await reported(2);
     first.send(JSON.stringify({ type: "voice_close" }));
-    await settle();
+    await reported(3);
     second.send(JSON.stringify({ type: "voice_close" }));
-    await settle();
+    await reported(4);
 
     // Faces only hear the set's edge transitions; the observer hears every
     // membership change, because the status route's mouth count is exact.
@@ -741,11 +878,11 @@ describe("what the observer is told", () => {
   test("a socket that dies without voice_close still counts down", async () => {
     const face = await connectFace();
     face.send(JSON.stringify({ type: "voice_open" }));
-    await settle();
+    await reported(1);
     expect(observed).toEqual(["voice:1"]);
 
     await shutFace(face, "terminate");
-    await settle();
+    await reported(2);
     expect(observed).toEqual(["voice:1", "voice:0"]);
   });
 
@@ -755,21 +892,28 @@ describe("what the observer is told", () => {
 
     const face = await connectFace();
     face.send(JSON.stringify({ type: "ask", id: "a1", request: "what time is it" }));
-    await settle();
+    await reported(1);
     expect(observed).toEqual(["ask"]);
 
     release("Late.");
-    await settle();
+    await reported(2);
     expect(observed).toEqual(["ask", "answer"]);
   });
 
   test("a caption crossing the lane reaches the observer once", async () => {
     const face = await connectFace();
     face.send(JSON.stringify({ type: "caption", text: "hello hub" }));
-    await settle();
+    await reported(1);
 
     // Once — the socket relays the caption to its own faces itself, and the
     // observer exists for the faces that are not on this socket.
-    expect(observed).toEqual(["caption:hello hub"]);
+    //
+    // A second caption is sent and waited for, because "once" is a claim about
+    // a report that never comes: stopping at the first arrival would pass just
+    // as well if a duplicate were still on its way. By the time the second is
+    // reported, any duplicate of the first would already have been recorded.
+    face.send(JSON.stringify({ type: "caption", text: "still here" }));
+    await reported(2);
+    expect(observed).toEqual(["caption:hello hub", "caption:still here"]);
   });
 });
