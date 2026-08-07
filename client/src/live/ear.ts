@@ -151,11 +151,23 @@ export interface Classifier {
  * what it knows: live testing showed Moonshine transcribing the spoken name as
  * "Master" or "Mastro". The list carries the model's spellings of the one
  * phrase, not extra names.
+ *
+ * The model also swallows the "y" in "hey": a live session on 2026-08-07 read
+ * three clean "hey Mastra"s as "He master, he master," and "He mastered." — the
+ * gate stayed shut on a missing letter. So the list carries the model's
+ * spellings of the greeting too. "he master" is a prefix of "he mastered", and
+ * the match is a substring, so the past tense costs no entry of its own. This
+ * widens the phrase toward an English sentence somebody could say about a third
+ * person, which is the price of a transcript-shaped wake word and the reason
+ * the fingerprint matcher exists.
  */
 export const WAKE_WORDS: readonly string[] = [
   "hey mastra",
   "hey master",
   "hey mastro",
+  "he mastra",
+  "he master",
+  "he mastro",
 ];
 
 const COMMAND_VERBS = [
