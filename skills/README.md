@@ -71,6 +71,33 @@ Refusals are recorded. The record names the screen and never what it found —
 an audit trail that quoted the address it was refusing would be publishing it
 helpfully.
 
+## And then something reads it
+
+The screens above are patterns, and the questions that decide whether a route
+should leave the machine that learned it are not questions a pattern can be
+asked. So the last step before a pull request exists is a reader — a model,
+handed the rendered `SKILL.md` byte for byte, and asked three things:
+
+1. Does anything in this name a person, a subject line, an employer, a path
+   under somebody's home directory or a hostname?
+2. Could following this destroy, send, pay for or delete something without
+   saying so first? Being told by running it is being told too late.
+3. Is this a route at all, or one installation's window titles and folder
+   layout — that machine's configuration with extra steps?
+
+Two rulings hold this up. A reader that could not be reached is **not** a pass:
+an expired credential, a rate limit or an answer in words the gate cannot read
+is an absence, it is recorded under its own name so an operator can tell it from
+a bad route, and nothing is proposed. And there is no override — no flag, no
+environment variable — because a gate with a way past it is a gate whose way
+past it becomes the way.
+
+What lands in the published `REVIEW.md` is which readers answered and what they
+answered, never their reasoning: a published file quoting a model's prose is a
+published file whose contents a model chose. Two readers agreeing is a stronger
+signal than one insisting, and both are weaker than yours. A machine having read
+it is a reason the pair is worth your time; it is not a reason to merge.
+
 ## What the screens cannot answer, and you can
 
 `Private Channels` and `Alice Nichols` are the same shape: two capitalised words,

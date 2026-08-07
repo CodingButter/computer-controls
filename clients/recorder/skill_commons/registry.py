@@ -192,12 +192,17 @@ class SkillRegistry:
         return tuple(hits[:limit])
 
 
-def write_pair(root: str | Path, skill) -> tuple[Path, Path]:
+def write_pair(root: str | Path, skill, read_by=None) -> tuple[Path, Path]:
     """Put both halves of a submission on disk, and answer with where.
 
     Both files or neither. A commit carrying a skill without the review that
     justified it is a submission whose reviewer has nothing to read, and the
     cheapest place to make that impossible is the function that writes them.
+
+    `read_by` is what the second reader answered, and it is what the forge hands
+    down when it is publishing. Absent, the review file is the checklist alone —
+    which is the shape the merged skills on disk already have, and is why this
+    stays optional here and is required at the gate rather than at the typewriter.
     """
     from .render import render, render_review
 
@@ -206,7 +211,7 @@ def write_pair(root: str | Path, skill) -> tuple[Path, Path]:
     document = folder / SKILL_FILE
     review = folder / REVIEW_FILE
     document.write_text(render(skill))
-    review.write_text(render_review(skill))
+    review.write_text(render_review(skill, read_by))
     return document, review
 
 
