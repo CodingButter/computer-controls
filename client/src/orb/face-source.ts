@@ -1,4 +1,4 @@
-import type { LaneObserver } from "../events/socket.ts";
+import type { LaneObserver, VoiceSession } from "../events/socket.ts";
 import type { EventSource } from "../events/source.ts";
 import type { StateEvent } from "../events/types.ts";
 
@@ -50,12 +50,30 @@ export type LaneFaceSource = {
   subscribeFace(handler: (event: StateEvent) => void): () => void;
   /** How many connections hold an open voice session right now. */
   mouths(): number;
+  /**
+   * The open sessions, aged at the moment of asking.
+   *
+   * Deltas rather than timestamps: a person reading the status route wants
+   * "open eleven minutes, silent for ten" — the answer to "is this thing
+   * stuck" — and a clock reading would make them do that subtraction against
+   * a hub whose clock they cannot see.
+   */
+  sessions(): VoiceSessionStatus[];
+};
+
+/** One open session, in ages rather than clock times. */
+export type VoiceSessionStatus = {
+  /** How long the session has been open. */
+  ageMs: number;
+  /** How long since its owner last said anything on the lane. */
+  quietMs: number;
 };
 
 export function createLaneFaceSource(): LaneFaceSource {
   const laneHandlers = new Set<(event: StateEvent) => void>();
   const faceHandlers = new Set<(event: StateEvent) => void>();
   let openMouths = 0;
+  let openSessions: readonly VoiceSession[] = [];
 
   const emit = (event: StateEvent) => {
     for (const handler of [...laneHandlers]) handler(event);
@@ -80,6 +98,9 @@ export function createLaneFaceSource(): LaneFaceSource {
         if (was === 0 && count > 0) emit({ type: "wake_opened" });
         if (was > 0 && count === 0) emit({ type: "idle" });
       },
+      voiceSessions(sessions) {
+        openSessions = sessions;
+      },
       askStarted() {
         emit({ type: "thinking" });
       },
@@ -97,5 +118,12 @@ export function createLaneFaceSource(): LaneFaceSource {
       return () => faceHandlers.delete(handler);
     },
     mouths: () => openMouths,
+    sessions() {
+      const now = Date.now();
+      return openSessions.map((session) => ({
+        ageMs: now - session.openedAt,
+        quietMs: now - session.lastSpokeAt,
+      }));
+    },
   };
 }

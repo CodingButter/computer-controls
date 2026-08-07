@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { StateEvent } from "../events/types.ts";
 import { GESTURES, buildOrbApp, parseGesture, toPageEvent } from "./routes.ts";
+import type { VoiceSessionStatus } from "./face-source.ts";
 
 /**
  * The routes survive the hub going deaf under their old names — a face
@@ -15,10 +16,11 @@ type Listener = (event: StateEvent) => void;
 
 function liveMount(mouths = 0) {
   const listeners = new Set<Listener>();
-  const state = { mouths };
+  const state = { mouths, sessions: [] as VoiceSessionStatus[] };
   return {
     mount: {
       mouths: () => state.mouths,
+      sessions: () => state.sessions,
       subscribe(listener: Listener) {
         listeners.add(listener);
         return () => listeners.delete(listener);
@@ -38,14 +40,41 @@ describe("the status a poll can trust", () => {
     const res = await buildOrbApp(mount).request("/api/orb/status");
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ enabled: true, state: "idle", mouths: 0 });
+    expect(await res.json()).toEqual({ enabled: true, state: "idle", mouths: 0, sessions: [] });
   });
 
   it("any open mouth is talking, and the count says how many", async () => {
-    const { mount } = liveMount(2);
+    const { mount, state } = liveMount(2);
+    state.sessions = [
+      { ageMs: 1_000, quietMs: 500 },
+      { ageMs: 2_000, quietMs: 2_000 },
+    ];
     const res = await buildOrbApp(mount).request("/api/orb/status");
 
-    expect(await res.json()).toEqual({ enabled: true, state: "talking", mouths: 2 });
+    expect(await res.json()).toEqual({
+      enabled: true,
+      state: "talking",
+      mouths: 2,
+      sessions: [
+        { ageMs: 1_000, quietMs: 500 },
+        { ageMs: 2_000, quietMs: 2_000 },
+      ],
+    });
+  });
+
+  it("reports each session's age and quiet time, so a stuck one is visible", async () => {
+    // The symptom this exists for: one mouth, open a long time, nothing said
+    // for nearly as long. A count alone reads identically to a conversation.
+    const { mount, state } = liveMount(1);
+    state.sessions = [{ ageMs: 3_600_000, quietMs: 3_540_000 }];
+    const res = await buildOrbApp(mount).request("/api/orb/status");
+
+    expect(await res.json()).toEqual({
+      enabled: true,
+      state: "talking",
+      mouths: 1,
+      sessions: [{ ageMs: 3_600_000, quietMs: 3_540_000 }],
+    });
   });
 
   it("a refused orb answers with the reason, not a fake green", async () => {

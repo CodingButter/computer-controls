@@ -222,7 +222,7 @@ const captures = createCaptureRequests();
 const orb = await mountOrb({
   credentials: storage,
   settingsPath: path.join(config.root, config.configDir, "settings.json"),
-  faces: { mouths: faces.mouths, subscribe: faces.subscribeFace },
+  faces: { mouths: faces.mouths, sessions: faces.sessions, subscribe: faces.subscribeFace },
   captureFrame: createDesktopCapture(),
   captures,
 });
