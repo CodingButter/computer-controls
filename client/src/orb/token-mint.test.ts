@@ -6,11 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AUTH_TOKENS_ENDPOINT,
   NEW_SESSION_WINDOW_MS,
+  OPENAI_CLIENT_SECRETS_ENDPOINT,
+  OPENAI_TOKEN_TTL_S,
   TOKEN_MINT_PATH,
   TOKEN_TTL_MS,
   buildTokenMintApp,
 } from "./token-mint.ts";
 import { LIVE_MODEL, LIVE_VOICE } from "../live/live.ts";
+import { ORB_SYSTEM_INSTRUCTION } from "../live/session.ts";
 
 const STORED_KEY = "AIzaSyFAKE-b1gbeast-key-that-must-never-travel";
 
@@ -38,6 +41,36 @@ function keylessStore() {
 
 function mintOk(name = "auth_tokens/minted-token-1") {
   return vi.fn(async () => new Response(JSON.stringify({ name }), { status: 200 }));
+}
+
+const OPENAI_KEY = "sk-fake-openai-key-that-must-never-travel";
+
+const NO_OPENAI_ACCOUNT =
+  "The orb needs an OpenAI account. The chat brain does not — it keeps using " +
+  "whatever model you signed in with, and typing still works. Sign in to " +
+  "OpenAI, or paste an OpenAI API key, to turn the orb on.";
+
+/** A store that has only an OpenAI key, filed under the openai-codex slot. */
+function openaiStore() {
+  return {
+    get: () => undefined,
+    getStoredApiKey: (provider: string) => (provider === "openai-codex" ? OPENAI_KEY : undefined),
+    getApiKey: async () => undefined,
+  };
+}
+
+function openaiMintOk(value = "ek_test-minted-secret-1", expiresAtSec?: number) {
+  const exp = expiresAtSec ?? Math.floor(Date.now() / 1000) + 60;
+  return vi.fn(
+    async () =>
+      new Response(JSON.stringify({ client_secret: { value, expires_at: exp } }), { status: 200 }),
+  );
+}
+
+async function openaiSettings(dir: string, extra: Record<string, string> = {}) {
+  const settingsPath = path.join(dir, "settings.json");
+  await writeFile(settingsPath, JSON.stringify({ realtimeProvider: "openai", ...extra }));
+  return settingsPath;
 }
 
 let dir: string;
@@ -228,5 +261,118 @@ describe("the token mint", () => {
     const error = ((await res.json()) as { error: string }).error;
     expect(error).toContain("ETIMEDOUT");
     expect(error).not.toContain(STORED_KEY);
+  });
+});
+
+describe("the OpenAI token mint", () => {
+  it("locks the outgoing mint to the session config, one flat tool, via client_secrets", async () => {
+    const settingsPath = await openaiSettings(dir, {
+      realtimeModel: "gpt-4o-realtime-preview-2024-12-17",
+      realtimeVoice: "alloy",
+    });
+    const fetchFn = openaiMintOk();
+    const app = buildTokenMintApp({ credentials: openaiStore(), settingsPath, fetchFn });
+
+    const res = await app.request(TOKEN_MINT_PATH, { method: "POST" });
+    expect(res.status).toBe(200);
+
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(OPENAI_CLIENT_SECRETS_ENDPOINT);
+    // The key rides the Authorization header, never the URL.
+    expect(url).not.toContain(OPENAI_KEY);
+    expect((init.headers as Record<string, string>)["Authorization"]).toBe(`Bearer ${OPENAI_KEY}`);
+
+    const body = JSON.parse(init.body as string) as {
+      expires_at: number;
+      session_config: {
+        model: string;
+        voice: string;
+        instructions: string;
+        tools: [{ type: string; name: string; parameters: object }];
+        tool_choice: string;
+        input_audio_format: string;
+        output_audio_format: string;
+        input_audio_transcription: { model: string };
+        output_audio_transcription: { model: string };
+      };
+    };
+    expect(body.session_config.model).toBe("gpt-4o-realtime-preview-2024-12-17");
+    expect(body.session_config.voice).toBe("alloy");
+    expect(body.session_config.instructions).toBe(ORB_SYSTEM_INSTRUCTION);
+    expect(body.session_config.tools).toHaveLength(1);
+    expect(body.session_config.tools[0].type).toBe("function");
+    expect(body.session_config.tools[0].name).toBe("ask_the_hub");
+    expect(body.session_config.tool_choice).toBe("auto");
+    expect(body.session_config.input_audio_format).toBe("pcm16");
+    expect(body.session_config.output_audio_format).toBe("pcm16");
+    // The requested expiry is tight — the browser dials immediately after mint.
+    const now = Math.floor(Date.now() / 1000);
+    expect(body.expires_at - now).toBeGreaterThan(OPENAI_TOKEN_TTL_S - 10);
+    expect(body.expires_at - now).toBeLessThanOrEqual(OPENAI_TOKEN_TTL_S);
+  });
+
+  it("refuses a mint response that carries the key where the token belongs", async () => {
+    // Same suspicion the Gemini name field gets: a client_secret value that
+    // echoes the credential is refused, never relayed.
+    const settingsPath = await openaiSettings(dir);
+    const fetchFn = openaiMintOk(`ek_${OPENAI_KEY}`);
+    const app = buildTokenMintApp({ credentials: openaiStore(), settingsPath, fetchFn });
+
+    const res = await app.request(TOKEN_MINT_PATH, { method: "POST" });
+    expect(res.status).toBe(502);
+    const text = await res.text();
+    expect(text).not.toContain(OPENAI_KEY);
+    expect(text).toContain("carried a credential");
+  });
+
+  it("never returns the stored key, even when the upstream echoes it", async () => {
+    // A hostile upstream that reflects the credential back in extra fields.
+    const settingsPath = await openaiSettings(dir);
+    const fetchFn = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            client_secret: { value: "ek_clean-secret-2", expires_at: Math.floor(Date.now() / 1000) + 60 },
+            echoedKey: OPENAI_KEY,
+            debug: { key: OPENAI_KEY },
+          }),
+          { status: 200 },
+        ),
+    );
+    const app = buildTokenMintApp({ credentials: openaiStore(), settingsPath, fetchFn });
+
+    const res = await app.request(TOKEN_MINT_PATH, { method: "POST" });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain(OPENAI_KEY);
+    const parsed = JSON.parse(text) as { token: string; expiresAt: string; model: string };
+    expect(parsed.token).toBe("ek_clean-secret-2");
+    expect(parsed.expiresAt).toMatch(/^\d{4}-/);
+  });
+
+  it("uses the upstream's expiry, not the locally-requested one", async () => {
+    // The provider decides when the secret actually expires; a locally computed
+    // timestamp could outlive it.
+    const settingsPath = await openaiSettings(dir);
+    const upstreamExpiry = Math.floor(Date.now() / 1000) + 30;
+    const fetchFn = openaiMintOk("ek_upstream-expiry-3", upstreamExpiry);
+    const app = buildTokenMintApp({ credentials: openaiStore(), settingsPath, fetchFn });
+
+    const res = await app.request(TOKEN_MINT_PATH, { method: "POST" });
+    expect(res.status).toBe(200);
+    const parsed = (await res.json()) as { expiresAt: string };
+    expect(parsed.expiresAt).toBe(new Date(upstreamExpiry * 1000).toISOString());
+  });
+
+  it("speaks the product's one credential sentence when there is no OpenAI account", async () => {
+    const settingsPath = await openaiSettings(dir);
+    const fetchFn = openaiMintOk();
+    const app = buildTokenMintApp({ credentials: keylessStore(), settingsPath, fetchFn });
+
+    const res = await app.request(TOKEN_MINT_PATH, { method: "POST" });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe(NO_OPENAI_ACCOUNT);
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 });

@@ -22,7 +22,21 @@ import { buildTokenMintApp } from "./token-mint.ts";
 import { buildOrbApp } from "./routes.ts";
 
 export { ORB_BASE_PATH, GESTURES, parseGesture, buildOrbApp, toPageEvent } from "./routes.ts";
-export { GOOGLE_PROVIDER_ID, resolveOrbCredential, orbAvailability } from "./credentials.ts";
+export {
+  GOOGLE_PROVIDER_ID,
+  resolveOrbCredential,
+  resolveRealtimeCredential,
+  resolveRealtimeProvider,
+  orbAvailability,
+} from "./credentials.ts";
+export {
+  REALTIME_PROVIDERS,
+  REALTIME_PROVIDER_IDS,
+  DEFAULT_REALTIME_PROVIDER,
+  parseRealtimeProviderId,
+  hasRealtimeCredential,
+} from "./providers.ts";
+export type { RealtimeProviderId, RealtimeProviderDescriptor } from "./providers.ts";
 export { createHubBrain } from "./brain.ts";
 export { createLaneFaceSource } from "./face-source.ts";
 

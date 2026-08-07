@@ -65,7 +65,7 @@ export const SETUP_TIMEOUT_MS = 15_000;
  * so far: the new socket starts a fresh session.
  */
 export const RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 15_000];
-const defaultRetryWait = (attempt) => new Promise((resolve) => {
+export const defaultRetryWait = (attempt) => new Promise((resolve) => {
     const delay = RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)];
     unrefTimer(setTimeout(resolve, delay));
 });
@@ -75,7 +75,7 @@ const defaultRetryWait = (attempt) => new Promise((resolve) => {
  * `unknown` because this module compiles for both worlds and neither lib
  * admits the other's timer shape.
  */
-function unrefTimer(timer) {
+export function unrefTimer(timer) {
     if (typeof timer === "object" && timer !== null && "unref" in timer) {
         timer.unref();
     }
