@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type { NextConfig } from "next";
 
 // The dashboard is a static export on purpose: the Hono hub in client/ is the
@@ -8,6 +10,12 @@ const nextConfig: NextConfig = {
   output: "export",
   // The export has no image-optimizer server to lean on.
   images: { unoptimized: true },
+  // The sidebar imports the hub's shared nav entries from ../client/src —
+  // Turbopack refuses to resolve anything above its filesystem root, so the
+  // root is the repository, not this package (#167).
+  turbopack: {
+    root: path.join(__dirname, ".."),
+  },
 };
 
 export default nextConfig;

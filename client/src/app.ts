@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 
 import type { AgentTurn } from "./chat.ts";
+import { buildNavApp } from "./nav/routes.ts";
 import type { PlatformId, PlatformSupport } from "./platform/index.ts";
 import { UNBUILT_DASHBOARD_PAGE, dashboardIsBuilt, readUiAsset } from "./ui.ts";
 
@@ -140,6 +141,10 @@ export function buildApp(deps: AppDeps): Hono {
     });
     return c.json(reply);
   });
+
+  // The hub's nav links — core, not optional. Both the dashboard sidebar and
+  // the standalone pages (orb, chat) fetch this so neither carries its own copy.
+  app.route("/", buildNavApp());
 
   // Mounted before the SPA fallback, or the catch-all would swallow the
   // settings section and every sign-in route with a 404-shaped page.
