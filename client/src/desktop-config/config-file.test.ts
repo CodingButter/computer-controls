@@ -145,7 +145,7 @@ describe("never writing a file the daemon would refuse", () => {
 
   it("holds the permissions modes security.py accepts", () => {
     const security = readFileSync(
-      path.join(import.meta.dirname, "..", "..", "..", "service", "desktop_service", "security.py"),
+      path.join(import.meta.dirname, "..", "..", "..", "comcon", "desktop_service", "security.py"),
       "utf8",
     );
     // PERMISSIONS_MODES is built from these two constants; a mode renamed on

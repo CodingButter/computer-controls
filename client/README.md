@@ -21,7 +21,7 @@ credential store (`auth.json`), so a machine that can run the TUI can run this.
 | `COMCON_CLIENT_HOST` | `127.0.0.1` | Bind address. Changing this publishes an agent that holds your desktop; nothing downstream will refuse. |
 | `COMCON_CLIENT_PORT` | `4111` | Port. `0` lets the OS pick, which is how the tests boot it. |
 | `COMCON_CLIENT_ROOT` | this package | Where config, plugins, and the database live. |
-| `COMCON_DESKTOP_PLUGIN_PATH` | `../plugin` | The desktop-control package to mount. |
+| `COMCON_DESKTOP_PLUGIN_PATH` | `../clients/mastra-plugin` | The desktop-control package to mount. |
 | `COMCON_DESKTOP_SCOPE` | `observe` | Operation classes the desktop plugin may mint tools for. |
 | `COMCON_PLUGIN_HOME` | your home | Where the hub looks for plugins already installed on this machine. |
 | `COMCON_PLUGIN_ALLOWLIST` | — | Extra plugin ids to admit, comma-separated. Extends the built-in list; cannot empty it. |

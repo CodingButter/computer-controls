@@ -1,10 +1,10 @@
 /**
  * Every package this package imports has to be a package it declares.
  *
- * The same invariant `plugin/src/dependencies.test.ts` holds, for the same
+ * The same invariant `clients/mastra-plugin/src/dependencies.test.ts` holds, for the same
  * reason: from inside a working checkout an undeclared import and a declared
  * one resolve identically, so neither the compiler nor any other test here can
- * tell them apart. Only the manifest can. This package sits beside `plugin/`
+ * tell them apart. Only the manifest can. This package sits beside `clients/mastra-plugin/`
  * with its own `node_modules`, which is exactly the arrangement where one
  * hand-made link makes the lanes pass on one machine and nowhere else.
  */

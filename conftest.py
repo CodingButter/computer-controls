@@ -24,7 +24,7 @@ is a third lane of its own — the ``human`` marker — deselected everywhere by
 default, including here, and opted into only by setting
 ``DESKTOP_HUMAN_PRESENT`` on the invocation itself.
 
-The gate sits at the repository root rather than inside ``service/`` because the
+The gate sits at the repository root rather than inside ``comcon/`` because the
 service is no longer the only thing with tests. An option registered in a
 subdirectory is not registered at all until pytest has already parsed the
 command line, so ``pytest --no-live`` from the root — the line every issue and
@@ -42,11 +42,11 @@ from pathlib import Path
 import pytest
 
 #: ``desktop_service`` and the service's own ``tests`` package used to be
-#: importable because pytest was run from inside ``service/``. Run from the
+#: importable because pytest was run from inside ``comcon/``. Run from the
 #: root, that directory is on nobody's path, so the suites are placed here
 #: instead of depending on a working directory.
 ROOT = Path(__file__).resolve().parent
-for package_root in (ROOT / "service", ROOT / "clients" / "recorder", ROOT / "commons"):
+for package_root in (ROOT / "comcon", ROOT / "clients" / "recorder", ROOT / "commons"):
     sys.path.insert(0, str(package_root))
 
 #: A live test is one that drives a session it did not create. The suffix is

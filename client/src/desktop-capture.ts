@@ -16,8 +16,8 @@
  * rejects in-flight pulls the same way, closing the stream cleanly.
  */
 
-import { DesktopClient, DesktopServiceError } from "../../plugin/src/client.ts";
-import { daemonSocketPath } from "../../plugin/src/supervisor.ts";
+import { DesktopClient, DesktopServiceError } from "../../clients/shared/src/desktop-client.ts";
+import { daemonSocketPath } from "../../clients/mastra-plugin/src/supervisor.ts";
 
 import type { CaptureFrame, CaptureFrameResult } from "./orb/routes.ts";
 

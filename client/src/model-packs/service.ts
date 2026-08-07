@@ -11,7 +11,7 @@
  * thing being configured gets a vote on.
  */
 
-import type { BrainTier } from "../../../plugin/src/scope-brain.ts";
+import type { BrainTier } from "../../../clients/mastra-plugin/src/scope-brain.ts";
 import type { CredentialStore } from "../auth/credentials.ts";
 import {
   DECLARED_PACK,

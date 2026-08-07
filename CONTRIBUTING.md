@@ -11,7 +11,7 @@ Every claim this project makes has to be provable by whoever makes it. That spli
 one mechanical line — which test lane can judge it.
 
 ```sh
-cd service
+cd comcon
 .venv/bin/python -m pytest -q --no-live     # portable. No display needed. Runs anywhere.
 .venv/bin/python -m pytest -q --live-only   # needs a real desktop session.
 ```
@@ -41,8 +41,9 @@ So:
 ## One writer for the protocol
 
 `protocol/schema.json` is the contract, and both validators are generated from it —
-`plugin/src/protocol.generated.ts`, `plugin/src/schemas.generated.ts`,
-`service/desktop_service/protocol_generated.py`. Never edit a generated file. Run
+`clients/shared/src/protocol.generated.ts`,
+`clients/mastra-plugin/src/schemas.generated.ts`,
+`comcon/desktop_service/protocol_generated.py`. Never edit a generated file. Run
 `node scripts/generate-protocol.mjs` and commit what it produces.
 
 **Do not change the schema in a feature branch unless the issue says the change is yours.** Four
@@ -82,8 +83,8 @@ anything.
 Before a PR is ready:
 
 ```sh
-cd service && .venv/bin/python -m pytest -q --no-live   # or the full suite if you have a display
-cd ../plugin && npx tsc --noEmit && npx vitest run
+cd comcon && .venv/bin/python -m pytest -q --no-live   # or the full suite if you have a display
+cd ../clients/mastra-plugin && npx tsc --noEmit && npx vitest run
 node scripts/generate-protocol.mjs                       # and check it produced no diff
 ```
 

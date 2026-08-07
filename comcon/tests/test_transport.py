@@ -214,7 +214,7 @@ def test_loop_shutdown_is_prompt():
 def test_concurrent_requests_on_the_glib_thread_do_not_deadlock():
     """Several clients calling the desktop at once must all be answered.
 
-    This is the contract from `service/README.md`: connection threads marshal onto
+    This is the contract from `comcon/README.md`: connection threads marshal onto
     one GLib loop thread. A serialization bug here shows up as a hang, so the test
     joins with a timeout and fails on a thread that never finished.
 
@@ -252,19 +252,23 @@ def test_concurrent_requests_on_the_glib_thread_do_not_deadlock():
 def test_the_service_gives_up_before_its_callers_do():
     """A slow-but-working sweep must not reach the model as a transport failure.
 
-    The plugin's request timeout and the service's backend budgets are written
-    in two languages in two files. If someone lowers one of them, this is the
-    only thing that notices.
+    The shared client's request timeout and the service's backend budgets are
+    written in two languages in two files. If someone lowers one of them, this
+    is the only thing that notices.
     """
     import re
 
     from desktop_service import server
 
     client = (
-        Path(__file__).resolve().parents[2] / "plugin" / "src" / "client.ts"
+        Path(__file__).resolve().parents[2]
+        / "clients"
+        / "shared"
+        / "src"
+        / "desktop-client.ts"
     ).read_text()
     match = re.search(r"DEFAULT_REQUEST_TIMEOUT_MS\s*=\s*([\d_]+)", client)
-    assert match, "the plugin's request timeout is no longer where this test looks"
+    assert match, "the client's request timeout is no longer where this test looks"
     client_budget = int(match.group(1).replace("_", "")) / 1000
 
     for name, budget in (

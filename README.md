@@ -4,9 +4,13 @@ A Mastra Code plugin that gives a coding agent a **semantic** interface to a Lin
 applications, windows, dialogs, buttons, text fields — instead of screenshots, OCR and
 coordinate guessing.
 
-- `plugin/` — the TypeScript Mastra Code plugin (`codingbutter.desktop-control`)
+- `comcon/` — the Python desktop service: the core, speaking AT-SPI2 over a Unix-socket JSON-RPC protocol
+- `clients/` — everything that connects to it. `mastra-plugin/` is the Mastra Code plugin
+  (`codingbutter.desktop-control`), `shared/` is the transport they all speak, `recorder/` keeps
+  episodes and `widget/` is the tray face
 - `client/` — the local hub you run on your own machine, and how you sign it in to your model accounts
-- `service/` — the Python desktop service, speaking AT-SPI2 over a Unix-socket JSON-RPC protocol
+- `agents/` — the agent layer's contract. A directory with a stated shape and no runtime yet;
+  read [`agents/README.md`](agents/README.md) before putting one there
 - `protocol/` — `schema.json`, the single source of truth for that protocol. The TypeScript and
   Python bindings are both generated from it, and neither is edited by hand
 - `scripts/` — the binding generator, its regeneration check, and the scripts that produce proofs
@@ -15,7 +19,7 @@ coordinate guessing.
 If you are picking up an issue, read [CONTRIBUTING.md](CONTRIBUTING.md) first — it is short, and
 it is mostly about how to prove what you did from wherever you happen to be sitting. For depth,
 [`protocol/README.md`](protocol/README.md) has the wire contract and what counts as a breaking
-change, [`service/README.md`](service/README.md) has the threading contract and the `gi`
+change, [`comcon/README.md`](comcon/README.md) has the threading contract and the `gi`
 containment rule, and [`ROADMAP.md`](ROADMAP.md) has where the project is.
 
 ### Documentation set
@@ -45,7 +49,7 @@ sudo apt-get install -y python3-gi gir1.2-atspi-2.0 libx11-6
 ```
 
 These are not optional, and not only for the tests that drive a real desktop.
-`service/desktop_service/backends/atspi.py` imports `gi` at module scope, so without them
+`comcon/desktop_service/backends/atspi.py` imports `gi` at module scope, so without them
 `pytest --no-live` does not fail a few tests — it collects none at all, and every file reports
 `ModuleNotFoundError: No module named 'gi'`.
 
@@ -54,11 +58,11 @@ These are not optional, and not only for the tests that drive a real desktop.
 ```sh
 # service toolchain — --system-site-packages is mandatory. A plain venv cannot see
 # the gi/AT-SPI typelibs, and the failure reads exactly like not having installed them.
-python3 -m venv --system-site-packages service/.venv
-service/.venv/bin/pip install pytest
+python3 -m venv --system-site-packages comcon/.venv
+comcon/.venv/bin/pip install pytest
 
 # plugin toolchain
-pnpm -C plugin install
+pnpm -C clients/mastra-plugin install
 ```
 
 ### Registering the plugin
@@ -68,7 +72,7 @@ which is git-ignored. A fresh clone has no registry record, so it must be recrea
 
 ```sh
 mkdir -p .mastracode/plugins/sources/local
-ln -sfn ../../../../plugin .mastracode/plugins/sources/local/desktop-control
+ln -sfn ../../../../clients/mastra-plugin .mastracode/plugins/sources/local/desktop-control
 ```
 
 Then write `.mastracode/plugins/plugins.json`:
@@ -79,7 +83,7 @@ Then write `.mastracode/plugins/plugins.json`:
     "desktop-control": {
       "enabled": true,
       "source": "local",
-      "specifier": "plugin",
+      "specifier": "clients/mastra-plugin",
       "path": "sources/local/desktop-control",
       "entry": "src/index.ts"
     }
@@ -89,15 +93,15 @@ Then write `.mastracode/plugins/plugins.json`:
 ```
 
 The `path` is relative to the plugins directory, **not** the project root. The plugin source
-itself stays in the tracked `plugin/` directory; the registry entry is a symlink to it.
+itself stays in the tracked `clients/mastra-plugin/` directory; the registry entry is a symlink to it.
 
 ## Running the service
 
 ```sh
-( cd service && .venv/bin/python -m desktop_service --session dev )
+( cd comcon && .venv/bin/python -m desktop_service --session dev )
 ```
 
-The service is imported as a package from `service/`, so this one runs in a subshell — the
+The service is imported as a package from `comcon/`, so this one runs in a subshell — the
 parentheses are what keep the directory change from leaking into whatever you paste next.
 
 It prints `listening <socket path>` once it is ready, and holds the terminal. Add `--daemon` to
@@ -119,16 +123,16 @@ they let go.
 
 ```sh
 # the portable half: protocol, registry, delta engine, consent ceiling. No desktop needed.
-service/.venv/bin/python -m pytest -q --no-live service/tests
+comcon/.venv/bin/python -m pytest -q --no-live comcon/tests
 
 # the half that drives whatever desktop session is actually logged in
-service/.venv/bin/python -m pytest -q --live-only service/tests
+comcon/.venv/bin/python -m pytest -q --live-only comcon/tests
 
 # everything this machine can run unattended
-service/.venv/bin/python -m pytest -q service/tests
+comcon/.venv/bin/python -m pytest -q comcon/tests
 
 # and the handful that need somebody at the keyboard, which nothing else runs
-DESKTOP_HUMAN_PRESENT=1 service/.venv/bin/python -m pytest -q service/tests
+DESKTOP_HUMAN_PRESENT=1 comcon/.venv/bin/python -m pytest -q comcon/tests
 
 # the checked-in bindings still match protocol/schema.json
 node scripts/generate-protocol.test.mjs
@@ -146,8 +150,8 @@ this desktop, and say so; `DESKTOP_HUMAN_PRESENT=1` selects them. Set it **inlin
 invocation, never in a shell rc** — exported once it is on silently forever, which is the exact
 failure the lane exists to prevent.
 
-The plugin's own lanes are `pnpm -C plugin test` and `pnpm -C plugin typecheck`, and
-`pnpm -C plugin install` is the only thing either one needs.
+The plugin's own lanes are `pnpm -C clients/mastra-plugin test` and `pnpm -C clients/mastra-plugin typecheck`, and
+`pnpm -C clients/mastra-plugin install` is the only thing either one needs.
 
 They can be run from a clone because the plugin declares the framework packages it imports:
 `@mastra/core` supplies `InputProcessor` from `@mastra/core/processors` and `SignalProvider`
@@ -159,11 +163,11 @@ class as the one the host checks against. The local copies exist so the lanes ca
 run; the host's copies are what the plugin is actually loaded with. Keep the two versions in
 step, which is why they are pinned exactly rather than caret-ranged.
 
-`plugin/src/dependencies.test.ts` enforces the property that made this section true: every
-package imported anywhere under `plugin/src` must appear in `plugin/package.json`. An import
+`clients/mastra-plugin/src/dependencies.test.ts` enforces the property that made this section true: every
+package imported anywhere under `clients/mastra-plugin/src` must appear in `clients/mastra-plugin/package.json`. An import
 that resolves only because of something a developer arranged by hand fails that test.
 
-There is also a third lane, `pnpm -C plugin test:gate`, holding tests that pin behaviour the
+There is also a third lane, `pnpm -C clients/mastra-plugin test:gate`, holding tests that pin behaviour the
 plugin depends on but does not own. Per [CONTRIBUTING.md](CONTRIBUTING.md), a failure there is a
 signal to investigate, not a reason to block a PR.
 

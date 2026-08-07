@@ -126,7 +126,7 @@ as a mysterious `ModuleNotFoundError` three layers into a backend.
 ## 7. Diagnosis from stderr
 
 `describeFailure` takes the last three lines of stderr, not one
-(`plugin/src/index.ts:47-73`). A single last line silently truncated wrapped
+(`clients/mastra-plugin/src/index.ts:47-73`). A single last line silently truncated wrapped
 messages: "exited with code 1" was actually "another service is already
 listening on that socket", which the caller could have acted on immediately
 (`index.ts:40-45`). `DIAGNOSIS_LINES = 3` — a few lines of frame noise costs
@@ -249,12 +249,12 @@ of the desktop at all.
 | Schema digest | `bfa45250563894d0` | `protocol_generated.py`, `protocol.generated.ts` |
 | Default poll interval | 1000 ms | `desktop-signal-provider.ts:136` |
 | Max summary lines | 6 | `desktop-signal-provider.ts:123` |
-| Diagnosis lines | 3 | `plugin/src/index.ts:65` |
-| Paced headroom | 30 s | `plugin/src/index.ts:126` |
+| Diagnosis lines | 3 | `clients/mastra-plugin/src/index.ts:65` |
+| Paced headroom | 30 s | `clients/mastra-plugin/src/index.ts:126` |
 | Max probe depth | 12 | `probe.py` |
 | Max probe nodes | 600 | `probe.py` |
 | Default call timeout | 15 s | `backends/loop.py:33` |
-| Plugin tests | 65 (9 files) | `pnpm -C plugin test` |
+| Plugin tests | 65 (9 files) | `pnpm -C clients/mastra-plugin test` |
 | `--no-live` lane | 464 passed, 45 skipped | `pytest --no-live` |
 
 ---
@@ -271,13 +271,13 @@ of the desktop at all.
 | Frame vs widget actions | `docs/07-open-questions.md:111-116` |
 | Zoom retraction | `docs/07-open-questions.md:108-126` |
 | `--no-live` lane design | `tests/test_env.py:7-12` |
-| `describeFailure` / `diagnosisFrom` | `plugin/src/index.ts:40-73` |
-| Stale daemon hint | `plugin/src/index.ts:89-92`; `docs/07-open-questions.md:155-169` |
-| Paced timeout | `plugin/src/index.ts:114-128` |
-| Push lane polls socket | `plugin/src/signals/desktop-signal-provider.ts:9-24` |
+| `describeFailure` / `diagnosisFrom` | `clients/mastra-plugin/src/index.ts:40-73` |
+| Stale daemon hint | `clients/mastra-plugin/src/index.ts:89-92`; `docs/07-open-questions.md:155-169` |
+| Paced timeout | `clients/mastra-plugin/src/index.ts:114-128` |
+| Push lane polls socket | `clients/mastra-plugin/src/signals/desktop-signal-provider.ts:9-24` |
 | Priority is proven, not assumed | `desktop-signal-provider.ts:28-33` |
 | Interrupt kinds | `desktop-signal-provider.ts:75-81` |
 | Summary is a summary | `desktop-signal-provider.ts:102-123` |
-| Arming processor | `plugin/src/signals/processor.ts:1-53` |
-| One provider instance | `plugin/src/signals/index.ts:1-22` |
-| Lane never starts service | `plugin/src/signals/source.ts:4-17` |
+| Arming processor | `clients/mastra-plugin/src/signals/processor.ts:1-53` |
+| One provider instance | `clients/mastra-plugin/src/signals/index.ts:1-22` |
+| Lane never starts service | `clients/mastra-plugin/src/signals/source.ts:4-17` |

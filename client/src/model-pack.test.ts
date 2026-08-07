@@ -4,7 +4,7 @@ import path from "node:path";
 import { Mastra } from "@mastra/core/mastra";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
-import { brainFromGrant, selectBrain } from "../../plugin/src/scope-brain.ts";
+import { brainFromGrant, selectBrain } from "../../clients/mastra-plugin/src/scope-brain.ts";
 import { buildApp } from "./app.ts";
 import { createAgentTurn } from "./chat.ts";
 import { resolveClientConfig } from "./config.ts";

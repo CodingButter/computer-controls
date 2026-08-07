@@ -45,7 +45,7 @@ import path from "node:path";
  * A hand copy, because the generated bindings live in the plugin package and
  * this one does not reach across that boundary. Hand copies drift, so
  * `config-file.test.ts` reads the schema and asserts this list against it — the
- * same guard `plugin/src/protocol.test.ts` puts on the generated copy. Drift
+ * same guard `clients/mastra-plugin/src/protocol.test.ts` puts on the generated copy. Drift
  * here fails closed (a newly frozen class would be refused rather than let
  * through), and the test turns "fails closed, quietly, for a release" into a
  * red build.

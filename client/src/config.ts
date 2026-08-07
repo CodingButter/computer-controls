@@ -133,7 +133,7 @@ export function resolveClientConfig(env: NodeJS.ProcessEnv = process.env): Clien
     configDir: ".mastracode",
     desktopPluginPath: env.COMCON_DESKTOP_PLUGIN_PATH
       ? path.resolve(env.COMCON_DESKTOP_PLUGIN_PATH)
-      : path.resolve(packageRoot, "..", "plugin"),
+      : path.resolve(packageRoot, "..", "clients", "mastra-plugin"),
     desktopScope: env.COMCON_DESKTOP_SCOPE ?? "observe",
     pluginHome: env.COMCON_PLUGIN_HOME ? path.resolve(env.COMCON_PLUGIN_HOME) : os.homedir(),
     pluginAllowlist: [...DEFAULT_PLUGIN_ALLOWLIST, ...readAllowlist(env.COMCON_PLUGIN_ALLOWLIST)],

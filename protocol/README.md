@@ -2,7 +2,7 @@
 
 **Frozen.** `schema.json` is the single source of truth; both halves generate from it and
 neither defines a message shape of its own. A golden copy lives at `golden/v1.0.schema.json`
-and `service/tests/test_protocol_compat.py` fails the build on any breaking change.
+and `comcon/tests/test_protocol_compat.py` fails the build on any breaking change.
 
 Transport is newline-framed JSON-RPC 2.0 over a Unix socket — one JSON object per line, one
 response per request, ids correlated by the client. The socket is per service instance, not

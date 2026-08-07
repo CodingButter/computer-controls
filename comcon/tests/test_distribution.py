@@ -23,7 +23,7 @@ from pathlib import Path
 from desktop_service import config
 
 REPO = Path(__file__).resolve().parents[2]
-SERVICE = REPO / "service" / "desktop_service"
+SERVICE = REPO / "comcon" / "desktop_service"
 
 #: Words that name a distribution-layer concern, not a desktop-control one.
 #: A method, a config key, or an import root carrying one of these is a seam

@@ -4,13 +4,11 @@ import {
   daemonEndpointFor,
   endpointIsFile,
   freedesktopDaemonEndpoint,
-  venvPython,
-} from "./platform.ts";
+} from "./endpoint.ts";
 import { SCHEMA_DIGEST } from "./protocol.generated.ts";
-import { daemonSocketPath } from "./supervisor.ts";
 
 /**
- * Where the supervisor dials, per OS.
+ * Where a client dials, per OS.
  *
  * Every case goes through the adapter with an environment handed in, so the
  * Windows and macOS answers are testable from the Linux machine this is
@@ -52,22 +50,4 @@ test("the schema digest is in every address, so mismatched builds never meet", (
   for (const platform of ["linux", "darwin", "win32"] as const) {
     expect(daemonEndpointFor(platform, {})).toContain(SCHEMA_DIGEST);
   }
-});
-
-test("an operator naming a socket outranks every OS convention", () => {
-  const previous = process.env.MASTRACODE_DESKTOP_SOCKET;
-  process.env.MASTRACODE_DESKTOP_SOCKET = "/tmp/chosen.sock";
-  try {
-    expect(daemonSocketPath()).toBe("/tmp/chosen.sock");
-  } finally {
-    if (previous === undefined) delete process.env.MASTRACODE_DESKTOP_SOCKET;
-    else process.env.MASTRACODE_DESKTOP_SOCKET = previous;
-  }
-});
-
-test("the virtualenv interpreter is where each OS actually puts it", () => {
-  expect(venvPython("/repo/service", "linux")).toBe("/repo/service/.venv/bin/python");
-  // The one difference between a working spawn and a confusing "virtualenv is
-  // missing" on Windows.
-  expect(venvPython("/repo/service", "win32")).toContain("Scripts");
 });

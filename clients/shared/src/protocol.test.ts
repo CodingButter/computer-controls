@@ -14,7 +14,7 @@ import {
 } from "./protocol.generated.ts";
 
 const schema = JSON.parse(
-  readFileSync(join(import.meta.dirname, "..", "..", "protocol", "schema.json"), "utf8"),
+  readFileSync(join(import.meta.dirname, "..", "..", "..", "protocol", "schema.json"), "utf8"),
 );
 
 describe("generated protocol bindings", () => {

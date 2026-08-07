@@ -4,14 +4,14 @@ import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { SERVICE_PYTHON, SERVICE_ROOT } from "../../plugin/src/supervisor.ts";
-import { DesktopClient } from "../../plugin/src/client.ts";
+import { SERVICE_PYTHON, SERVICE_ROOT } from "../../clients/mastra-plugin/src/supervisor.ts";
+import { DesktopClient } from "../../clients/shared/src/desktop-client.ts";
 import { createDesktopCapture } from "./desktop-capture.ts";
 
 /**
  * The hub's read path to the daemon's capture, exercised end-to-end.
  *
- * Mirrors service/tests/test_capture_live.py: the daemon's own dimensional
+ * Mirrors comcon/tests/test_capture_live.py: the daemon's own dimensional
  * proof (a11y bounds ≡ drawable geometry ≡ encoded PNG size) lives there,
  * because the Python side is the one that can query AT-SPI. The blocked-app
  * refusal is unit-tested on the route side (APPLICATION_NOT_FOUND → 403) and

@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "service"))
+sys.path.insert(0, str(ROOT / "comcon"))
 
 from desktop_service import server  # noqa: E402
 from desktop_service.backends import atspi, loop, session_env, x11  # noqa: E402
@@ -305,7 +305,7 @@ def render(
             "",
             "Nothing was recorded before the deletion, so this artifact shows a deletion",
             "being named correctly without showing that a different edit would be named",
-            "differently. The unit tests in `service/tests/test_deltas.py` cover that",
+            "differently. The unit tests in `comcon/tests/test_deltas.py` cover that",
             "distinction; this run did not, and saying so is cheaper than implying it did.",
             "",
         ]

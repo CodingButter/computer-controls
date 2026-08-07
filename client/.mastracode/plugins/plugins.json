@@ -3,8 +3,8 @@
     "desktop-control": {
       "enabled": true,
       "source": "local",
-      "specifier": "/home/codingbutter/computer-controls/plugin",
-      "path": "/home/codingbutter/computer-controls/plugin",
+      "specifier": "/home/codingbutter/computer-controls/clients/mastra-plugin",
+      "path": "/home/codingbutter/computer-controls/clients/mastra-plugin",
       "entry": "src/index.ts",
       "config": {
         "scope": "observe"

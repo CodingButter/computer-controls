@@ -8,7 +8,7 @@ import { createWorkspaceTools, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import type { AnyWorkspace } from "@mastra/core/workspace";
 import { afterAll, beforeAll, expect, test } from "vitest";
 
-import desktopControl from "../../plugin/src/index.ts";
+import desktopControl from "../../clients/mastra-plugin/src/index.ts";
 import { buildApp } from "./app.ts";
 import type { HubController, HubSession } from "./chat.ts";
 import { resolveClientConfig } from "./config.ts";
@@ -146,7 +146,7 @@ test("test_desktop_tools_survive_the_stripping_at_every_scope", async () => {
 });
 
 async function mintedAt(scope: string): Promise<string[]> {
-  const pluginDir = path.resolve(import.meta.dirname, "..", "..", "plugin");
+  const pluginDir = path.resolve(import.meta.dirname, "..", "..", "clients", "mastra-plugin");
   const minted = await desktopControl.tools({
     cwd: pluginDir,
     scope: "project",

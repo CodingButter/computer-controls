@@ -3,7 +3,7 @@ import { fastMode } from "@mastra/code-sdk/agents/modes/explore";
 import { planMode } from "@mastra/code-sdk/agents/modes/plan";
 import type { AgentControllerMode } from "@mastra/core/agent-controller";
 
-import type { BrainTier } from "../../plugin/src/scope-brain.ts";
+import type { BrainTier } from "../../clients/mastra-plugin/src/scope-brain.ts";
 
 /**
  * Which model holds the desktop.

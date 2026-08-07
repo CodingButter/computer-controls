@@ -53,7 +53,7 @@ from io import BytesIO
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "service"))
+sys.path.insert(0, str(ROOT / "comcon"))
 
 DEFAULT_OUT = "docs/proofs/the-face-can-be-photographed.md"
 DEFAULT_PORT = int(os.environ.get("COMCON_CLIENT_PORT", "4111"))

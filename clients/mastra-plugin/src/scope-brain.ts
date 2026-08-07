@@ -19,7 +19,7 @@
  * what it costs them, and that mapping belongs to them.
  */
 
-import type { GrantScopeResult } from "./protocol.generated.ts";
+import type { GrantScopeResult } from "../../shared/src/protocol.generated.ts";
 
 /** How much damage a mistake within the scope can cause. */
 export interface ScopeSeverity {

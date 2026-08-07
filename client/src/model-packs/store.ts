@@ -19,7 +19,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import type { BrainTier } from "../../../plugin/src/scope-brain.ts";
+import type { BrainTier } from "../../../clients/mastra-plugin/src/scope-brain.ts";
 import { TIERS } from "../model-pack.ts";
 
 /** The hub's pack file, beside the runtime's settings rather than inside it. */

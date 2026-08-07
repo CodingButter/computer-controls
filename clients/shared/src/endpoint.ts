@@ -20,7 +20,7 @@ import { SCHEMA_DIGEST } from "./protocol.generated.ts";
 
 export type DaemonEndpoint = (env?: NodeJS.ProcessEnv) => string;
 
-const SOCKET_DIR = "mastracode-desktop";
+export const SOCKET_DIR = "mastracode-desktop";
 
 function socketName(): string {
   return `daemon-${SCHEMA_DIGEST}.sock`;
@@ -33,8 +33,16 @@ function socketName(): string {
  * plain ssh login, most notably — where the directory usually exists anyway.
  */
 export function freedesktopDaemonEndpoint(env: NodeJS.ProcessEnv = process.env): string {
-  const runtimeDir = env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 1000}`;
-  return join(runtimeDir, SOCKET_DIR, socketName());
+  return join(runtimeDir(env), SOCKET_DIR, socketName());
+}
+
+/**
+ * The directory a freedesktop session keeps per-user runtime state in. Shared
+ * with socket discovery, which needs the directory without needing the name of
+ * any socket in it.
+ */
+export function runtimeDir(env: NodeJS.ProcessEnv = process.env): string {
+  return env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 1000}`;
 }
 
 /**
@@ -70,20 +78,4 @@ export function daemonEndpointFor(
   if (platform === "win32") return windowsDaemonEndpoint();
   if (platform === "darwin") return macosDaemonEndpoint(env);
   return freedesktopDaemonEndpoint(env);
-}
-
-/**
- * The interpreter that runs the service.
- *
- * Windows puts a virtualenv's interpreter in `Scripts\python.exe` rather than
- * `bin/python`, which is the only thing separating a working spawn from a
- * confusing "service virtualenv is missing".
- */
-export function venvPython(
-  serviceRoot: string,
-  platform: NodeJS.Platform = process.platform,
-): string {
-  return platform === "win32"
-    ? join(serviceRoot, ".venv", "Scripts", "python.exe")
-    : join(serviceRoot, ".venv", "bin", "python");
 }

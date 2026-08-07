@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DesktopServiceError } from "./client.ts";
+import { DesktopServiceError } from "../../shared/src/desktop-client.ts";
 import { describeFailure, staleDaemonHint } from "./index.ts";
 
 describe("service failures reaching the model", () => {

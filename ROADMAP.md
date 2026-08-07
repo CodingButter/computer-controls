@@ -81,4 +81,4 @@ needs to know them and because the tier ladder exists precisely for these.
 - [#16](https://github.com/CodingButter/computer-controls/issues/16) — port the backends to Windows
 
 Deliberately parked, and cheaper than it sounds: everything platform-specific lives under
-`service/desktop_service/backends/`, and a test fails if a toolkit import appears above it.
+`comcon/desktop_service/backends/`, and a test fails if a toolkit import appears above it.
