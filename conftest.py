@@ -46,7 +46,7 @@ import pytest
 #: root, that directory is on nobody's path, so the suites are placed here
 #: instead of depending on a working directory.
 ROOT = Path(__file__).resolve().parent
-for package_root in (ROOT / "service", ROOT / "clients" / "recorder"):
+for package_root in (ROOT / "service", ROOT / "clients" / "recorder", ROOT / "commons"):
     sys.path.insert(0, str(package_root))
 
 #: A live test is one that drives a session it did not create. The suffix is

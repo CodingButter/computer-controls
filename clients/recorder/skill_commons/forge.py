@@ -58,8 +58,17 @@ class Forge(Protocol):
     def open_requests(self) -> set[int]:
         """The numbers of this machine's proposals that are still open."""
 
-    def propose(self, skill: Skill, *, base: str) -> int:
-        """Open a request that this skill be admitted, and answer with its number."""
+    def propose(self, skill: Skill, *, base: str, credit: str = "") -> int:
+        """Open a request that this skill be admitted, and answer with its number.
+
+        `credit` names a person, and defaults to naming nobody. A machine
+        proposing its own routes has nobody to credit — `submitter` is an
+        installation and that is the whole of what the commons needs. The
+        argument exists for the publishing service, where a human pressed the
+        button and may have asked to be named for it; there, being credited is
+        an offer somebody accepted, never something the transport worked out
+        about them.
+        """
 
     def withdraw(self, number: int, reason: str) -> None:
         """Close one of this machine's own proposals, saying why."""
@@ -124,7 +133,7 @@ class GitHubForge:
             return set()
         return {int(entry["number"]) for entry in json.loads(found)}
 
-    def propose(self, skill: Skill, *, base: str = "main") -> int:
+    def propose(self, skill: Skill, *, base: str = "main", credit: str = "") -> int:
         branch = BRANCH_PREFIX + skill.name
 
         # From the base every time, never from whatever the checkout happened
@@ -152,7 +161,7 @@ class GitHubForge:
             "--title",
             _title(skill),
             "--body",
-            _body(skill, submitter=self.submitter),
+            _body(skill, submitter=self.submitter, credit=credit),
         )
         assert document.exists() and review.exists()
         return _number_in(answered)
@@ -195,7 +204,7 @@ def _commit_message(skill: Skill) -> str:
     )
 
 
-def _body(skill: Skill, *, submitter: str) -> str:
+def _body(skill: Skill, *, submitter: str, credit: str = "") -> str:
     """What a reviewer sees before they open either file.
 
     Deliberately not a summary of the skill. A summary is an argument, and a
@@ -203,10 +212,26 @@ def _body(skill: Skill, *, submitter: str) -> str:
     prepared to approve it. This says what the submission *is*, where the two
     files are, and what the reviewer is being asked to decide — and it leaves
     the deciding to the files.
+
+    `credit`, when there is one, is one sentence and one handle. It is not a
+    trailer: the trailers are how a machine finds its own proposals and how a
+    maintainer cuts off one that goes bad, and a person's name is not either of
+    those things.
+
+    It is also written flat rather than as `@handle`. Nothing authenticates the
+    handle — it arrives in a submission from somebody with no account here, which
+    is the point — and an `@` is not decoration on a forge, it is a notification
+    sent to whoever owns that name. A field anybody can fill in should not be a
+    way to make a stranger's phone buzz. Credit is a line a reader can see; being
+    summoned is not part of the offer.
     """
     lines = [
         f"A skill proposed for the commons by installation `{submitter}`.",
         "",
+    ]
+    if credit:
+        lines += [f"Contributed by `{credit}`, who asked to be credited.", ""]
+    lines += [
         "This is a **pair**, and both halves are meant to be read:",
         "",
         f"- `{SKILLS_DIR}/{skill.name}/SKILL.md` — the route, as the agent that"
