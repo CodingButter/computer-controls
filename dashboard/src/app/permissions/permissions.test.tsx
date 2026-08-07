@@ -67,6 +67,32 @@ test("rows render from the merged view with their states", () => {
   expect(cureWarned).toContain("Needs accessibility cure");
 });
 
+test("the panel stamps how old the census on screen is", () => {
+  const fresh = renderToStaticMarkup(
+    <PermissionsPanel view={VIEW} onChoose={() => {}} updatedAt={0} now={12_000} />,
+  );
+  expect(fresh).toContain("Updated 12s ago");
+
+  // Past a minute the stamp rolls over rather than counting seconds forever.
+  const older = renderToStaticMarkup(
+    <PermissionsPanel view={VIEW} onChoose={() => {}} updatedAt={0} now={120_000} />,
+  );
+  expect(older).toContain("Updated 2m ago");
+});
+
+test("the refresh affordance and the stamp are only drawn for a caller that has a clock", () => {
+  const withRefresh = renderToStaticMarkup(
+    <PermissionsPanel view={VIEW} onChoose={() => {}} updatedAt={0} now={0} onRefresh={() => {}} />,
+  );
+  expect(withRefresh).toContain("Refresh");
+
+  // A caller with neither promises neither: no stamp claiming a freshness it
+  // cannot know, and no button wired to nothing.
+  const bare = renderToStaticMarkup(<PermissionsPanel view={VIEW} onChoose={() => {}} />);
+  expect(bare).not.toContain("Updated");
+  expect(bare).not.toContain("Refresh");
+});
+
 test("the chosen state is the one the control marks, and the three read in the order they widen", () => {
   const html = renderToStaticMarkup(
     <PermissionsPanel
