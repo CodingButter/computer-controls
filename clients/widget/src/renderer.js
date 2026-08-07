@@ -137,6 +137,11 @@ function paint() {
   paintScouts();
   shaderState = shaderStateFor(state);
   webglOrb?.setState(shaderState);
+  // The muted face is dimmed, desaturated and slowed — the third of the three
+  // looks the face has to be able to tell apart. It is drawn from the same
+  // flag that plugs the ear below, so it can never be a costume over a live
+  // microphone.
+  webglOrb?.setMuted(state.muted);
   reportHitShapes();
 }
 
@@ -306,6 +311,10 @@ async function startListening() {
       // model's answer: a user listening in silence is not a user who left.
       hold: () => mouth?.speaking() ?? false,
     });
+    // Mute survives a dismiss and a re-wake, so an ear opened while the face
+    // is already muted opens plugged. Otherwise the tray re-enabling the
+    // widget would quietly un-mute it.
+    if (state.muted) ears.plug("mute");
   } catch {
     // A refused microphone is a widget without ears, not a broken face.
     // Everything else — the lane, the gestures, the scouts — still works.
@@ -340,6 +349,16 @@ function stopEars() {
  */
 function perform(gesture) {
   state = applyGesture(state, gesture);
+  // Mute stops the ear, it does not merely draw a stopped one (#202). The
+  // widget grew its own microphone after this gesture was written, and a face
+  // that looks deaf while the mic is still feeding the wake gate is the one
+  // lie this design cannot afford. Plugging rather than stopping keeps the
+  // device claimed, so unmuting is instant and asks for nothing again — and a
+  // muted widget cannot wake, which is what muted has to mean.
+  if (gesture.type === "mute") {
+    if (state.muted) ears?.plug("mute");
+    else ears?.unplug("mute");
+  }
   paint();
   // A hand on the face is a person using it: not the moment to fade away.
   rewindFade();
@@ -541,12 +560,20 @@ if (hasWebGl(document.createElement("canvas"))) {
     });
 }
 
-// The single animation loop: synthesize a level from the current face state and
-// feed it to the shader each frame. When the CSS orb is the active face,
-// webglOrb is null and this is a no-op — the same shape the hub's page uses.
+// The single animation loop, and the place the face learns who is talking
+// (#202): the outer smoke moves to the microphone, the inner wave to the
+// orb's own playback. Both numbers are measured where the audio already lives
+// — this loop only reads scalars.
+//
+// syntheticLevel is the fallback for a frame with no mouth open. It is what
+// the hub's /orb page has always used, and it still says "it is talking"
+// while the widget has no real amplitude to offer; it just cannot say how
+// loudly. When the CSS orb is the active face, webglOrb is null and this is a
+// no-op — the same shape the hub's page uses.
 const loop = (now) => {
   if (webglOrb) {
-    webglOrb.setLevel(syntheticLevel(shaderState, now));
+    webglOrb.setUserLevel(ears?.level() ?? 0);
+    webglOrb.setLevel(mouth?.level() ?? syntheticLevel(shaderState, now));
     webglOrb.tick(now);
   }
   requestAnimationFrame(loop);

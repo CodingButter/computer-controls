@@ -3,7 +3,15 @@
 
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
-import { bytesFromFrame, floatFromPcm16, frameForVoice, interpretLaneFrame, openMouth } from "./mouth.js";
+import {
+  bytesFromFrame,
+  envelopeSegments,
+  floatFromPcm16,
+  frameForVoice,
+  interpretLaneFrame,
+  levelAt,
+  openMouth,
+} from "./mouth.js";
 import { ANSWER_PREFIX, ANSWER_SUFFIX, PROGRESS_PREFIX, PROGRESS_SUFFIX } from "./vendor/live/live.js";
 
 const mouthSource = readFileSync(new URL("./mouth.js", import.meta.url), "utf8");
@@ -145,5 +153,60 @@ describe("the disciplines, pinned in the source", () => {
     expect(mouthSource).toContain("if (playing.size === 0) flushHeldWords()");
     // An answer purges the queued progress it outran.
     expect(deliver).toContain('heldWords[i].kind === "progress"');
+  });
+});
+
+describe("the level the inner wave moves to", () => {
+  const loudThenQuiet = () => {
+    const samples = new Float32Array(2400);
+    for (let i = 0; i < 1200; i += 1) samples[i] = 0.8;
+    for (let i = 1200; i < 2400; i += 1) samples[i] = 0.05;
+    return samples;
+  };
+
+  test("the segments tile the buffer without a gap or an overhang", () => {
+    const segments = envelopeSegments(new Float32Array(2400).fill(0.5), 24000, 3);
+    expect(segments).toHaveLength(2);
+    expect(segments[0].start).toBeCloseTo(3);
+    expect(segments[0].end).toBeCloseTo(segments[1].start);
+    expect(segments[segments.length - 1].end).toBeCloseTo(3 + 2400 / 24000);
+  });
+
+  test("a loud half and a quiet half do not read the same — this is the whole point", () => {
+    const segments = envelopeSegments(loudThenQuiet(), 24000, 0);
+    expect(segments[0].level).toBeGreaterThan(segments[1].level);
+    expect(segments[1].level).toBeGreaterThan(0);
+  });
+
+  test("silence played is silence shown", () => {
+    const segments = envelopeSegments(new Float32Array(2400), 24000, 0);
+    expect(segments.every((segment) => segment.level === 0)).toBe(true);
+  });
+
+  test("an empty buffer is no envelope at all", () => {
+    expect(envelopeSegments(new Float32Array(0), 24000, 0)).toEqual([]);
+  });
+
+  test("before it starts and after it drains, the orb is not talking", () => {
+    const segments = envelopeSegments(new Float32Array(2400).fill(0.5), 24000, 3);
+    expect(levelAt(segments, 2.9)).toBe(0);
+    expect(levelAt(segments, 3.05)).toBeGreaterThan(0);
+    expect(levelAt(segments, 3.2)).toBe(0);
+  });
+
+  test("a cleared envelope reads silent immediately — barge-in cuts the face too", () => {
+    expect(levelAt([], 3)).toBe(0);
+  });
+});
+
+describe("the face is fed by the mouth and the ears, not by a sine wave", () => {
+  test("the animation loop asks the mouth how loud it is and the ears how loud the room is", () => {
+    expect(rendererSource).toMatch(/setUserLevel\(ears\?\.level\(\)/);
+    expect(rendererSource).toMatch(/setLevel\(mouth\?\.level\(\)/);
+  });
+
+  test("muting plugs the ear rather than only drawing a muted face", () => {
+    expect(rendererSource).toMatch(/ears\?\.plug\("mute"\)/);
+    expect(rendererSource).toMatch(/ears\?\.unplug\("mute"\)/);
   });
 });

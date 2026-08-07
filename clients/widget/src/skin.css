@@ -155,9 +155,22 @@ body {
   animation: pulse 0.7s ease-in-out infinite;
 }
 
+/*
+ * Muted is the third look, and it has to be unmistakable at a glance: dimmed,
+ * desaturated, and moving slowly enough that nobody reads it as listening.
+ * The slowed animation is deliberately last so it overrides whatever activity
+ * the face is otherwise wearing — a muted orb has no activity to show.
+ */
 .muted #orb {
-  filter: grayscale(0.85);
+  filter: grayscale(0.85) brightness(0.6);
   box-shadow: none;
+}
+
+.muted #orb,
+.muted.activity-listening #orb,
+.muted.activity-thinking #orb,
+.muted.activity-speaking #orb {
+  animation: breathe 9s ease-in-out infinite;
 }
 
 /*

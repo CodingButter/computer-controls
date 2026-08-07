@@ -13,6 +13,9 @@ import {
   moodToColor,
   hasWebGl,
   syntheticLevel,
+  smokeChurn,
+  calmScale,
+  desaturate,
 } from "../../public/orb-webgl.js";
 
 // ---------------------------------------------------------------------------
@@ -156,6 +159,68 @@ describe("mood color mapping", () => {
 
   it("falls back to neutral for an unknown mood", () => {
     expect(moodToColor("confused")).toEqual(moodToColor("neutral"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #202: the face says who is talking. The outer smoke is the user's layer and
+// the inner sphere is the orb's, so the two must be drivable independently —
+// and muted has to look like a third thing, not like a quiet room.
+// ---------------------------------------------------------------------------
+
+describe("test_the_face_shows_who_is_talking", () => {
+  it("churns the smoke harder the louder the user speaks", () => {
+    expect(smokeChurn(0)).toBeLessThan(smokeChurn(0.5));
+    expect(smokeChurn(0.5)).toBeLessThan(smokeChurn(1));
+  });
+
+  it("keeps the smoke drifting at silence — still is not frozen", () => {
+    expect(smokeChurn(0)).toBeGreaterThan(0);
+  });
+
+  it("clamps a level outside the range instead of flinging the haze", () => {
+    expect(smokeChurn(-3)).toBe(smokeChurn(0));
+    expect(smokeChurn(9)).toBe(smokeChurn(1));
+  });
+
+  it("lets the voice dominate the drift floor, so speech is the visible part", () => {
+    // The swing the voice adds must be larger than the resting drift, or
+    // "the smoke moved" would be indistinguishable from the idle churn.
+    expect(smokeChurn(1) - smokeChurn(0)).toBeGreaterThan(smokeChurn(0));
+  });
+
+  it("slows the whole face when muted, without freezing it", () => {
+    expect(calmScale(true)).toBeLessThan(calmScale(false));
+    expect(calmScale(true)).toBeGreaterThan(0);
+  });
+
+  it("drains colour toward grey when muted, and is the identity when not", () => {
+    const mood = moodToColor("frustrated");
+    const drained = desaturate(mood, 0.7);
+    const spread = (c: number[]) => Math.max(...c) - Math.min(...c);
+    expect(spread(drained)).toBeLessThan(spread(mood));
+    expect(desaturate(mood, 0)).toEqual(mood);
+  });
+
+  it("collapses to a single grey at full desaturation", () => {
+    const [r, g, b] = desaturate(moodToColor("excited"), 1);
+    expect(g - r).toBeCloseTo(0, 5);
+    expect(b - r).toBeCloseTo(0, 5);
+  });
+
+  it("gives the smoke its own flow clock and level uniforms", () => {
+    // The two layers shared uFlowTime and one uLevel before #202 — the whole
+    // face moved on one clock, so it could not say who was talking.
+    const webgl = readFileSync(resolve(__dirname, "../../public/orb-webgl.js"), "utf-8");
+    const smokeShader = webgl.slice(webgl.indexOf("SMOKE_FRAGMENT_SHADER"));
+    expect(smokeShader).toMatch(/uniform float uSmokeFlowTime;/);
+    expect(smokeShader).toMatch(/uniform float uSmokeLevel;/);
+    expect(smokeShader).toMatch(/uniform float uDim;/);
+  });
+
+  it("exposes the user level and the mute state on the controller", () => {
+    const webgl = readFileSync(resolve(__dirname, "../../public/orb-webgl.js"), "utf-8");
+    expect(webgl).toMatch(/return \{[^}]*setUserLevel[^}]*setMuted[^}]*\}/);
   });
 });
 
