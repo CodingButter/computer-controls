@@ -41,7 +41,7 @@ So:
 ## One writer for the protocol
 
 `protocol/schema.json` is the contract, and both validators are generated from it —
-`clients/mastra-plugin/src/protocol.generated.ts`,
+`clients/shared/src/protocol.generated.ts`,
 `clients/mastra-plugin/src/schemas.generated.ts`,
 `comcon/desktop_service/protocol_generated.py`. Never edit a generated file. Run
 `node scripts/generate-protocol.mjs` and commit what it produces.

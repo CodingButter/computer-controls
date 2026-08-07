@@ -4,9 +4,13 @@ A Mastra Code plugin that gives a coding agent a **semantic** interface to a Lin
 applications, windows, dialogs, buttons, text fields — instead of screenshots, OCR and
 coordinate guessing.
 
-- `clients/mastra-plugin/` — the TypeScript Mastra Code plugin (`codingbutter.desktop-control`), one client of the core
+- `comcon/` — the Python desktop service: the core, speaking AT-SPI2 over a Unix-socket JSON-RPC protocol
+- `clients/` — everything that connects to it. `mastra-plugin/` is the Mastra Code plugin
+  (`codingbutter.desktop-control`), `shared/` is the transport they all speak, `recorder/` keeps
+  episodes and `widget/` is the tray face
 - `client/` — the local hub you run on your own machine, and how you sign it in to your model accounts
-- `comcon/` — the Python desktop service (the core), speaking AT-SPI2 over a Unix-socket JSON-RPC protocol
+- `agents/` — the agent layer's contract. A directory with a stated shape and no runtime yet;
+  read [`agents/README.md`](agents/README.md) before putting one there
 - `protocol/` — `schema.json`, the single source of truth for that protocol. The TypeScript and
   Python bindings are both generated from it, and neither is edited by hand
 - `scripts/` — the binding generator, its regeneration check, and the scripts that produce proofs

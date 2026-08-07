@@ -13,8 +13,8 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const generated = [
-  join(root, "plugin", "src", "protocol.generated.ts"),
-  join(root, "plugin", "src", "schemas.generated.ts"),
+  join(root, "clients", "shared", "src", "protocol.generated.ts"),
+  join(root, "clients", "mastra-plugin", "src", "schemas.generated.ts"),
   join(root, "comcon", "desktop_service", "protocol_generated.py"),
 ];
 

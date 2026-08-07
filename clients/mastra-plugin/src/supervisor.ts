@@ -3,10 +3,11 @@ import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { DesktopClient, DesktopServiceError } from "./client.ts";
-import { daemonEndpointFor, venvPython } from "./platform.ts";
-import type { GrantScopeResult } from "./protocol.generated.ts";
-import { PROTOCOL_VERSION } from "./protocol.generated.ts";
+import { DesktopClient, DesktopServiceError } from "../../shared/src/desktop-client.ts";
+import { daemonEndpointFor } from "../../shared/src/endpoint.ts";
+import { venvPython } from "./platform.ts";
+import type { GrantScopeResult } from "../../shared/src/protocol.generated.ts";
+import { PROTOCOL_VERSION } from "../../shared/src/protocol.generated.ts";
 import { brainFromGrant, type BrainChoice } from "./scope-brain.ts";
 
 /**

@@ -383,7 +383,7 @@ function pyLiteral(value, indent) {
   return `{\n${entries.join("\n")}\n${indent}}`;
 }
 
-writeFileSync(join(root, "clients", "mastra-plugin", "src", "protocol.generated.ts"), generateTypeScript());
+writeFileSync(join(root, "clients", "shared", "src", "protocol.generated.ts"), generateTypeScript());
 writeFileSync(join(root, "clients", "mastra-plugin", "src", "schemas.generated.ts"), generateZod());
 writeFileSync(
   join(root, "comcon", "desktop_service", "protocol_generated.py"),

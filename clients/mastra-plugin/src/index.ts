@@ -1,7 +1,7 @@
 import { createTool, defineMastraCodePlugin, z } from "@mastra/code-sdk/plugin";
 
-import { DesktopServiceError } from "./client.ts";
-import { OPERATION_CLASS, SCHEMA_DIGEST } from "./protocol.generated.ts";
+import { DesktopServiceError } from "../../shared/src/desktop-client.ts";
+import { OPERATION_CLASS, SCHEMA_DIGEST } from "../../shared/src/protocol.generated.ts";
 import * as schemas from "./schemas.generated.ts";
 import { buildPushLane } from "./signals/index.ts";
 import { DesktopSupervisor } from "./supervisor.ts";

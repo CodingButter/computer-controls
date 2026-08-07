@@ -1,0 +1,17 @@
+{
+  "name": "@codingbutter/comcon-client",
+  "version": "0.1.0",
+  "description": "The desktop transport every client speaks: newline-framed JSON-RPC over the daemon's socket",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

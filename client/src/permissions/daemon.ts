@@ -1,17 +1,23 @@
-import fs from "node:fs";
-import { connect } from "node:net";
-import path from "node:path";
+import {
+  DesktopClient,
+  DesktopServiceError,
+} from "../../../clients/shared/src/desktop-client.ts";
+
+export { findDaemonSocket } from "../../../clients/shared/src/discover.ts";
 
 /**
  * The one daemon question the permissions page asks: what is running.
  *
- * A deliberately tiny client — one request, one connection, closed after the
- * answer. The hub already reaches the daemon through the desktop plugin for
- * the agent's sake; this lane exists because a page render must not spend an
- * agent turn to draw a checklist. It speaks the same newline-framed JSON-RPC
- * the plugin does, and it only ever asks `listApplications`, an observe-class
- * method a fresh connection already holds. Nothing here can widen anything:
- * the socket has no method that widens, and this client asks one question.
+ * The hub already reaches the daemon through the desktop plugin for the
+ * agent's sake; this lane exists because a page render must not spend an agent
+ * turn to draw a checklist. It used to hand-roll the wire format to get that —
+ * its own buffer scan, its own timer — which is precisely the duplication
+ * `clients/shared` exists to end. What is left here is the part that is
+ * actually about permissions: which method to ask, and what a row means.
+ *
+ * Nothing here can widen anything: the socket has no method that widens, and
+ * this client asks one question — `listApplications`, an observe-class method
+ * a fresh connection already holds.
  */
 
 export type CensusApplication = { name: string; running: true; readable: boolean };
@@ -19,46 +25,6 @@ export type CensusApplication = { name: string; running: true; readable: boolean
 export type Census =
   | { reachable: true; applications: CensusApplication[] }
   | { reachable: false; reason: string };
-
-/**
- * Where a shared daemon listens. The digest lives in the socket's filename, so
- * rather than baking a copy of it here we look for whatever daemon is actually
- * listening — the socket that exists is the daemon we can talk to.
- */
-export function findDaemonSocket(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  if (env.MASTRACODE_DESKTOP_SOCKET) return env.MASTRACODE_DESKTOP_SOCKET;
-  const runtimeDir = env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 1000}`;
-  const dir = path.join(runtimeDir, "mastracode-desktop");
-  let files: string[];
-  try {
-    files = fs.readdirSync(dir);
-  } catch {
-    return undefined;
-  }
-  // A shared daemon listens on daemon-<digest>.sock; a supervised session
-  // daemon listens on mc-<pid>.sock. Either answers the observe-class census,
-  // so prefer the shared one when both exist and take whatever is there
-  // otherwise — the socket that exists is the daemon we can talk to.
-  const all = files.filter((f) => f.endsWith(".sock"));
-  const shared = all.filter((f) => f.startsWith("daemon-"));
-  const sockets = shared.length > 0 ? shared : all;
-  if (sockets.length === 0) return undefined;
-  // Several sockets would mean several daemon generations; the newest socket
-  // is the one the current build talks to.
-  const newest = sockets
-    .map((f) => {
-      const full = path.join(dir, f);
-      let mtime = 0;
-      try {
-        mtime = fs.statSync(full).mtimeMs;
-      } catch {
-        /* raced a cleanup; treated as oldest */
-      }
-      return { full, mtime };
-    })
-    .sort((a, b) => b.mtime - a.mtime)[0];
-  return newest?.full;
-}
 
 const CENSUS_TIMEOUT_MS = 5_000;
 
@@ -79,51 +45,34 @@ export async function readCensus(socketPath: string | undefined): Promise<Census
     return { reachable: false, reason: "The desktop service is not running (no socket found)." };
   }
 
-  return await new Promise<Census>((resolve) => {
-    const socket = connect(socketPath);
-    let buffer = "";
-    let settled = false;
-    const settle = (census: Census) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      socket.destroy();
-      resolve(census);
-    };
-    const timer = setTimeout(
-      () => settle({ reachable: false, reason: "The desktop service did not answer in time." }),
-      CENSUS_TIMEOUT_MS,
-    );
-
-    socket.once("connect", () => {
-      socket.setEncoding("utf8");
-      socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "listApplications", params: {} })}\n`);
-      socket.on("data", (chunk: string) => {
-        buffer += chunk;
-        const newline = buffer.indexOf("\n");
-        if (newline === -1) return;
-        try {
-          const message = JSON.parse(buffer.slice(0, newline)) as {
-            result?: ListApplicationsResult;
-            error?: { message?: string };
-          };
-          if (message.error) {
-            settle({
-              reachable: false,
-              reason: message.error.message ?? "The desktop service refused the census.",
-            });
-            return;
-          }
-          settle({ reachable: true, applications: toCensusRows(message.result ?? {}) });
-        } catch {
-          settle({ reachable: false, reason: "The desktop service answered unreadably." });
-        }
-      });
-    });
-    socket.once("error", () =>
-      settle({ reachable: false, reason: "The desktop service is not running." }),
-    );
+  // One request, one connection, closed after the answer.
+  const client = new DesktopClient({
+    socketPath,
+    requestTimeoutMs: CENSUS_TIMEOUT_MS,
+    connectTimeoutMs: CENSUS_TIMEOUT_MS,
   });
+  try {
+    const result = await client.request<ListApplicationsResult>("listApplications");
+    return { reachable: true, applications: toCensusRows(result ?? {}) };
+  } catch (error) {
+    return { reachable: false, reason: unreachableBecause(error) };
+  } finally {
+    client.close();
+  }
+}
+
+/**
+ * A sentence for the page. The shared client already distinguishes "nothing is
+ * listening" from "it did not answer", so this only has to choose the words a
+ * reader of a permissions checklist needs.
+ */
+function unreachableBecause(error: unknown): string {
+  if (error instanceof DesktopServiceError) {
+    if (error.code === "TIMEOUT") return "The desktop service did not answer in time.";
+    if (error.code === "BACKEND_UNAVAILABLE") return "The desktop service is not running.";
+    return error.message;
+  }
+  return "The desktop service answered unreadably.";
 }
 
 function toCensusRows(result: ListApplicationsResult): CensusApplication[] {
