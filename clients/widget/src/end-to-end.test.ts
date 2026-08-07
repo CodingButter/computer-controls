@@ -6,7 +6,7 @@ import WebSocket from "ws";
 import { ScriptedEventSource } from "../../../client/src/events/source.ts";
 import { attachEventSocket } from "../../../client/src/events/socket.ts";
 import { INITIAL_STATE, applyGesture, fade, reduce } from "./state-machine.js";
-import { paintCaption, scoutRects } from "./paint.js";
+import { paintCaption } from "./paint.js";
 
 /**
  * A turn, from the hub's mouth to the widget's face.
@@ -134,34 +134,35 @@ test("a turn: the face arrives when spoken to, says what was said, and fades", a
   face.ws.close();
 });
 
-test("a scout is drawn over the element the agent is actually touching", async () => {
+test("what the agent is touching arrives over the socket and is drawn by nobody", async () => {
+  // The widget no longer has a surface to point with: the window is the orb's
+  // own box, so there is nothing wide enough to draw a rectangle over a control
+  // on the other side of the desk. The words stay understood — they are the
+  // hub's vocabulary and a successor surface is #177's work — so what this
+  // pins is that the lane still carries them and the face still tracks them
+  // honestly, gaining and losing nothing else.
   const face = widget();
   await face.opened;
 
-  // The face is on the right-hand monitor of a two-screen desk, which is the
-  // arrangement where a screen coordinate and a page coordinate are different
-  // numbers and a mistake is visible.
-  const stage = { x: 1920, y: 0, width: 2560, height: 1440 };
-
   source.emit({ type: "wake_opened" });
   await settle();
-  // Nothing is being touched yet: one orb, no scouts. This is the acceptance
-  // criterion's idle case, over the real socket.
-  expect(scoutRects(face.state.scouts, stage)).toEqual([]);
+  expect(face.state.scouts).toEqual([]);
 
-  // The agent reaches for a button. The hub reports the rectangle the desktop
-  // gave it, in screen coordinates, and the face puts a scout on it.
   source.emit({ type: "touching", id: "call-1", x: 2400, y: 512, width: 96, height: 28 });
-  // And a second operation on the far monitor, which this face cannot see.
   source.emit({ type: "touching", id: "call-2", x: 200, y: 512, width: 96, height: 28 });
   await settle();
 
-  expect(scoutRects(face.state.scouts, stage)).toEqual([
-    { id: "call-1", left: 480, top: 512, width: 96, height: 28 },
+  // Both, in the coordinates the desktop reported. Nothing is dropped for being
+  // on a monitor the window is not on, because the window is not a monitor.
+  expect(face.state.scouts).toEqual([
+    { id: "call-1", x: 2400, y: 512, width: 96, height: 28 },
+    { id: "call-2", x: 200, y: 512, width: 96, height: 28 },
   ]);
+  // The face itself is unmoved by the work: no caption invented, still visible.
+  expect(face.onScreen).toBe("");
+  expect(face.state.presence).toBe("visible");
 
-  // The work finishes and the scout goes with it. A rectangle left glowing
-  // over a button nobody is pressing is the lie this feature is built against.
+  // The work finishes and the record goes with it.
   source.emit({ type: "released", id: "call-1" });
   source.emit({ type: "released", id: "call-2" });
   await settle();

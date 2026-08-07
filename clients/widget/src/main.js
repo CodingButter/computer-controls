@@ -22,8 +22,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   dragPlacement,
+  isOverVisibleShape,
+  openingPlacement,
   readDragRequest,
-  stageFor,
+  readHitShapes,
 } from "./window-shape.js";
 import { readPlacement, writePlacement } from "./placement-store.js";
 import { readTrayState, writeTrayState } from "./tray-state.js";
@@ -42,48 +44,47 @@ const trayStateFile = () => path.join(app.getPath("userData"), "tray-state.json"
 const hubPort = () => Number(process.env.COMCON_CLIENT_PORT ?? 4111);
 
 /**
- * The flag the stage travels on, spelled the same way in the preload.
+ * How often the shell asks where the cursor is, in milliseconds.
  *
- * Two files hold this string because they are two dialects — this one is a
- * module and the preload is CommonJS by construction — and a test asserts they
- * agree, so the duplication cannot become a disagreement that shows up as a
- * page that quietly does not know where it is.
+ * About thirty times a second: fast enough that the orb feels like it is
+ * waiting for the pointer rather than catching up with it, slow enough that
+ * an idle desk is not paying for a face nobody is reaching for. It only runs
+ * while something is actually drawn.
  */
-const STAGE_ARGUMENT = "--comcon-stage=";
+const CURSOR_POLL_MS = 33;
 
 /**
- * Which desk to draw on, and where on it the face starts.
+ * Where the face opens: the orb's own box, on the display it was left on.
  *
- * Two questions that used to be one. The window covers a display, so the
- * display is chosen first — the one the face was last left on, or the primary
- * one when it has never been left anywhere. Where the orb sits inside that
- * stage is then either the remembered spot, resolved against this display's
- * work area, or the default corner.
+ * The display is chosen first — the one the face was last left on, or the
+ * primary one when it has never been left anywhere — and the spot on it is
+ * either the remembered placement, resolved against that display's work area,
+ * or the default corner.
  *
  * A remembered spot on a monitor that is no longer plugged in resolves onto a
  * display that is, which is the whole reason the placement is stored as an
  * intention rather than as a pair of pixels.
  */
-function openingStage() {
+function openingBounds() {
   const stored = readPlacement(placementFile());
   const display = stored
     ? screen.getDisplayNearestPoint({ x: stored.x, y: stored.y })
     : screen.getPrimaryDisplay();
-  return stageFor(display, stored ?? process.env.COMCON_WIDGET_PLACEMENT ?? "corner");
+  return openingPlacement(display, stored ?? process.env.COMCON_WIDGET_PLACEMENT ?? "corner");
 }
 
 function createWindow({ startHidden = false } = {}) {
-  const stage = openingStage();
+  const bounds = openingBounds();
 
   const window = new BrowserWindow({
-    // The window is the whole display. It is transparent and click-through, so
-    // what the user sees is still an orb in a corner — but the renderer can now
-    // draw at any screen position, which is the only way a face can point at
-    // something the agent is touching on the other side of the desk.
-    width: stage.width,
-    height: stage.height,
-    x: stage.x,
-    y: stage.y,
+    // The window is the face: the orb's own box, put where the orb goes and
+    // carried there by the drag. It used to be the whole display — a sheet the
+    // orb was drawn somewhere inside — which is exactly why the face could
+    // never leave the monitor it opened on.
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
     // Frameless and transparent: the widget is an orb on the desk, not an
     // application window with a title bar and a close button.
     frame: false,
@@ -95,15 +96,28 @@ function createWindow({ startHidden = false } = {}) {
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
-    // Dragging the orb moves the orb, not the window: the window is the desk
-    // the orb is drawn on and it stays where the desk is.
-    movable: false,
+    // Dragging the orb moves this window, so the window has to be movable.
+    movable: true,
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
-    // Never steals what the user was typing into. A face that took focus when
-    // it appeared would interrupt the very work it is meant to sit beside.
-    focusable: false,
+    // Focusable, and the tradeoff is deliberate.
+    //
+    // This was `false`, to guarantee the face never steals what the user is
+    // typing into. On X11 that flag does not mean "do not take focus": Electron
+    // implements an unfocusable window as an override-redirect one, which tells
+    // the window manager not to manage it at all. An unmanaged window has no
+    // `_NET_WM_STATE_ABOVE` and no place in `_NET_CLIENT_LIST_STACKING`, so
+    // `alwaysOnTop` above is silently discarded and the orb's visibility
+    // becomes raw stacking luck — one raised window away from buried.
+    //
+    // The two cannot coexist there, so the flag goes and the guarantee stays:
+    // this shell only ever calls `showInactive()`, never `show()` and never
+    // `focus()`, so the face still never takes focus by appearing. What is
+    // given up is that clicking the orb can now focus it — a deliberate act by
+    // the user, on a window they just clicked, which is what every other
+    // window on the desk does.
+    focusable: true,
     show: false,
     webPreferences: {
       preload: path.join(here, "preload.js"),
@@ -115,13 +129,6 @@ function createWindow({ startHidden = false } = {}) {
       webviewTag: false,
       // No second window may be conjured to run with different rules.
       nativeWindowOpen: false,
-      // Where this window is on the desk, handed to the page at load.
-      //
-      // The renderer has to convert screen coordinates into its own, and a
-      // sandboxed page cannot ask which display it is on. An argument is the
-      // narrowest way to tell it: it is read once, at startup, and there is no
-      // channel here for the page to ask a second question through.
-      additionalArguments: [`${STAGE_ARGUMENT}${JSON.stringify(stage)}`],
     },
   });
 
@@ -130,10 +137,9 @@ function createWindow({ startHidden = false } = {}) {
   window.setAlwaysOnTop(true, "screen-saver");
   window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
-  // The rectangle is mostly transparent, and a transparent pixel that ate a
-  // click would have quietly stolen part of the user's desk. The renderer
-  // turns this off while the pointer is genuinely over the orb.
-  window.setIgnoreMouseEvents(true, { forward: true });
+  // Click-through until something drawn is under the pointer. The shell turns
+  // this off while the cursor is genuinely over the orb; see the poll below.
+  window.setIgnoreMouseEvents(true);
 
   window.loadFile(path.join(here, "index.html"));
   // A widget the user disabled last run comes back disabled: loaded and
@@ -142,11 +148,7 @@ function createWindow({ startHidden = false } = {}) {
     if (!startHidden) window.showInactive();
   });
 
-  // The stage travels out with the window because the drag handler needs the
-  // same origin the page was given. Two readings of the display could disagree
-  // after a monitor changed, and a face drawn against one origin and placed
-  // against another is a face in the wrong place for no visible reason.
-  return { window, stage };
+  return window;
 }
 
 /** The one document the microphone may be granted to: the widget's own page. */
@@ -205,7 +207,7 @@ app.whenReady().then(() => {
 
   guardPermissions(() => trayState.disabled);
 
-  const { window, stage } = createWindow({ startHidden: trayState.disabled });
+  const window = createWindow({ startHidden: trayState.disabled });
 
   // The one page this process opens, shared by the tray menu and the face's
   // own context menu. The address is built here, in the main process, from a
@@ -261,37 +263,26 @@ app.whenReady().then(() => {
     });
   });
 
-  // The renderer knows what shape it painted; the shell owns the window. While
-  // the pointer is over the orb the window takes clicks, and the moment it
-  // leaves, clicks fall through to the desk again.
-  ipcMain.on("widget:pointer-over-shape", (_event, over) => {
-    if (window.isDestroyed()) return;
-    window.setIgnoreMouseEvents(!over, { forward: true });
-  });
-
   /*
-   * Dragging moves the face, and the shell is the half that can say where.
+   * Dragging moves the window, and the shell is the half that can say where.
    *
    * The page reports the distance the pointer has travelled since the press;
    * everything else happens here, where the shape of the desk is actually
-   * known. What changed when the window became the stage is only the subject
-   * of the arithmetic: the orb moves inside a window that stays where the desk
-   * is, rather than the window moving under the compositor. The rule the page
-   * lives by did not change at all — it reports travel, never a position,
-   * because on a desk with three monitors it has no honest way to know one.
-   *
-   * The result is handed back in page coordinates, because the page is the
-   * thing that draws now. That is the one direction this seam gained, and it
-   * carries a place to draw rather than an answer about where the window is.
+   * known. The page reports travel and never a position, because on a desk
+   * with three monitors it has no honest way to know one — and it does not
+   * need one, because the answer is not drawn, it is `setPosition`.
    *
    * The origin is taken once, at the press, so a long drag accumulates no
-   * rounding error and a snap that pulls the orb to an edge does not drag the
+   * rounding error and a snap that pulls the face to an edge does not drag the
    * cursor's frame of reference with it.
+   *
+   * The clamp follows the pointer's display rather than the window's, which is
+   * what lets the face cross onto a second monitor: the desk it is being taken
+   * to is the one that decides where the edges are.
    *
    * The write happens on release only. A face persisted on every mousemove
    * would be a JSON file rewritten sixty times a second.
    */
-  let orb = stage.orb;
   let dragOrigin = null;
   ipcMain.on("widget:drag", (_event, request) => {
     if (window.isDestroyed()) return;
@@ -299,29 +290,83 @@ app.whenReady().then(() => {
     if (!drag) return;
 
     if (drag.phase === "begin") {
-      dragOrigin = { x: orb.x, y: orb.y };
+      const bounds = window.getBounds();
+      dragOrigin = { x: bounds.x, y: bounds.y };
       return;
     }
     if (!dragOrigin) return;
 
     const wanted = { x: dragOrigin.x + drag.dx, y: dragOrigin.y + drag.dy };
-    // Clamped and snapped against the display the hand is over, which is not
-    // always the display the stage is on — a face dragged towards a second
-    // monitor stops at the edge of the desk it is drawn on rather than
-    // half-existing on one it cannot reach.
     const display = screen.getDisplayNearestPoint(wanted);
     const placement = dragPlacement(display.workArea, wanted, drag.snap);
-    orb = { x: placement.x, y: placement.y };
-    window.webContents.send("widget:placed", {
-      x: placement.x - stage.x,
-      y: placement.y - stage.y,
-    });
+    window.setPosition(placement.x, placement.y);
 
     if (drag.phase === "end") {
       dragOrigin = null;
       writePlacement(placementFile(), placement);
     }
   });
+
+  /*
+   * Click-through, and the poll that is the only honest way to leave it.
+   *
+   * The window is mostly transparent — a rounded orb and sometimes a line of
+   * text inside a rectangle — and a transparent pixel that ate a click would
+   * quietly steal part of the user's desk. So the window ignores mouse events
+   * by default and claims them only while the pointer is genuinely over
+   * something drawn.
+   *
+   * Deciding that here, rather than letting the page say so, is forced by the
+   * platform. `setIgnoreMouseEvents(true, { forward: true })` — asking for the
+   * events to be forwarded to the page anyway, so it can notice the pointer
+   * arriving and change its mind — does nothing on Linux. An ignoring window
+   * there receives no pointer events at all, which means a page that had gone
+   * click-through could never be the thing that reports the pointer coming
+   * back. The shell asks the compositor where the cursor is instead.
+   *
+   * The page still owns the shapes, because the page is what drew them: it
+   * reports them in window coordinates whenever they change, and `null` when
+   * there is nothing on screen to claim. Nothing drawn means nothing to poll,
+   * so the timer stops — an invisible face costs no cursor lookups.
+   *
+   * A drag in flight suspends the question entirely. The window is being moved
+   * under the pointer on purpose, and a clamp at the edge of a display can
+   * leave the cursor outside the orb for a frame; releasing the claim there
+   * would drop the gesture the user is still making.
+   */
+  let hitShapes = null;
+  let cursorPoll = null;
+
+  const stopPolling = () => {
+    if (cursorPoll) clearInterval(cursorPoll);
+    cursorPoll = null;
+  };
+
+  const followCursor = () => {
+    if (window.isDestroyed()) return stopPolling();
+    if (!hitShapes || dragOrigin) return;
+    const cursor = screen.getCursorScreenPoint();
+    const origin = window.getBounds();
+    const over = isOverVisibleShape(
+      { x: cursor.x - origin.x, y: cursor.y - origin.y },
+      hitShapes,
+    );
+    window.setIgnoreMouseEvents(!over);
+  };
+
+  ipcMain.on("widget:hit-shapes", (_event, shapes) => {
+    if (window.isDestroyed()) return;
+    hitShapes = readHitShapes(shapes);
+    if (!hitShapes) {
+      stopPolling();
+      window.setIgnoreMouseEvents(true);
+      return;
+    }
+    if (!cursorPoll) cursorPoll = setInterval(followCursor, CURSOR_POLL_MS);
+    followCursor();
+  });
+
+  window.on("closed", stopPolling);
 
   // The dashboard opens in the user's browser, not in this process. A widget
   // that rendered a settings page would have become a second application, and

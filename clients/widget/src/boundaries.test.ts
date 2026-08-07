@@ -5,7 +5,7 @@ import { describe, expect, test } from "vitest";
 // The shell's manners, importable without starting Electron. `main.js` itself
 // is read as text below rather than imported, because importing it would mean
 // this suite could only run on a machine with a display.
-import { GRANTED_PERMISSIONS, HEIGHT, placeOrb, stageFor } from "./window-shape.js";
+import { GRANTED_PERMISSIONS, HEIGHT, WIDTH, openingPlacement, placeOrb } from "./window-shape.js";
 import { hubEventsUrl, nextRetryDelay } from "./connection.js";
 import { dashboardUrl } from "./dashboard.js";
 
@@ -329,18 +329,28 @@ describe("the shell", () => {
     // Clicks fall through the transparent rectangle by default.
     expect(main).toContain("setIgnoreMouseEvents(true");
 
-    // And the default is the only unconditional setting there is. The window
-    // is made click-through when it opens, and the single other call is the
-    // renderer's report of what it drew — so a hit test that goes wrong
-    // leaves the widget transparent, which is the direction a bug here must
-    // fail in. Swallowing a click meant for the user's editor is the worst
-    // outcome available.
+    // Click-through is the default and every other call is a hit test's
+    // answer, so a hit test that goes wrong leaves the widget transparent —
+    // the direction a bug here must fail in. Swallowing a click meant for the
+    // user's editor is the worst outcome available.
     const flips = [...main.matchAll(/setIgnoreMouseEvents\(([^,)]*)/g)].map((match) => match[1]);
-    expect(flips).toEqual(["true", "!over"]);
+    expect(flips[0]).toBe("true");
+    expect(flips.filter((flip) => flip !== "true")).toEqual(["!over"]);
 
-    // It never steals what the user was typing into.
-    expect(main).toContain("focusable: false");
+    // The window is managed by the window manager, which is the only way
+    // `alwaysOnTop` above means anything on X11: an unfocusable window there
+    // is an override-redirect one, and an unmanaged window's always-on-top is
+    // silently discarded. The guarantee that flag used to carry — that the
+    // face never takes what the user is typing into — is kept by never
+    // showing the window any way but inactive.
+    expect(main).toContain("focusable: true");
+    expect(main).not.toContain("focusable: false");
     expect(main).toContain("showInactive()");
+    const shows = [...stripComments(main).matchAll(/window\.show[A-Za-z]*\(/g)].map(
+      (match) => match[0],
+    );
+    expect(new Set(shows)).toEqual(new Set(["window.showInactive("]));
+    expect(stripComments(main)).not.toContain("window.focus(");
 
     // It cannot become a browser: no new windows, no navigation, no webviews.
     expect(main).toContain('action: "deny"');
@@ -416,47 +426,79 @@ describe("the shell", () => {
     }
   });
 
-  test("covers one whole display and says where that display is", () => {
-    // A second monitor to the left, so the origin is not zero and a stage
-    // that quietly assumed it was would be caught here rather than by a
-    // scout drawn 1920 pixels from the thing it was pointing at. A panel at
-    // the top and a dock on the left, so the work area differs from the
-    // display on every axis.
+  test("is the orb's own box, on the display it was left on", () => {
+    // A second monitor to the left, so the origin is not zero and a window
+    // that quietly assumed it was would be caught here rather than by a face
+    // opening 1920 pixels from where it was left. A panel at the top and a
+    // dock on the left, so the work area differs from the display on every
+    // axis.
     const display = {
       bounds: { x: 1920, y: 0, width: 2560, height: 1440 },
       workArea: { x: 1968, y: 32, width: 2512, height: 1408 },
     };
 
-    const stage = stageFor(display, "corner");
+    const bounds = openingPlacement(display, "corner");
 
-    // The window is the display. Anything smaller is a face that cannot
-    // point at the far side of the screen, which is the whole capability here.
-    expect({ x: stage.x, y: stage.y, width: stage.width, height: stage.height }).toEqual(
-      display.bounds,
-    );
+    // The window is the face, not the desk it is standing on. A window the
+    // size of a display is one that cannot be carried to a different display,
+    // which is the bug this shape exists to remove.
+    expect({ width: bounds.width, height: bounds.height }).toEqual({
+      width: WIDTH,
+      height: HEIGHT,
+    });
 
-    // The orb still sits in the work area's corner, in screen coordinates —
-    // clear of a panel at the top and not at the window's own origin.
-    expect(stage.orb.x).toBeGreaterThan(display.bounds.x + display.bounds.width / 2);
-    expect(stage.orb.y).toBeGreaterThan(display.bounds.y + display.bounds.height / 2);
-    expect(stage.orb.y).toBeLessThanOrEqual(display.workArea.y + display.workArea.height - HEIGHT);
+    // And it opens in the work area's corner, in screen coordinates — clear of
+    // the panel, on the monitor it was resolved against, wholly on-screen.
+    expect(bounds.x).toBeGreaterThan(display.bounds.x + display.bounds.width / 2);
+    expect(bounds.y).toBeGreaterThan(display.bounds.y + display.bounds.height / 2);
+    expect(bounds.y).toBeLessThanOrEqual(display.workArea.y + display.workArea.height - HEIGHT);
+    expect(bounds.x + WIDTH).toBeLessThanOrEqual(display.workArea.x + display.workArea.width);
   });
 
-  test("the stage crosses to the page on one flag, spelled the same way twice", () => {
-    // The shell is a module and the preload is CommonJS by construction, so
-    // the flag's name is written in both files. A test compares them,
-    // because a rename in one place would otherwise ship a page that
-    // silently does not know where it is — and a page that does not know
-    // where it is draws no scouts at all.
-    const flag = "--comcon-stage=";
-    expect(read("main.js")).toContain(flag);
-    expect(read("preload.js")).toContain(flag);
-    expect(read("main.js")).toContain("additionalArguments");
+  test("asks the compositor where the cursor is, because the page cannot be asked", () => {
+    const main = stripComments(read("main.js"));
 
-    // The stage is a measurement handed down, not a channel. The page reads
-    // it off its own arguments; there is no request it could make for more.
-    expect(read("preload.js")).toContain("process.argv");
-    expect(read("preload.js")).toContain("stage:");
+    // An ignoring window on Linux receives no pointer events at all, so a page
+    // that had gone click-through can never be the thing that reports the
+    // pointer coming back. `{ forward: true }` is the setting that pretends
+    // otherwise, and it is a Windows-only courtesy — asking for it here reads
+    // as a working mechanism and is not one.
+    expect(main).not.toContain("forward: true");
+
+    // So the shell polls the real cursor against the shapes the page reported,
+    // in the shell, where the window's own origin is known.
+    expect(main).toContain("getCursorScreenPoint()");
+    expect(main).toContain('ipcMain.on("widget:hit-shapes"');
+    expect(main).toContain("isOverVisibleShape(");
+
+    // The poll exists only while something is drawn: nothing on screen means
+    // the timer stops and the window goes click-through, so an invisible face
+    // costs no cursor lookups and claims no clicks.
+    expect(main).toMatch(/setInterval\(followCursor/);
+    expect(main).toContain("clearInterval");
+    expect(main).toContain('window.on("closed", stopPolling)');
+
+    // The page's old boolean channel is gone. It could only ever answer for
+    // events it was still receiving, which was the bug.
+    for (const file of ["main.js", "preload.js", "renderer.js"]) {
+      expect(read(file)).not.toContain("widget:pointer-over-shape");
+    }
+  });
+
+  test("draws nothing outside its own box, because it no longer has one to draw on", () => {
+    // Scouts were rectangles drawn over the user's own windows, which only a
+    // window the size of a display can do. That window is what made the orb
+    // unmanaged and stuck on one monitor, so the surface is gone and with it
+    // the drawing. The words stay in the state machine — they are the hub's
+    // vocabulary, and it is the record of what the hub said, not a canvas.
+    for (const file of ["renderer.js", "paint.js", "index.html", "skin.css"]) {
+      expect(code(file), `${file} must not draw a scout`).not.toMatch(/scout/i);
+    }
+    expect(read("state-machine.js")).toContain("scouts");
+
+    // And the page draws at its own origin, because the window is the face.
+    // Anything positioning the widget inside a larger sheet is the old shape.
+    expect(read("renderer.js")).not.toContain("window.widget.stage");
   });
 });
 
@@ -568,19 +610,24 @@ describe("the drag", () => {
     expect(main).toContain("readDragRequest(request)");
     expect(main).toContain("dragPlacement(display.workArea, wanted, drag.snap)");
 
-    // The window itself never moves. It is the whole display, and a stage
-    // that slid around under the compositor would take the scouts with it —
-    // so the shell answers a drag with a place to draw rather than by moving
-    // anything, and neither half calls setPosition at all.
-    expect(main).not.toContain("setPosition");
-    expect(renderer).not.toContain("setPosition");
-    expect(main).toContain('window.webContents.send("widget:placed"');
+    // Dragging the face moves the window, which is what lets it cross onto
+    // another monitor — and the shell is the only half that may do it.
+    expect(main).toContain("window.setPosition(placement.x, placement.y)");
+    expect(stripComments(renderer)).not.toContain("setPosition");
 
-    // And what comes back is in the page's own coordinates: the stage origin
-    // is taken off before it crosses, so the answer to "where do I draw" can
-    // never become an answer to "where is my window".
-    expect(main).toContain("x: placement.x - stage.x");
-    expect(renderer).toContain("window.widget.onPlaced");
+    // The display that decides the edges is the one under the pointer, not the
+    // one the window is currently on. A clamp against the window's own display
+    // is a face that can never leave it.
+    expect(main).toContain("screen.getDisplayNearestPoint(wanted)");
+
+    // Nothing comes back. The result of a drag is the window being somewhere
+    // else, so an answer sent to the page would be a second copy of a fact the
+    // page has no use for — and the beginning of a way to ask where the window
+    // is.
+    for (const file of ["main.js", "preload.js", "renderer.js"]) {
+      expect(read(file)).not.toContain("widget:placed");
+      expect(read(file)).not.toContain("onPlaced");
+    }
 
     // The page never names a place, only a distance travelled since the
     // press. It cannot name one honestly: on a desk with three monitors it
@@ -602,7 +649,7 @@ describe("the drag", () => {
     // display it is opening on rather than replayed as raw pixels.
     expect(main).toContain("readPlacement(placementFile())");
     expect(main).toContain("screen.getDisplayNearestPoint({ x: stored.x, y: stored.y })");
-    expect(main).toContain("stageFor(display, stored ??");
+    expect(main).toContain("openingPlacement(display, stored ??");
     expect(read("window-shape.js")).toContain("restorePlacement(display.workArea, placement)");
   });
 });
