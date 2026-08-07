@@ -1,5 +1,6 @@
 import type { AgentTurn } from "../chat.ts";
-import type { PermissionRegistry } from "./registry.ts";
+import { deriveRefusal, type PermissionRefusal } from "./refusal.ts";
+import type { PermissionRegistry, PermissionRow, PermissionsView } from "./registry.ts";
 
 /**
  * The "no permission yet" signal, installed at the one place both transports
@@ -19,8 +20,18 @@ import type { PermissionRegistry } from "./registry.ts";
  * same wrapped function.
  */
 
-export function permissionContextPrefix(app: string): string {
-  return `[context for the assistant: "${app}" is installed but the user has not granted it permission on the Permissions page. If the request concerns it, say so and point there.]`;
+/**
+ * The refusal, handed to the agent as context.
+ *
+ * The sentence comes from the same builder a denied tool call uses, so the
+ * agent hears the level and the remedy in the page's own words rather than a
+ * bare "not permitted" it can only relay as a shrug. The registry is
+ * user-owned and deny-by-default: the setting is the person's to change, and
+ * an agent that offered to change it would be offering to widen its own
+ * permissions.
+ */
+export function permissionContextPrefix(refusal: PermissionRefusal): string {
+  return `[context for the assistant: ${refusal.sentence} Say so if the request concerns it, and point at the permissions page. Never offer to change the setting yourself.]`;
 }
 
 /**
@@ -29,18 +40,18 @@ export function permissionContextPrefix(app: string): string {
  * earliest wins; at the same position the longer name wins, so "google chrome"
  * beats "chrome" instead of losing to its own substring.
  */
-function firstMentioned(message: string, apps: string[]): string | undefined {
+function firstMentioned(message: string, apps: PermissionRow[]): PermissionRow | undefined {
   const folded = message.toLowerCase();
-  let best: { app: string; index: number } | undefined;
+  let best: { app: PermissionRow; index: number } | undefined;
   for (const app of apps) {
-    const name = app.toLowerCase().trim();
+    const name = app.name.toLowerCase().trim();
     if (!name) continue;
     const index = folded.indexOf(name);
     if (index === -1) continue;
     if (
       !best ||
       index < best.index ||
-      (index === best.index && app.length > best.app.length)
+      (index === best.index && app.name.length > best.app.name.length)
     ) {
       best = { app, index };
     }
@@ -53,22 +64,38 @@ export function wrapTurnWithPermissionAwareness(
   registry: PermissionRegistry,
 ): AgentTurn {
   return async (request) => {
-    let unpermitted: string[];
+    let view: PermissionsView | undefined;
     try {
-      unpermitted = await registry.unpermittedApps();
+      view = await registry.view();
     } catch {
       // A malformed config or a hiccuping census must not take the chat lane
       // down with it; the turn proceeds unprefixed, which is the behaviour
       // this wrapper was added to.
-      unpermitted = [];
+      view = undefined;
     }
+    if (!view) return await turn(request);
 
-    const mentioned = firstMentioned(request.message, unpermitted);
-    if (!mentioned) return await turn(request);
+    const row = firstMentioned(
+      request.message,
+      view.applications.filter((candidate) => !candidate.permitted),
+    );
+    if (!row) return await turn(request);
+
+    // A mention is the agent about to look, so `observe` is the class at
+    // stake — and the narrowest remedy that would answer it.
+    const refusal = deriveRefusal({
+      application: row.name,
+      demanded: "observe",
+      access: row.access,
+      ...(row.classes ? { classes: row.classes } : {}),
+      ceiling: view.ceiling,
+      listed: true,
+    });
+    if (!refusal) return await turn(request);
 
     return await turn({
       ...request,
-      message: `${permissionContextPrefix(mentioned)}\n\n${request.message}`,
+      message: `${permissionContextPrefix(refusal)}\n\n${request.message}`,
     });
   };
 }

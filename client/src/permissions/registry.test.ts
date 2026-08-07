@@ -286,6 +286,124 @@ describe("the registry against a real config file", () => {
     expect(written.scopes.applications.sort()).toEqual(["Files", "org.gnome.Nautilus"]);
   });
 
+  test("a write matches names exactly, even though a refusal does not", async () => {
+    // A refusal resolves "disc" to Discord because the daemon would. A WRITE
+    // must not: the row it finds decides whose allowlist entry and whose class
+    // cap get deleted, so a near-miss would revoke a different application
+    // than the one the user clicked.
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        scopes: {
+          permissionsMode: "per-application",
+          applications: ["Discord"],
+          applicationClasses: { Discord: ["observe"] },
+        },
+      }),
+    );
+
+    await registry().setAccess("disc", "off");
+
+    const written = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
+      scopes: { applications: string[]; applicationClasses: Record<string, string[]> };
+    };
+    expect(written.scopes.applications).toEqual(["Discord"]);
+    expect(written.scopes.applicationClasses).toEqual({ Discord: ["observe"] });
+
+    // The same spelling still earns a truthful refusal, which is the whole
+    // reason the two lookups are allowed to differ.
+    expect(await registry().refusalFor("disc", "activate")).toMatchObject({
+      application: "Discord",
+      listed: true,
+    });
+  });
+
+  test("a refusal reads the same file the toggle writes", async () => {
+    // Nothing permitted: the refusal is the page's own answer, spelled out.
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        scopes: {
+          permissionsMode: "per-application",
+          applications: [],
+          operationClasses: ["observe", "edit", "activate"],
+        },
+      }),
+    );
+
+    const refusal = await registry().refusalFor("Discord", "activate");
+    expect(refusal).toMatchObject({
+      application: "Discord",
+      demanded: "activate",
+      access: "off",
+      listed: true,
+      remedy: { where: "permissions-page", from: "off", to: "interact" },
+    });
+  });
+
+  test("a view-only application refuses what view does not hold and permits what it does", async () => {
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        scopes: {
+          permissionsMode: "per-application",
+          applications: ["Discord"],
+          applicationClasses: { Discord: ["observe"] },
+          operationClasses: ["observe", "edit", "activate"],
+        },
+      }),
+    );
+
+    expect(await registry().refusalFor("Discord", "activate")).toMatchObject({
+      access: "view",
+      allowed: ["observe"],
+      remedy: { where: "permissions-page", from: "view", to: "interact" },
+    });
+    // Reading is exactly what it was granted, so there is nothing to refuse.
+    expect(await registry().refusalFor("Discord", "observe")).toBeUndefined();
+  });
+
+  test("a refusal resolves the name however it was spelled, as the ceiling would", async () => {
+    // Saying "not listed" about an application the daemon would have matched
+    // is the one wrong answer here, so the lookup mirrors the ceiling's rule.
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ scopes: { permissionsMode: "per-application", applications: [] } }),
+    );
+
+    for (const spelling of ["Discord", "discord", "disc"]) {
+      const refusal = await registry().refusalFor(spelling, "observe");
+      expect(refusal?.application, spelling).toBe("Discord");
+      expect(refusal?.listed, spelling).toBe(true);
+    }
+
+    const unknown = await registry().refusalFor("Signal", "observe");
+    expect(unknown).toMatchObject({ application: "Signal", listed: false });
+  });
+
+  test("a row known by its census name is refused under either of its names", async () => {
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ scopes: { permissionsMode: "per-application", applications: [] } }),
+    );
+    const gnomeish = createPermissionRegistry({
+      configPath,
+      readCensus: async () =>
+        ({
+          reachable: true,
+          applications: [{ name: "org.gnome.Nautilus", running: true, readable: true }],
+        }) as Census,
+      scanInstalled: async () => [{ id: "org.gnome.Nautilus", name: "Files" }],
+    });
+
+    for (const spelling of ["Files", "org.gnome.Nautilus"]) {
+      const refusal = await gnomeish.refusalFor(spelling, "observe");
+      // One application, one row, one refusal — under the friendly name.
+      expect(refusal?.application, spelling).toBe("Files");
+      expect(refusal?.listed, spelling).toBe(true);
+    }
+  });
+
   test("an unreachable daemon is an answer, not an error", async () => {
     const offline = createPermissionRegistry({
       configPath,
