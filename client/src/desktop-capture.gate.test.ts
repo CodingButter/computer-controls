@@ -4,8 +4,8 @@ import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { SERVICE_PYTHON, SERVICE_ROOT } from "../../plugin/src/supervisor.ts";
-import { DesktopClient } from "../../plugin/src/client.ts";
+import { SERVICE_PYTHON, SERVICE_ROOT } from "../../clients/mastra-plugin/src/supervisor.ts";
+import { DesktopClient } from "../../clients/mastra-plugin/src/client.ts";
 import { createDesktopCapture } from "./desktop-capture.ts";
 
 /**

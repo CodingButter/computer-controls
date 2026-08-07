@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { WebSocket } from "ws";
 
-import desktopControl from "../../plugin/src/index.ts";
+import desktopControl from "../../clients/mastra-plugin/src/index.ts";
 import type { DevicesView } from "./devices/index.ts";
 import { EVENTS_PATH } from "./events/index.ts";
 
@@ -315,7 +315,7 @@ test("the configuration agent is reachable by dispatch and its verbs are not the
 });
 
 async function mintedAt(scope: string): Promise<string[]> {
-  const pluginDir = path.resolve(import.meta.dirname, "..", "..", "plugin");
+  const pluginDir = path.resolve(import.meta.dirname, "..", "..", "clients", "mastra-plugin");
   const tools = await desktopControl.tools({
     cwd: pluginDir,
     scope: "project",

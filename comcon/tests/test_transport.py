@@ -261,7 +261,7 @@ def test_the_service_gives_up_before_its_callers_do():
     from desktop_service import server
 
     client = (
-        Path(__file__).resolve().parents[2] / "plugin" / "src" / "client.ts"
+        Path(__file__).resolve().parents[2] / "clients" / "mastra-plugin" / "src" / "client.ts"
     ).read_text()
     match = re.search(r"DEFAULT_REQUEST_TIMEOUT_MS\s*=\s*([\d_]+)", client)
     assert match, "the plugin's request timeout is no longer where this test looks"

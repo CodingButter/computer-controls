@@ -33,7 +33,7 @@ pack. The orb is a client-side face + a new voice path into the same hub.
 | Same session, same thread | `hub.ts` mints one session per `BROWSER_RESOURCE_ID="local-browser"`; orb and chat page share it | `client/src/hub.ts:85-91` |
 | Actionable → one function call | `AgentTurn` (`chat.ts`) is the single bridge from voice to brain; the Live provider holds no desktop/memory tools — the function call routes through `createAgentTurn` | `client/src/chat.ts:42-61` |
 | Google credential in same store | `AuthStorageCredentialStore` is extensible; add `google` to `PROVIDER_IDS` + `PROVIDERS` in `auth/providers.ts` (currently only `anthropic`, `openai`) | `client/src/auth/providers.ts:35-52` |
-| Signals → orb as text turns | Plugin `signals/` lane exists; `@mastra/code-sdk` 1.1.1 has no `signalProviders` surface yet (upstream PR mastra-ai/mastra#20554, open) — hedge per issue comment: hub-side injection behind an interface | `plugin/src/signals/`, issue comment 2026-08-04 |
+| Signals → orb as text turns | Plugin `signals/` lane exists; `@mastra/code-sdk` 1.1.1 has no `signalProviders` surface yet (upstream PR mastra-ai/mastra#20554, open) — hedge per issue comment: hub-side injection behind an interface | `clients/mastra-plugin/src/signals/`, issue comment 2026-08-04 |
 | The orb is a new SPA route | `ui.ts` SPA fallback already supports client-side routing; add `/orb` page (or make orb default) | `client/src/ui.ts:27-41` |
 | Brain stays Tier 2 | `model-pack.ts` resolves the standard-tier model (`sonnet-4-6`) the function call reaches; Live never sees it | `client/src/model-pack.ts:41-48` |
 

@@ -25,7 +25,7 @@ import { brainFromGrant, type BrainChoice } from "./scope-brain.ts";
  */
 
 const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const repoRoot = resolve(pluginRoot, "..");
+const repoRoot = resolve(pluginRoot, "..", "..");
 
 export const SERVICE_ROOT = join(repoRoot, "comcon");
 export const SERVICE_PYTHON = venvPython(SERVICE_ROOT);

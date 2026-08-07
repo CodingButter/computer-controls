@@ -4,7 +4,7 @@ A Mastra Code plugin that gives a coding agent a **semantic** interface to a Lin
 applications, windows, dialogs, buttons, text fields — instead of screenshots, OCR and
 coordinate guessing.
 
-- `plugin/` — the TypeScript Mastra Code plugin (`codingbutter.desktop-control`)
+- `clients/mastra-plugin/` — the TypeScript Mastra Code plugin (`codingbutter.desktop-control`), one client of the core
 - `client/` — the local hub you run on your own machine, and how you sign it in to your model accounts
 - `comcon/` — the Python desktop service (the core), speaking AT-SPI2 over a Unix-socket JSON-RPC protocol
 - `protocol/` — `schema.json`, the single source of truth for that protocol. The TypeScript and
@@ -58,7 +58,7 @@ python3 -m venv --system-site-packages comcon/.venv
 comcon/.venv/bin/pip install pytest
 
 # plugin toolchain
-pnpm -C plugin install
+pnpm -C clients/mastra-plugin install
 ```
 
 ### Registering the plugin
@@ -68,7 +68,7 @@ which is git-ignored. A fresh clone has no registry record, so it must be recrea
 
 ```sh
 mkdir -p .mastracode/plugins/sources/local
-ln -sfn ../../../../plugin .mastracode/plugins/sources/local/desktop-control
+ln -sfn ../../../../clients/mastra-plugin .mastracode/plugins/sources/local/desktop-control
 ```
 
 Then write `.mastracode/plugins/plugins.json`:
@@ -79,7 +79,7 @@ Then write `.mastracode/plugins/plugins.json`:
     "desktop-control": {
       "enabled": true,
       "source": "local",
-      "specifier": "plugin",
+      "specifier": "clients/mastra-plugin",
       "path": "sources/local/desktop-control",
       "entry": "src/index.ts"
     }
@@ -89,7 +89,7 @@ Then write `.mastracode/plugins/plugins.json`:
 ```
 
 The `path` is relative to the plugins directory, **not** the project root. The plugin source
-itself stays in the tracked `plugin/` directory; the registry entry is a symlink to it.
+itself stays in the tracked `clients/mastra-plugin/` directory; the registry entry is a symlink to it.
 
 ## Running the service
 
@@ -146,8 +146,8 @@ this desktop, and say so; `DESKTOP_HUMAN_PRESENT=1` selects them. Set it **inlin
 invocation, never in a shell rc** — exported once it is on silently forever, which is the exact
 failure the lane exists to prevent.
 
-The plugin's own lanes are `pnpm -C plugin test` and `pnpm -C plugin typecheck`, and
-`pnpm -C plugin install` is the only thing either one needs.
+The plugin's own lanes are `pnpm -C clients/mastra-plugin test` and `pnpm -C clients/mastra-plugin typecheck`, and
+`pnpm -C clients/mastra-plugin install` is the only thing either one needs.
 
 They can be run from a clone because the plugin declares the framework packages it imports:
 `@mastra/core` supplies `InputProcessor` from `@mastra/core/processors` and `SignalProvider`
@@ -159,11 +159,11 @@ class as the one the host checks against. The local copies exist so the lanes ca
 run; the host's copies are what the plugin is actually loaded with. Keep the two versions in
 step, which is why they are pinned exactly rather than caret-ranged.
 
-`plugin/src/dependencies.test.ts` enforces the property that made this section true: every
-package imported anywhere under `plugin/src` must appear in `plugin/package.json`. An import
+`clients/mastra-plugin/src/dependencies.test.ts` enforces the property that made this section true: every
+package imported anywhere under `clients/mastra-plugin/src` must appear in `clients/mastra-plugin/package.json`. An import
 that resolves only because of something a developer arranged by hand fails that test.
 
-There is also a third lane, `pnpm -C plugin test:gate`, holding tests that pin behaviour the
+There is also a third lane, `pnpm -C clients/mastra-plugin test:gate`, holding tests that pin behaviour the
 plugin depends on but does not own. Per [CONTRIBUTING.md](CONTRIBUTING.md), a failure there is a
 signal to investigate, not a reason to block a PR.
 

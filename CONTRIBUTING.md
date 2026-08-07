@@ -41,7 +41,8 @@ So:
 ## One writer for the protocol
 
 `protocol/schema.json` is the contract, and both validators are generated from it —
-`plugin/src/protocol.generated.ts`, `plugin/src/schemas.generated.ts`,
+`clients/mastra-plugin/src/protocol.generated.ts`,
+`clients/mastra-plugin/src/schemas.generated.ts`,
 `comcon/desktop_service/protocol_generated.py`. Never edit a generated file. Run
 `node scripts/generate-protocol.mjs` and commit what it produces.
 
@@ -83,7 +84,7 @@ Before a PR is ready:
 
 ```sh
 cd comcon && .venv/bin/python -m pytest -q --no-live   # or the full suite if you have a display
-cd ../plugin && npx tsc --noEmit && npx vitest run
+cd ../clients/mastra-plugin && npx tsc --noEmit && npx vitest run
 node scripts/generate-protocol.mjs                       # and check it produced no diff
 ```
 

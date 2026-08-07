@@ -26,7 +26,7 @@ the model needed to know about *now* — the window it was working in vanished �
 arrives whenever the model next polls, which might be never.
 
 The capability the whole project exists for is stated in one comment
-(`plugin/src/signals/desktop-signal-provider.ts:1-8`):
+(`clients/mastra-plugin/src/signals/desktop-signal-provider.ts:1-8`):
 
 > Everything else in this plugin is pull — the model asks, the service answers.
 > This is the one path where a change on the desktop reaches the model without
@@ -66,7 +66,7 @@ own. A golden copy lives at `golden/v1.0.schema.json` and
 `comcon/tests/test_protocol_compat.py` fails the build on any breaking change.
 The generator stamps a 16-character digest (`bfa45250563894d0`) into both
 generated files so a client and a daemon can detect a version mismatch at
-handshake time — not assumed, compared (`plugin/src/index.ts:89-106`).
+handshake time — not assumed, compared (`clients/mastra-plugin/src/index.ts:89-106`).
 
 ---
 
@@ -149,11 +149,11 @@ The signal provider is the one path where a change reaches the model without a
 tool call. It is built once at plugin load and shared between the
 signal-provider lane and the arming processor — two provider instances would
 mean one subscribed provider and one polling provider that never learned a
-thread existed (`plugin/src/signals/index.ts:1-7, 19-22`).
+thread existed (`clients/mastra-plugin/src/signals/index.ts:1-7, 19-22`).
 
 The provider polls the service's revision counter over the local Unix socket,
 not the desktop. This is deliberate and the reasoning is in the source
-(`plugin/src/signals/desktop-signal-provider.ts:10-24`):
+(`clients/mastra-plugin/src/signals/desktop-signal-provider.ts:10-24`):
 
 The service is genuinely event-driven — AT-SPI events, no polling of the
 accessibility tree — and it could push deltas up the socket as JSON-RPC
@@ -173,7 +173,7 @@ The model still gets a push. That is the part that matters.
 ### Priority routing
 
 Not all changes are equal. `priorityOf` inspects a delta's changes and routes
-them (`plugin/src/signals/desktop-signal-provider.ts:81-100`):
+them (`clients/mastra-plugin/src/signals/desktop-signal-provider.ts:81-100`):
 
 - **`window-closed`** is an interrupt-class change. A window disappearing is the
   one structural change a worker cannot discover later without consequence:
@@ -197,7 +197,7 @@ Desktop deltas therefore go out at `medium` or `high`, never at `low`.
 ### Summary, not payload
 
 What the model receives is a **summary**, not a payload
-(`plugin/src/signals/desktop-signal-provider.ts:102-121`). A wall of change
+(`clients/mastra-plugin/src/signals/desktop-signal-provider.ts:102-121`). A wall of change
 objects in the notification slot would be noise the model cannot act on. The
 summary is enough to decide whether to look — "The desktop changed while you
 were not looking: window X closed, focus moved to Y" — and the tools already
@@ -211,13 +211,13 @@ the summary says so and names the revision to re-read from.
 The push lane needs to know which threads to deliver to. A tool call is not a
 reliable signal, because **the turn that matters most for this feature is
 precisely the turn where the model called no desktop tool at all**
-(`plugin/src/signals/processor.ts:1-8`).
+(`clients/mastra-plugin/src/signals/processor.ts:1-8`).
 
 The arming processor is an input processor that runs on every turn. It
 contributes nothing to the model's input — it returns the message list it was
 handed, untouched. Its whole job is to read the thread identity from the memory
 request context and say "this thread exists" to the push lane
-(`plugin/src/signals/processor.ts:1-13, 41-53`).
+(`clients/mastra-plugin/src/signals/processor.ts:1-13, 41-53`).
 
 Thread identity comes from the memory request context rather than from
 arguments, because `processInput` is handed the context but not the ids. A turn
