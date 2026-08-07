@@ -60,14 +60,18 @@ describe("what is talking to this hub", () => {
     expect(after.devices.find((d) => d.kind === "widget")?.connected).toBe(true);
   });
 
-  it("lists no paired clients, and says why instead of leaving a blank", async () => {
+  it("says why instead of leaving a blank when no pairing store is mounted", async () => {
     const { body } = await ask(0);
 
-    // Pairing is #35's flow. Until it exists there is no registry to read, and
-    // an invented row would be worse than an empty list.
+    // A hub assembled without a credential store has no registry to read, and
+    // an invented row would be worse than an empty list. It reports pairing off
+    // with a reason rather than drawing a button that cannot work.
     expect(body.devices.every((device) => device.kind !== "hub" || !device.removable)).toBe(true);
     expect(body.pairing.enabled).toBe(false);
-    expect(body.pairing.reason).toContain("phone client");
+    // Narrowed rather than asserted through: the disabled arm is the only one
+    // carrying a reason, and a test that reached for it on the enabled arm
+    // would be reading a field the type says is not there.
+    if (!body.pairing.enabled) expect(body.pairing.reason).toContain("phone client");
   });
 
   it("names nothing this product did not generate", async () => {

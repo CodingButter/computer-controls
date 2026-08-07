@@ -521,8 +521,9 @@ describe("the door", () => {
    * tests. The peer is fabricated instead: a real server, a real client, and
    * an interposed upgrade listener that hands the handler a request whose
    * socket claims a tailnet address — the same one the isLocalPeer unit test
-   * already refuses. The credential path's end-to-end exercise arrives with
-   * #35's pairing; what is being proven here is the handler's own decisions.
+   * already refuses. What is being proven here is the handler's own decisions:
+   * who it admits, who it refuses, and that a revoked credential stops working
+   * at the door rather than only disappearing from the devices page.
    */
   let doorServer: Server;
   let doorSocket: EventSocket;
@@ -608,6 +609,43 @@ describe("the door", () => {
     // which ids exist.
     expect(wrongSecret.reason).toBe(unknownDevice.reason);
     expect(doorSocket.faceCount).toBe(0);
+  });
+
+  test("a revoked credential stops opening the door", async () => {
+    peerAddress = "100.99.230.54";
+    const offering = [`${DEVICE_SUBPROTOCOL_PREFIX}${minted.id}.${minted.secret}`];
+
+    // It worked a moment ago, which is what makes the second half meaningful.
+    expect((await dial(offering)).opened).toBe(true);
+
+    const store = createDeviceCredentialStore(
+      path.join(credentialDir, "device-credentials.json"),
+    );
+    expect(await store.revoke(minted.id)).toBe(true);
+
+    // Revoking a lost phone is the whole point of the control on the devices
+    // page. A door that kept admitting the credential because it had cached the
+    // store at boot would make that control a lie, and the person would believe
+    // they had shut a door that was still open.
+    const after = await dial(offering);
+    expect(after.opened).toBe(false);
+  });
+
+  test("revoking one device leaves the others paired", async () => {
+    peerAddress = "100.99.230.54";
+    const store = createDeviceCredentialStore(
+      path.join(credentialDir, "device-credentials.json"),
+    );
+    const other = await store.mint("a second phone");
+
+    expect(await store.revoke(minted.id)).toBe(true);
+
+    expect((await dial([`${DEVICE_SUBPROTOCOL_PREFIX}${minted.id}.${minted.secret}`])).opened).toBe(
+      false,
+    );
+    expect((await dial([`${DEVICE_SUBPROTOCOL_PREFIX}${other.id}.${other.secret}`])).opened).toBe(
+      true,
+    );
   });
 
   test("a credential presented to a lane with no store is refused", async () => {

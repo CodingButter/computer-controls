@@ -12,24 +12,30 @@
  *   the widget   — connected or not, counted off the one loopback event socket
  *                  a face actually holds. No socket, no row-with-a-stale-name:
  *                  the row says it is not connected, which is the truth.
- *   paired       — nothing, today. Pairing is #35's QR flow and it carries its
- *                  own security story; until it lands there is no registry to
- *                  read and the honest answer is an empty list with a reason.
+ *   paired       — the phones that completed the QR ceremony, read from the
+ *                  credential store the `/events` door already checks. They are
+ *                  the first rows that are legitimately removable: revoking a
+ *                  pairing is a real action, which is exactly why this machine
+ *                  is not removable and the widget is not either.
  *
  * Two things this deliberately does not do. It mints no device identifier that
  * this product did not already generate — no hostname, no MAC, no address, no
  * probe of the network — because a page that answers "what is connected" must
- * not become the thing that fingerprints the machine it runs on. And it is
- * read-only: the only mutation the issue admits is revocation, and there is
- * nothing to revoke until there is something to pair.
+ * not become the thing that fingerprints the machine it runs on. A paired phone
+ * is named by the label it offered during pairing, which is a person's words
+ * for their own device, and by nothing read off the network. And it never
+ * returns a secret: the store's `list` omits it at the type level, so this
+ * route could not leak one if it tried.
  */
 
 import { Hono } from "hono";
 
+import type { PairedDevice } from "../events/index.ts";
+
 export const DEVICES_PATH = "/api/devices";
 
 /** The surfaces this hub has a word for. Closed, like every other vocabulary here. */
-export const DEVICE_KINDS = ["hub", "widget"] as const;
+export const DEVICE_KINDS = ["hub", "widget", "paired"] as const;
 export type DeviceKind = (typeof DEVICE_KINDS)[number];
 
 export type DeviceView = {
@@ -45,6 +51,15 @@ export type DeviceView = {
   detail: string;
   /** Whether the page may offer a revoke control. The hub is never removable. */
   removable: boolean;
+  /**
+   * The handle revocation needs, present only on rows that have one.
+   *
+   * Minted by this product during pairing — hex from a random generator — so
+   * publishing it names nothing about the machine or the network. Rows that
+   * cannot be removed carry no id, because an identifier with no action behind
+   * it is just another thing on the page to leak.
+   */
+  id?: string;
 };
 
 export type DevicesView = {
@@ -57,7 +72,7 @@ export type DevicesView = {
    * that is off says so with a reason a person can act on, and the page repeats
    * it instead of offering a button that cannot work.
    */
-  pairing: { enabled: false; reason: string };
+  pairing: { enabled: true } | { enabled: false; reason: string };
 };
 
 export type DevicesMount = {
@@ -67,6 +82,14 @@ export type DevicesMount = {
    * the case this page exists to show.
    */
   faces: () => number;
+  /**
+   * The phones that completed pairing, secrets already omitted.
+   *
+   * Optional so a hub assembled without a credential store still answers this
+   * page — it reports no paired devices, which is true of such a hub, rather
+   * than failing the whole list because one section has no source.
+   */
+  paired?: () => Promise<PairedDevice[]>;
 };
 
 const HUB_DETAIL = "The hub is running here. This is the machine the agent acts on.";
@@ -80,8 +103,9 @@ const NO_PAIRING =
 export function buildDevicesApp(mount: DevicesMount): Hono {
   const app = new Hono();
 
-  app.get(DEVICES_PATH, (c) => {
+  app.get(DEVICES_PATH, async (c) => {
     const faces = mount.faces();
+    const paired = mount.paired ? await mount.paired() : [];
     return c.json<DevicesView>({
       devices: [
         {
@@ -101,12 +125,41 @@ export function buildDevicesApp(mount: DevicesMount): Hono {
           // which is the window's business.
           removable: false,
         },
+        ...paired.map(
+          (device): DeviceView => ({
+            kind: "paired",
+            name: device.label,
+            // A paired phone is not a socket this hub holds open. Whether it is
+            // in a pocket or on a table is not a thing the hub can know, and a
+            // row that guessed would be the page inventing an answer. What is
+            // true is that the pairing exists, so the row reports the pairing.
+            connected: false,
+            detail: pairedDetail(device),
+            removable: true,
+            id: device.id,
+          }),
+        ),
       ],
-      pairing: { enabled: false, reason: NO_PAIRING },
+      // The mint is wired or it is not; there is no half-open pairing. A hub
+      // assembled without one still says so with a reason rather than drawing a
+      // button that cannot work.
+      pairing: mount.paired ? { enabled: true } : { enabled: false, reason: NO_PAIRING },
     });
   });
 
   return app;
+}
+
+/**
+ * When the pairing happened, in the hub's words.
+ *
+ * The date is the one fact the hub recorded during the ceremony. It is not read
+ * off the device and it names nothing about the network.
+ */
+function pairedDetail(device: PairedDevice): string {
+  const paired = new Date(device.createdAt);
+  if (Number.isNaN(paired.getTime())) return "Paired with this hub.";
+  return `Paired with this hub on ${paired.toLocaleDateString("en-CA")}.`;
 }
 
 /**

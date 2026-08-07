@@ -15,6 +15,13 @@ export type DeviceView = {
   connected: boolean;
   detail: string;
   removable: boolean;
+  /**
+   * The handle a revoke control needs. Present only on rows the hub says are
+   * removable — the hub omits it elsewhere, and the page must not invent one,
+   * because a row with an id but no action behind it is a identifier on the
+   * page for no reason.
+   */
+  id?: string;
 };
 
 /**
@@ -39,6 +46,7 @@ function parseDevice(value: unknown): DeviceView | undefined {
     connected: raw.connected === true,
     detail: typeof raw.detail === "string" ? raw.detail : "",
     removable: raw.removable === true,
+    ...(typeof raw.id === "string" ? { id: raw.id } : {}),
   };
 }
 

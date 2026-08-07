@@ -19,6 +19,7 @@ export * from "./permissions";
 export * from "./accounts";
 export * from "./audit";
 export * from "./devices";
+export * from "./pairing";
 export * from "./realtime";
 export * from "./autostart";
 export * from "./desktop-config";

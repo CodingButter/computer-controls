@@ -68,6 +68,19 @@ refused; a plugin in neither list is one that is not installed here.
 | `src/ui.ts` | The static lane: one directory served as an SPA, with anything that escapes it refused. |
 | `src/plugins.ts` | The allowlist: reads what is installed on the machine, mounts only what is admitted. |
 | `src/desktop-plugin.ts` | The desktop plugin's registry record, at the configured scope. |
+| `src/pairing/` | The pairing ceremony: a two-minute single-use ticket, minted locally, spent once by a phone. |
+
+## Pairing a phone
+
+The Devices page can show a QR code that pairs a phone with this hub. The
+ticket behind it lasts two minutes and works once, minting a device credential
+that the `/events` door accepts and that the same page can revoke.
+
+Minting and revoking are refused unless the caller is on this machine. That
+check reads the peer off the socket, so **a TLS proxy in front of the hub must
+not forward `POST /api/pairing/ticket` or `DELETE /api/pairing/devices/:id`** —
+through a proxy every request looks local. `docs/11-the-phone.md` has the full
+ceremony and the proxy table.
 
 ## Tests
 

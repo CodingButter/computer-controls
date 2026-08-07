@@ -136,11 +136,30 @@ function digest(value: string): Buffer {
   return createHash("sha256").update(value).digest();
 }
 
+/** A paired device as anything outside this module may see it: never the secret. */
+export type PairedDevice = Omit<DeviceCredential, "secret">;
+
 export type DeviceCredentialStore = {
   /** Create and persist a credential. The pairing flow is the only intended caller. */
   mint(label: string): Promise<DeviceCredential>;
   /** Whether a presented subprotocol names a credential this hub minted. */
   verify(presented: string): Promise<boolean>;
+  /**
+   * The paired devices, without their secrets.
+   *
+   * The return type omits `secret` at the type level rather than by convention,
+   * so a future caller that renders this list cannot reach a secret to leak
+   * even by accident. A store that cannot be read lists nothing: the Devices
+   * page asking "what is paired" must not be the thing that surfaces a parse
+   * error as an empty-and-then-overwritten store.
+   */
+  list(): Promise<PairedDevice[]>;
+  /**
+   * Forget a credential. True when one was removed, false when the id was
+   * already gone — revoking twice is not an error, and a phone that is already
+   * revoked is in exactly the state the caller asked for.
+   */
+  revoke(id: string): Promise<boolean>;
 };
 
 export function createDeviceCredentialStore(file: string): DeviceCredentialStore {
@@ -176,6 +195,27 @@ export function createDeviceCredentialStore(file: string): DeviceCredentialStore
       const expected = entry ? digest(entry.secret) : digest(randomBytes(32).toString("hex"));
       const offered = digest(parsed ? parsed.secret : "");
       return timingSafeEqual(expected, offered) && entry !== undefined;
+    },
+
+    async list(): Promise<PairedDevice[]> {
+      let devices: DeviceCredential[];
+      try {
+        ({ devices } = await readStore(file));
+      } catch {
+        // Same posture as the door: a store that cannot be read yields nothing
+        // rather than a thrown page. The malformed-file error belongs to the
+        // minting path, where a person is present to hear it.
+        return [];
+      }
+      return devices.map(({ secret: _secret, ...rest }) => rest);
+    },
+
+    async revoke(id: string): Promise<boolean> {
+      const { document, devices } = await readStore(file);
+      const kept = devices.filter((device) => device.id !== id);
+      if (kept.length === devices.length) return false;
+      await writeStore(file, { ...document, devices: kept });
+      return true;
     },
   };
 }
