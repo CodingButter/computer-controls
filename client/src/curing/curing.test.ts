@@ -101,6 +101,99 @@ describe("curing one Exec line", () => {
 });
 
 describe("curing the machine", () => {
+  it("cures autostart entries and desktop icons in place", () => {
+    const { systemDir, userDir } = machine();
+    const discord = install(systemDir, "discord", "/usr/share/discord/Discord");
+    const autostart = path.join(path.dirname(systemDir), "autostart");
+    const desktop = path.join(path.dirname(systemDir), "Desktop");
+    fs.mkdirSync(autostart, { recursive: true });
+    fs.mkdirSync(desktop, { recursive: true });
+    // Named for the feature rather than the application, which is the ordinary
+    // case and the reason matching cannot rely on the filename.
+    const tray = path.join(autostart, "discord-tray.desktop");
+    fs.writeFileSync(tray, "[Desktop Entry]\nName=Discord\nExec=/usr/share/discord/Discord --start-minimized\n");
+    const icon = path.join(desktop, "discord.desktop");
+    fs.writeFileSync(icon, "[Desktop Entry]\nName=Discord\nExec=/usr/share/discord/Discord %U\n", {
+      mode: 0o755,
+    });
+
+    const report = cureChromiumApps({
+      rows: [row({ name: "Discord", desktopId: "discord" })],
+      entries: [discord],
+      userApplicationsDir: userDir,
+      inPlaceDirs: [autostart, desktop],
+    });
+
+    expect(fs.readFileSync(tray, "utf8")).toContain(ACCESSIBILITY_FLAG);
+    expect(fs.readFileSync(icon, "utf8")).toContain(ACCESSIBILITY_FLAG);
+    // An executable desktop icon that came back non-executable would no longer
+    // launch, so the mode rides along.
+    expect(fs.statSync(icon).mode & 0o111).toBeTruthy();
+    // One application, three launchers, one line in the report.
+    expect(report.cured).toHaveLength(1);
+    expect(report.cured[0]?.launchers).toHaveLength(3);
+    // The temp file used for the atomic swap does not survive.
+    expect(fs.readdirSync(autostart)).toEqual(["discord-tray.desktop"]);
+  });
+
+  it("leaves an unpermitted application's autostart entry byte-identical", () => {
+    const { systemDir, userDir } = machine();
+    const discord = install(systemDir, "discord", "/usr/share/discord/Discord");
+    const autostart = path.join(path.dirname(systemDir), "autostart");
+    fs.mkdirSync(autostart, { recursive: true });
+    const chrome = path.join(autostart, "google-chrome.desktop");
+    const before = "[Desktop Entry]\nName=Chrome\nExec=/usr/bin/google-chrome %U\n";
+    fs.writeFileSync(chrome, before);
+
+    cureChromiumApps({
+      rows: [
+        row({ name: "Discord", desktopId: "discord" }),
+        row({ name: "Google-chrome", desktopId: "google-chrome", permitted: false }),
+      ],
+      entries: [discord],
+      userApplicationsDir: userDir,
+      inPlaceDirs: [autostart],
+    });
+
+    // Chromium-family, in a directory being cured, and still untouched: the
+    // permitted set is what bounds the in-place pass.
+    expect(fs.readFileSync(chrome, "utf8")).toBe(before);
+  });
+
+  it("does not create a launcher, a directory, or a second cure", () => {
+    const { systemDir, userDir } = machine();
+    const discord = install(systemDir, "discord", "/usr/share/discord/Discord");
+    const autostart = path.join(path.dirname(systemDir), "autostart");
+    fs.mkdirSync(autostart, { recursive: true });
+    const tray = path.join(autostart, "discord.desktop");
+    fs.writeFileSync(tray, "[Desktop Entry]\nName=Discord\nExec=/usr/share/discord/Discord\n");
+    const absent = path.join(path.dirname(systemDir), "no-such-desktop");
+
+    const deps = {
+      rows: [row({ name: "Discord", desktopId: "discord" })],
+      entries: [discord],
+      userApplicationsDir: userDir,
+      inPlaceDirs: [autostart, absent],
+    };
+    cureChromiumApps(deps);
+    const written = fs.readFileSync(tray, "utf8");
+    const stamp = fs.statSync(tray).mtimeMs;
+
+    const second = cureChromiumApps({
+      ...deps,
+      // The second run sees the override the first one wrote, as a rescan would.
+      entries: [{ ...discord, source: path.join(userDir, "discord.desktop") }],
+    });
+
+    // A missing directory is skipped, not created.
+    expect(fs.existsSync(absent)).toBe(false);
+    // The second pass finds the flag already there and writes nothing.
+    expect(fs.readFileSync(tray, "utf8")).toBe(written);
+    expect(fs.statSync(tray).mtimeMs).toBe(stamp);
+    expect(second.cured).toEqual([]);
+    expect(second.alreadyCured).toHaveLength(1);
+  });
+
   it("writes a user-scope override and never touches the system file", () => {
     const { systemDir, userDir } = machine();
     const discord = install(systemDir, "discord", "/usr/share/discord/Discord");
@@ -112,7 +205,9 @@ describe("curing the machine", () => {
       userApplicationsDir: userDir,
     });
 
-    expect(report.cured).toEqual([{ name: "Discord", desktopId: "discord" }]);
+    expect(report.cured).toEqual([
+      { name: "Discord", desktopId: "discord", launchers: [path.join(userDir, "discord.desktop")] },
+    ]);
     expect(fs.readFileSync(discord.source, "utf8")).toBe(before);
     expect(fs.readFileSync(path.join(userDir, "discord.desktop"), "utf8")).toContain(
       ACCESSIBILITY_FLAG,
@@ -153,7 +248,8 @@ describe("curing the machine", () => {
     });
 
     expect(second.cured).toEqual([]);
-    expect(second.alreadyCured).toEqual([{ name: "Slack", desktopId: "slack" }]);
+    // Nothing was written this time, so there is no launcher to name.
+    expect(second.alreadyCured).toEqual([{ name: "Slack", desktopId: "slack", launchers: [] }]);
     expect(fs.readFileSync(target, "utf8")).toBe(written);
     expect(fs.statSync(target).mtimeMs).toBe(stamp);
   });

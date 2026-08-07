@@ -78,7 +78,25 @@ export function buildPermissionsApp(
     }
 
     try {
-      return c.json(await registry.setAccess(appName, access));
+      const view = await registry.setAccess(appName, access);
+      // The grant is only half the promise: a permitted Chromium application
+      // whose launcher still lacks the flag comes up unreadable, and until now
+      // that was only fixed at the next boot. Curing here closes the gap while
+      // the person is still looking at the switch they flipped. It runs after
+      // setAccess because the pass re-reads the config that call just wrote.
+      // Revoking cures nothing — a flag on a launcher grants no access, and
+      // the ceiling is what withholds it.
+      if (access !== "off" && cure) {
+        try {
+          await cure();
+        } catch (error) {
+          // Never fatal, exactly as at boot: the permission was granted and
+          // saved, and a launcher that could not be rewritten is a slower
+          // path to readable, not a failed grant.
+          console.error("[client] curing after grant failed", error);
+        }
+      }
+      return c.json(view);
     } catch (error) {
       if (error instanceof MalformedConfigError) {
         return c.json({ error: error.message }, 409);

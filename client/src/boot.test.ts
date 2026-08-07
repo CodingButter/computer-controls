@@ -38,6 +38,10 @@ beforeAll(async () => {
   // root here: a test suite that edits the developer's own .desktop files
   // would be a side effect nobody asked this test to have.
   process.env.COMCON_APPLICATIONS_DIR = path.join(root, "applications");
+  // And the launchers cured in place. This one is not merely tidy: these files
+  // are rewritten where they sit, so without the override this boot would edit
+  // the real ~/.config/autostart and ~/Desktop of whoever ran the suite.
+  process.env.COMCON_LAUNCHER_DIRS = path.join(root, "autostart");
   const entry = await import("./index.ts");
   baseUrl = await entry.listening;
   close = () => new Promise<void>((resolve) => entry.server.close(() => resolve()));

@@ -155,6 +155,82 @@ test("a PUT without one of the three states is a 400, not a guess", async () => 
   expect(fs.existsSync(configPath)).toBe(false);
 });
 
+const emptyReport = () => ({ cured: [], alreadyCured: [], needsRestart: [] });
+
+const withCure = (cure: () => Promise<ReturnType<typeof emptyReport>>) =>
+  buildPermissionsApp(
+    createPermissionRegistry({
+      configPath,
+      readCensus: async () => census,
+      scanInstalled: async () => installed,
+    }),
+    undefined,
+    cure,
+  );
+
+const grant = (built: ReturnType<typeof withCure>, access: string) =>
+  built.request("/api/permissions/Google-chrome", {
+    method: "PUT",
+    body: JSON.stringify({ access }),
+    headers: { "content-type": "application/json" },
+  });
+
+test("granting access cures the launchers before it answers", async () => {
+  for (const access of ["view", "interact"]) {
+    fs.rmSync(configPath, { force: true });
+    let calls = 0;
+    const response = await grant(
+      withCure(async () => {
+        calls += 1;
+        return emptyReport();
+      }),
+      access,
+    );
+
+    expect(response.status).toBe(200);
+    // Exactly once, and before the response: a page that has been told the
+    // grant landed must be able to trust that the launcher matches it.
+    expect(calls).toBe(1);
+  }
+});
+
+test("revoking cures nothing", async () => {
+  let calls = 0;
+  const response = await grant(
+    withCure(async () => {
+      calls += 1;
+      return emptyReport();
+    }),
+    "off",
+  );
+
+  expect(response.status).toBe(200);
+  expect(calls).toBe(0);
+});
+
+test("a grant survives a cure that fails", async () => {
+  const response = await grant(
+    withCure(async () => {
+      throw new Error("read-only filesystem");
+    }),
+    "interact",
+  );
+
+  // The permission was written; only the launcher rewrite failed. Answering
+  // with an error would tell the person their grant did not land, and it did.
+  expect(response.status).toBe(200);
+  const view = (await response.json()) as { applications: { name: string; permitted: boolean }[] };
+  expect(view.applications.find((row) => row.name === "Google-chrome")?.permitted).toBe(true);
+  expect(JSON.parse(fs.readFileSync(configPath, "utf8")).scopes.applications).toContain(
+    "Google-chrome",
+  );
+});
+
+test("a machine that cannot cure still grants", async () => {
+  const response = await grant(app() as ReturnType<typeof withCure>, "view");
+  expect(response.status).toBe(200);
+});
+
 test("the icon route streams a resolved icon and 404s honestly otherwise", async () => {
   const withIcons = buildPermissionsApp(
     createPermissionRegistry({

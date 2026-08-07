@@ -2,6 +2,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { autostartDir } from "./platform/freedesktop/autostart.ts";
+import { desktopIconDirs } from "./platform/freedesktop/entries.ts";
 import { resolveHubPlatform, type HubPlatform } from "./platform/index.ts";
 import { DEFAULT_PLUGIN_ALLOWLIST } from "./plugins.ts";
 import { parseVoiceProviderId, type VoiceProviderId } from "./voice/providers.ts";
@@ -62,6 +64,15 @@ export type ClientConfig = {
    * developer's own launchers every time the suite starts the hub for real.
    */
   applicationsDir: string;
+  /**
+   * Launcher directories cured in place — autostart entries and desktop icons.
+   *
+   * Injectable via COMCON_LAUNCHER_DIRS (colon-separated) for the same reason
+   * as applicationsDir, and more urgently: these are edited where they sit, so
+   * a suite that boots the hub for real without this would rewrite the
+   * developer's own ~/.config/autostart.
+   */
+  launcherDirs: string[];
   /**
    * The skill commons this hub reads merged routes from, when there is one.
    *
@@ -134,6 +145,11 @@ export function resolveClientConfig(env: NodeJS.ProcessEnv = process.env): Clien
     applicationsDir: env.COMCON_APPLICATIONS_DIR
       ? path.resolve(env.COMCON_APPLICATIONS_DIR)
       : path.join(os.homedir(), ".local", "share", "applications"),
+    launcherDirs: env.COMCON_LAUNCHER_DIRS
+      ? env.COMCON_LAUNCHER_DIRS.split(":")
+          .filter((dir) => dir.length > 0)
+          .map((dir) => path.resolve(dir))
+      : [autostartDir(env), ...desktopIconDirs(env)],
     // Beside the package rather than under the hub's state root: the commons is
     // a folder in the checkout, and `root` is wherever this hub was told to keep
     // its own files — which in a test is a temporary directory with nothing in

@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -36,6 +37,47 @@ export function applicationDirs(env: NodeJS.ProcessEnv = process.env): string[] 
     .split(":")
     .filter((dir) => dir.length > 0);
   return [dataHome, ...dataDirs].map((dir) => path.join(dir, "applications"));
+}
+
+/**
+ * The desktop-icon directory, if this machine has one that exists.
+ *
+ * `user-dirs.dirs` is the file the XDG user-dirs tool writes and the file
+ * managers read, so it is the only authority on a desktop that is not named
+ * "Desktop" — a localised install may call it something else entirely, and a
+ * hardcoded `~/Desktop` would silently cure nothing there. The env var is
+ * checked first because a caller that sets it means it.
+ *
+ * Returns only directories that exist: these are read to be edited in place,
+ * and this function never invents a desktop that the session does not have.
+ */
+export function desktopIconDirs(env: NodeJS.ProcessEnv = process.env): string[] {
+  const home = env.HOME || os.homedir();
+  const candidates: string[] = [];
+
+  if (env.XDG_DESKTOP_DIR) candidates.push(env.XDG_DESKTOP_DIR);
+
+  const configHome = env.XDG_CONFIG_HOME || path.join(home, ".config");
+  try {
+    const declared = fs.readFileSync(path.join(configHome, "user-dirs.dirs"), "utf8");
+    const match = declared.match(/^\s*XDG_DESKTOP_DIR\s*=\s*"(.*)"\s*$/m);
+    if (match?.[1]) candidates.push(match[1].replace(/^\$HOME/, home));
+  } catch {
+    // No user-dirs file is ordinary: the fallback below is the spec's default.
+  }
+
+  candidates.push(path.join(home, "Desktop"));
+
+  const seen = new Set<string>();
+  return candidates.filter((dir) => {
+    if (seen.has(dir)) return false;
+    seen.add(dir);
+    try {
+      return fs.statSync(dir).isDirectory();
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
