@@ -40,7 +40,7 @@ function install(dir: string, id: string, exec: string, extra = ""): DesktopEntr
 }
 
 function row(over: Partial<PermissionRow> & { name: string }): PermissionRow {
-  return { permitted: true, running: false, readable: false, ...over };
+  return { permitted: true, access: "interact", running: false, readable: false, ...over };
 }
 
 describe("Chromium detection", () => {

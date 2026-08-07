@@ -5,7 +5,8 @@ import type { IconSource } from "./icons.ts";
 import { MalformedConfigError, type PermissionRegistry } from "./registry.ts";
 
 /**
- * The permissions page's HTTP surface: read the merged view, toggle one app.
+ * The permissions page's HTTP surface: read the merged view, set how far into
+ * one application an agent may go.
  *
  * Two routes, and neither can widen anything the daemon holds. The PUT writes
  * the user's own config file — the same file they could open in an editor —
@@ -66,13 +67,17 @@ export function buildPermissionsApp(
   app.put("/api/permissions/:app", async (c) => {
     const appName = c.req.param("app");
     const body = await c.req.json().catch(() => undefined);
-    const permitted = (body as { permitted?: unknown } | undefined)?.permitted;
-    if (typeof permitted !== "boolean") {
-      return c.json({ error: "permitted must be a boolean" }, 400);
+    const access = (body as { access?: unknown } | undefined)?.access;
+    // `custom` is a shape the file can hold and this route cannot be asked
+    // for: it describes a hand-written entry, and the only way to reach one is
+    // to write it by hand. Accepting it here would mean inventing which
+    // classes the caller meant.
+    if (access !== "off" && access !== "view" && access !== "interact") {
+      return c.json({ error: 'access must be one of "off", "view", "interact"' }, 400);
     }
 
     try {
-      return c.json(await registry.setPermitted(appName, permitted));
+      return c.json(await registry.setAccess(appName, access));
     } catch (error) {
       if (error instanceof MalformedConfigError) {
         return c.json({ error: error.message }, 409);

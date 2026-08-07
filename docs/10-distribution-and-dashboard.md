@@ -114,6 +114,14 @@ Shipped in this wave:
   changes it. Asked to act on an unpermitted application, the hub says it has no
   permission yet and names the page — on both transports, because the signal is
   wrapped at the one site the orb and the typed chat both flow from.
+- **Three-state access** (#127's hub half): each row is off, view-only, or
+  interact, rather than in or out. View-only writes `scopes.applicationClasses`
+  beside the allow-list; interact writes no cap at all, so the row keeps whatever
+  `operationClasses` allows generally and does not need rewriting when that
+  changes. Interact implies view, and the page says so instead of offering two
+  switches that could ask for clicking without reading. Where the global
+  `operationClasses` stops at `observe`, the page cannot offer interaction and
+  explains why rather than writing a line the daemon would ignore.
 - **Shortcut curing** (#115): permitted Chromium-family launchers get a
   user-scope `.desktop` override carrying `--force-renderer-accessibility`.
   System files are never edited, unpermitted applications are never cured, and

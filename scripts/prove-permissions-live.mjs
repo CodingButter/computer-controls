@@ -9,7 +9,9 @@
  *      the page where that is fixed.
  *   3. Permitting Discord through the same route the page uses rewrites the
  *      user's own config file, and the daemon's ceiling follows it — no restart,
- *      no socket call, no agent-facing widening.
+ *      no socket call, no agent-facing widening. The same route can permit less
+ *      than everything: view-only writes a cap beside the allow-list, and
+ *      widening back to interact takes the cap away again.
  *   4. The launcher is cured and the application is restarted. A human does this
  *      half: nothing here kills a running program.
  *   5. Discord's window reads as a real tree rather than a title.
@@ -112,7 +114,7 @@ async function main() {
     await hub(`/api/permissions/${encodeURIComponent(APP)}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ permitted: false }),
+      body: JSON.stringify({ access: "off" }),
     });
   }
   const unpermitted = await hub("/api/permissions");
@@ -151,7 +153,7 @@ async function main() {
   const put = await hub(`/api/permissions/${encodeURIComponent(APP)}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ permitted: true }),
+    body: JSON.stringify({ access: "interact" }),
   });
   const configAfter = readConfig();
   const parsed = (() => {
@@ -177,6 +179,62 @@ async function main() {
       modeAfter: parsed?.scopes?.permissionsMode,
       applicationsCount: (parsed?.scopes?.applications ?? []).length,
     },
+  });
+
+  // --- Step 3b: the same route can permit less than everything ------------
+  // Interact is not the only answer the page can give. View-only writes a cap
+  // into the user's own file beside the allow-list, and the daemon's lazy
+  // reload is what makes the next answer reflect it.
+  const viewOnly = await hub(`/api/permissions/${encodeURIComponent(APP)}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ access: "view" }),
+  });
+  const cappedConfig = (() => {
+    try {
+      return JSON.parse(readConfig());
+    } catch {
+      return undefined;
+    }
+  })();
+  const capInFile = Object.entries(cappedConfig?.scopes?.applicationClasses ?? {}).filter(
+    ([name]) => name.toLowerCase().includes(APP.toLowerCase()),
+  );
+  const capped = await hub("/api/permissions");
+  const rowCapped = rowFor(capped.body, APP);
+  record({
+    name: `${APP} can be permitted as view-only`,
+    measured: `put=${viewOnly.status} inFile=${JSON.stringify(capInFile)} permitted=${rowCapped?.permitted} access=${rowCapped?.access} classes=${JSON.stringify(rowCapped?.classes ?? null)}`,
+    held:
+      viewOnly.status === 200 &&
+      capInFile.length > 0 &&
+      rowCapped?.permitted === true &&
+      rowCapped?.access === "view",
+    detail: { applicationClasses: cappedConfig?.scopes?.applicationClasses },
+  });
+
+  // And back, so the arc leaves the desktop as it found it plus the permission
+  // step 3 asked for. Interact deletes the cap rather than restating the ceiling.
+  const backToInteract = await hub(`/api/permissions/${encodeURIComponent(APP)}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ access: "interact" }),
+  });
+  const uncapped = (() => {
+    try {
+      return JSON.parse(readConfig());
+    } catch {
+      return undefined;
+    }
+  })();
+  const capGone = !Object.keys(uncapped?.scopes?.applicationClasses ?? {}).some((name) =>
+    name.toLowerCase().includes(APP.toLowerCase()),
+  );
+  record({
+    name: "widening back to interact removes the cap it wrote",
+    measured: `put=${backToInteract.status} capRemoved=${capGone} access=${rowFor((await hub("/api/permissions")).body, APP)?.access}`,
+    held: backToInteract.status === 200 && capGone,
+    detail: { applicationClasses: uncapped?.scopes?.applicationClasses ?? null },
   });
 
   // --- Step 4: the human half ---------------------------------------------

@@ -41,6 +41,20 @@ export type ScopesView = {
   mode: PermissionsMode;
   applications: string[];
   blockedApplications: string[];
+  /**
+   * `scopes.operationClasses` — what the daemon permits anywhere. Read because
+   * a per-application entry is intersected with it: a page that offered
+   * "interact" on a desktop whose ceiling stops at `observe` would be
+   * promising something the daemon refuses.
+   */
+  classes: string[];
+  /**
+   * `scopes.applicationClasses` — how far inside a named application an agent
+   * may go. An application absent from this map is governed by `classes`
+   * alone, which is the daemon's own reading and the reason an empty map is
+   * indistinguishable from no map at all.
+   */
+  applicationClasses: Record<string, string[]>;
   /** The whole parsed document, kept so a write can preserve what it does not own. */
   document: Record<string, unknown>;
 };
@@ -58,7 +72,14 @@ export function readScopesConfig(configPath: string): ScopesView {
   try {
     raw = fs.readFileSync(configPath, "utf8");
   } catch {
-    return { mode: OPEN_MODE, applications: [], blockedApplications: [], document: {} };
+    return {
+      mode: OPEN_MODE,
+      applications: [],
+      blockedApplications: [],
+      classes: [],
+      applicationClasses: {},
+      document: {},
+    };
   }
 
   let document: unknown;
@@ -90,6 +111,8 @@ export function readScopesConfig(configPath: string): ScopesView {
     mode: (mode as PermissionsMode | undefined) ?? OPEN_MODE,
     applications: readNames(scopes.applications),
     blockedApplications: readNames(scopes.blockedApplications),
+    classes: readNames(scopes.operationClasses),
+    applicationClasses: readApplicationClasses(configPath, scopes.applicationClasses),
     document: doc,
   };
 }
@@ -100,23 +123,58 @@ function readNames(value: unknown): string[] {
 }
 
 /**
- * Rewrite only what the permissions page owns — `scopes.permissionsMode` and
- * `scopes.applications` — and keep every other key exactly as found. The
- * config is shared state with whatever the user wrote by hand;
- * `blockedApplications`, `confirmClasses`, `audit` and anything we have never
- * heard of ride through untouched.
+ * The per-application class map, refused loudly when it is not one.
+ *
+ * The daemon raises on a malformed `applicationClasses` and keeps the ceiling
+ * it already had, which means a page that shrugged this off would show
+ * permissions from a file the daemon never loaded.
+ */
+function readApplicationClasses(configPath: string, value: unknown): Record<string, string[]> {
+  if (value === undefined) return {};
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new MalformedConfigError(configPath, "applicationClasses is not an object");
+  }
+  const entries: Record<string, string[]> = {};
+  for (const [name, classes] of Object.entries(value as Record<string, unknown>)) {
+    if (!Array.isArray(classes) || classes.some((entry) => typeof entry !== "string")) {
+      throw new MalformedConfigError(
+        configPath,
+        `applicationClasses["${name}"] is not an array of strings`,
+      );
+    }
+    entries[name] = classes as string[];
+  }
+  return entries;
+}
+
+/**
+ * Rewrite only what the permissions page owns — `scopes.permissionsMode`,
+ * `scopes.applications` and `scopes.applicationClasses` — and keep every other
+ * key exactly as found. The config is shared state with whatever the user
+ * wrote by hand; `blockedApplications`, `confirmClasses`, `audit` and anything
+ * we have never heard of ride through untouched.
+ *
+ * An empty class map deletes the key rather than writing `{}`. The daemon
+ * reads the two identically, so leaving an empty object behind would only be
+ * this page's litter in a file the user opens and reads.
  *
  * Written whole via temp file and rename: the daemon re-reads this file on its
  * own schedule, and it must never observe half a write.
  */
-export function writePermittedApplications(
+export function writePermissions(
   configPath: string,
   document: Record<string, unknown>,
   applications: string[],
+  applicationClasses: Record<string, string[]>,
 ): void {
   const scopes = { ...((document.scopes ?? {}) as Record<string, unknown>) };
   scopes.permissionsMode = PER_APPLICATION_MODE;
   scopes.applications = applications;
+  if (Object.keys(applicationClasses).length > 0) {
+    scopes.applicationClasses = applicationClasses;
+  } else {
+    delete scopes.applicationClasses;
+  }
   const next = { ...document, scopes };
 
   fs.mkdirSync(path.dirname(configPath), { recursive: true });

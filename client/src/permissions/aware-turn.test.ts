@@ -12,9 +12,10 @@ function registryWith(unpermitted: string[]): PermissionRegistry {
     view: async (): Promise<PermissionsView> => ({
       mode: "per-application",
       daemon: { reachable: true },
+      ceiling: ["observe"],
       applications: [],
     }),
-    setPermitted: async () => {
+    setAccess: async () => {
       throw new Error("not under test");
     },
     unpermittedApps: async () => unpermitted,
