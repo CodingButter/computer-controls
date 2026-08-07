@@ -154,6 +154,13 @@ describe("the entry format defends its own fields", () => {
     const port = freedesktopAutostart({ HOME: "/home/nobody", XDG_CONFIG_HOME: "/elsewhere" });
     expect(port.path("thing")).toBe("/elsewhere/autostart/thing.desktop");
   });
+
+  it("an empty XDG_CONFIG_HOME is unset, not an answer", () => {
+    // Taken as an answer it would write the entry to a relative `autostart/`
+    // beside wherever the hub was started, where no session manager looks.
+    const port = freedesktopAutostart({ HOME: "/home/nobody", XDG_CONFIG_HOME: "" });
+    expect(port.path("thing")).toBe("/home/nobody/.config/autostart/thing.desktop");
+  });
 });
 
 describe("the default command", () => {

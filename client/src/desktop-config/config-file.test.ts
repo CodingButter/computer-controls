@@ -9,7 +9,6 @@ import {
   OPERATION_CLASSES,
   PERMISSIONS_MODES,
   SETTINGS_KEYS,
-  defaultConfigPath,
   mergeSettings,
   readConfigFile,
   writeConfigFile,
@@ -25,20 +24,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
-});
-
-describe("where the daemon looks", () => {
-  it("follows XDG_CONFIG_HOME, the way config.py does", () => {
-    expect(defaultConfigPath({ XDG_CONFIG_HOME: "/tmp/xdg" } as NodeJS.ProcessEnv)).toBe(
-      "/tmp/xdg/mastracode-desktop/config.json",
-    );
-  });
-
-  it("falls back to ~/.config when it is unset", () => {
-    expect(defaultConfigPath({} as NodeJS.ProcessEnv)).toBe(
-      path.join(os.homedir(), ".config", "mastracode-desktop", "config.json"),
-    );
-  });
 });
 
 describe("reading", () => {

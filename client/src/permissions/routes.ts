@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 
 import type { CureReport } from "../curing/curing.ts";
-import type { IconSource } from "./icons.ts";
+import type { IconSource } from "../platform/index.ts";
 import { MalformedConfigError, type PermissionRegistry } from "./registry.ts";
 
 /**
@@ -39,16 +39,17 @@ export function buildPermissionsApp(
     }
   });
 
-  // The page's row icons, resolved from the machine's own icon themes. The
-  // parameter is a desktop-file id matched against entries the hub scanned
-  // itself — it never becomes a filesystem path. A missing icon is a 404 the
-  // page answers with an initial-letter avatar, not an error.
-  app.get("/api/permissions/icon/:desktopId", (c) => {
-    const icon = iconFor?.(c.req.param("desktopId"));
+  // The page's row icons, resolved by the platform adapter from whatever this
+  // machine keeps icons in. The parameter is the adapter's own id for an
+  // application, handed straight back to it — this route never turns it into a
+  // filesystem path. A missing icon is a 404 the page answers with an
+  // initial-letter avatar, not an error.
+  app.get("/api/permissions/icon/:desktopId", async (c) => {
+    const icon = await iconFor?.(c.req.param("desktopId"));
     if (!icon) return c.text("no icon", 404);
-    c.header("content-type", icon.contentType);
+    c.header("content-type", icon.mediaType);
     c.header("cache-control", "max-age=3600");
-    return c.body(new Uint8Array(icon.body));
+    return c.body(new Uint8Array(icon.bytes));
   });
 
   app.get("/api/permissions", async (c) => {

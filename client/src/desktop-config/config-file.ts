@@ -35,18 +35,7 @@
  */
 
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
-
-/**
- * Where the daemon looks, following `config.py:default_path` exactly. Read from
- * the environment rather than captured at import so a test can point the whole
- * module at a temporary directory without monkey-patching.
- */
-export function defaultConfigPath(env: NodeJS.ProcessEnv = process.env): string {
-  const home = env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
-  return path.join(home, "mastracode-desktop", "config.json");
-}
 
 /**
  * The complete operation vocabulary, frozen in `protocol/schema.json` and

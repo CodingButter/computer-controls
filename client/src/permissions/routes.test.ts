@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { Census } from "./daemon.ts";
-import type { DesktopEntryApp } from "./desktop-entries.ts";
+import type { InstalledApplication } from "../platform/index.ts";
 import { createPermissionRegistry } from "./registry.ts";
 import { buildPermissionsApp } from "./routes.ts";
 
@@ -27,9 +27,9 @@ const census: Census = {
     { name: "Google-chrome", running: true, readable: false },
   ],
 };
-const installed: DesktopEntryApp[] = [
-  { name: "Discord", desktopId: "discord.desktop", exec: "Discord" },
-  { name: "GIMP", desktopId: "gimp.desktop", exec: "gimp-2.10" },
+const installed: InstalledApplication[] = [
+  { id: "discord", name: "Discord" },
+  { id: "gimp", name: "GIMP" },
 ];
 
 const app = () =>
@@ -37,7 +37,7 @@ const app = () =>
     createPermissionRegistry({
       configPath,
       readCensus: async () => census,
-      scanInstalled: () => installed,
+      scanInstalled: async () => installed,
     }),
   );
 
@@ -160,23 +160,23 @@ test("the icon route streams a resolved icon and 404s honestly otherwise", async
     createPermissionRegistry({
       configPath,
       readCensus: async () => census,
-      scanInstalled: () => installed,
+      scanInstalled: async () => installed,
     }),
-    (desktopId) =>
-      desktopId === "discord.desktop"
-        ? { body: Buffer.from("PNGBYTES"), contentType: "image/png" }
+    async (applicationId) =>
+      applicationId === "discord"
+        ? { bytes: new TextEncoder().encode("PNGBYTES"), mediaType: "image/png" }
         : undefined,
   );
 
-  const hit = await withIcons.request("/api/permissions/icon/discord.desktop");
+  const hit = await withIcons.request("/api/permissions/icon/discord");
   expect(hit.status).toBe(200);
   expect(hit.headers.get("content-type")).toBe("image/png");
   expect(await hit.text()).toBe("PNGBYTES");
 
-  const miss = await withIcons.request("/api/permissions/icon/gimp.desktop");
+  const miss = await withIcons.request("/api/permissions/icon/gimp");
   expect(miss.status).toBe(404);
 
   // Without an icon source at all, the route still answers rather than throws.
-  const none = await app().request("/api/permissions/icon/discord.desktop");
+  const none = await app().request("/api/permissions/icon/discord");
   expect(none.status).toBe(404);
 });

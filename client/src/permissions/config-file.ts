@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 /**
@@ -27,14 +26,6 @@ export class MalformedConfigError extends Error {
     super(`The config at ${configPath} could not be read as JSON: ${cause}`);
     this.name = "MalformedConfigError";
   }
-}
-
-/** Mirrors the daemon's own resolution: XDG_CONFIG_HOME, else ~/.config. */
-export function defaultConfigPath(env: NodeJS.ProcessEnv = process.env): string {
-  const configHome = env.XDG_CONFIG_HOME
-    ? path.resolve(env.XDG_CONFIG_HOME)
-    : path.join(os.homedir(), ".config");
-  return path.join(configHome, "mastracode-desktop", "config.json");
 }
 
 export type ScopesView = {

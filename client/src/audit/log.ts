@@ -1,6 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 /**
  * The daemon's audit log, read back for the dashboard's audit page.
@@ -15,14 +13,6 @@ import path from "node:path";
  * prunes — a log the reader can edit is a log with a story to tell about the
  * one line that is missing.
  */
-
-/** Mirrors the daemon's own resolution: XDG_STATE_HOME, else ~/.local/state. */
-export function defaultAuditPath(env: NodeJS.ProcessEnv = process.env): string {
-  const stateHome = env.XDG_STATE_HOME
-    ? path.resolve(env.XDG_STATE_HOME)
-    : path.join(os.homedir(), ".local", "state");
-  return path.join(stateHome, "mastracode-desktop", "audit.jsonl");
-}
 
 /**
  * One record, exactly as the daemon wrote it.

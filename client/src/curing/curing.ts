@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import type { DesktopEntryApp } from "../permissions/desktop-entries.ts";
+import type { DesktopEntry } from "../platform/freedesktop/entries.ts";
 import type { PermissionRow } from "../permissions/registry.ts";
 
 /**
@@ -123,18 +123,33 @@ export function cureExecLine(exec: string): string {
   return [...tokens.slice(0, insertAt), ACCESSIBILITY_FLAG, ...tokens.slice(insertAt)].join(" ");
 }
 
-/** The whole desktop file with every Exec line cured — actions included. */
-export function cureDesktopFile(text: string): { text: string; changed: boolean } {
+/**
+ * The whole desktop file with every Exec line cured — actions included.
+ *
+ * `chromium` is reported alongside `changed` because the two absences mean
+ * opposite things: a file nothing here recognises is not a candidate at all,
+ * while a Chromium file that changed nothing is one that already carries the
+ * flag. The file itself is the only place that distinction can be read, which
+ * is why the caller does not need an `Exec` field handed to it separately.
+ */
+export function cureDesktopFile(text: string): {
+  text: string;
+  changed: boolean;
+  chromium: boolean;
+} {
   let changed = false;
+  let chromium = false;
   const lines = text.split("\n").map((line) => {
     const match = /^(\s*Exec\s*=)(.*)$/.exec(line);
     if (!match) return line;
     const value = match[2] as string;
-    if (!isChromiumExec(value) || isCured(value)) return line;
+    if (!isChromiumExec(value)) return line;
+    chromium = true;
+    if (isCured(value)) return line;
     changed = true;
     return `${match[1] as string}${cureExecLine(value)}`;
   });
-  return { text: lines.join("\n"), changed };
+  return { text: lines.join("\n"), changed, chromium };
 }
 
 export type CuredApp = { name: string; desktopId: string };
@@ -156,7 +171,7 @@ export type CureDeps = {
   /** The merged permission rows: only the permitted ones are candidates. */
   rows: PermissionRow[];
   /** The scanned launcher entries, carrying the source file each was read from. */
-  entries: DesktopEntryApp[];
+  entries: DesktopEntry[];
   /** Where overrides are written. The system directory is never a candidate. */
   userApplicationsDir: string;
 };
@@ -167,23 +182,28 @@ export type CureDeps = {
  */
 export function cureChromiumApps(deps: CureDeps): CureReport {
   const report: CureReport = { cured: [], alreadyCured: [], needsRestart: [] };
-  const byDesktopId = new Map(deps.entries.map((entry) => [entry.desktopId, entry]));
+  const byId = new Map(deps.entries.map((entry) => [entry.id, entry]));
 
   for (const row of deps.rows) {
     if (!row.permitted || !row.desktopId) continue;
-    const entry = byDesktopId.get(row.desktopId);
-    if (!entry?.sourcePath || !entry.exec) continue;
-    if (!isChromiumExec(entry.exec)) continue;
+    const entry = byId.get(row.desktopId);
+    if (!entry) continue;
 
     let source: string;
     try {
-      source = fs.readFileSync(entry.sourcePath, "utf8");
+      source = fs.readFileSync(entry.source, "utf8");
     } catch {
       continue; // A launcher that vanished between scan and cure is not an error.
     }
 
-    const target = path.join(deps.userApplicationsDir, row.desktopId);
     const cured = cureDesktopFile(source);
+    // Nothing in this file starts a Chromium-family binary, so there is no
+    // flag to add and no report to make about it.
+    if (!cured.chromium) continue;
+
+    // The override must carry the same basename as the file it shadows: that
+    // equality is the whole of freedesktop's precedence rule.
+    const target = path.join(deps.userApplicationsDir, path.basename(entry.source));
     const record = { name: row.name, desktopId: row.desktopId };
 
     if (!cured.changed) {

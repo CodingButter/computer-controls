@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import type { Census } from "./daemon.ts";
-import type { DesktopEntryApp } from "./desktop-entries.ts";
+import type { InstalledApplication } from "../platform/index.ts";
 import { createPermissionRegistry, deriveAccess, derivePermitted } from "./registry.ts";
 
 /**
@@ -69,16 +69,16 @@ describe("the registry against a real config file", () => {
       { name: "Google-chrome", running: true, readable: false },
     ],
   };
-  const installed: DesktopEntryApp[] = [
-    { name: "Discord", desktopId: "discord.desktop", exec: "Discord" },
-    { name: "GIMP", desktopId: "gimp.desktop", exec: "gimp-2.10" },
+  const installed: InstalledApplication[] = [
+    { id: "discord", name: "Discord" },
+    { id: "gimp", name: "GIMP" },
   ];
 
   const registry = () =>
     createPermissionRegistry({
       configPath,
       readCensus: async () => census,
-      scanInstalled: () => installed,
+      scanInstalled: async () => installed,
     });
 
   test("an absent config reads as open mode: everything permitted", async () => {
@@ -165,7 +165,7 @@ describe("the registry against a real config file", () => {
       permitted: true,
       running: true,
       readable: true,
-      desktopId: "discord.desktop",
+      desktopId: "discord",
     });
     expect(byName["Google-chrome"]).toMatchObject({
       permitted: false,
@@ -186,9 +186,7 @@ describe("the registry against a real config file", () => {
           reachable: true,
           applications: [{ name: "org.gnome.Nautilus", running: true, readable: true }],
         }) as Census,
-      scanInstalled: () => [
-        { name: "Files", desktopId: "org.gnome.Nautilus.desktop", exec: "nautilus" },
-      ],
+      scanInstalled: async () => [{ id: "org.gnome.Nautilus", name: "Files" }],
     });
 
     const view = await gnomeish.view();
@@ -197,7 +195,7 @@ describe("the registry against a real config file", () => {
       name: "Files",
       running: true,
       readable: true,
-      desktopId: "org.gnome.Nautilus.desktop",
+      desktopId: "org.gnome.Nautilus",
       censusName: "org.gnome.Nautilus",
     });
   });
@@ -214,9 +212,7 @@ describe("the registry against a real config file", () => {
           reachable: true,
           applications: [{ name: "org.gnome.Nautilus", running: true, readable: true }],
         }) as Census,
-      scanInstalled: () => [
-        { name: "Files", desktopId: "org.gnome.Nautilus.desktop", exec: "nautilus" },
-      ],
+      scanInstalled: async () => [{ id: "org.gnome.Nautilus", name: "Files" }],
     });
 
     // Permitting by the display name writes the name the daemon matches on.
@@ -263,9 +259,7 @@ describe("the registry against a real config file", () => {
           reachable: true,
           applications: [{ name: "org.gnome.Nautilus", running: true, readable: true }],
         }) as Census,
-      scanInstalled: () => [
-        { name: "Files", desktopId: "org.gnome.Nautilus.desktop", exec: "nautilus" },
-      ],
+      scanInstalled: async () => [{ id: "org.gnome.Nautilus", name: "Files" }],
     });
 
     const view = await gnomeish.view();
@@ -282,9 +276,7 @@ describe("the registry against a real config file", () => {
     const closedApp = createPermissionRegistry({
       configPath,
       readCensus: async () => ({ reachable: true, applications: [] }) as Census,
-      scanInstalled: () => [
-        { name: "Files", desktopId: "org.gnome.Nautilus.desktop", exec: "nautilus" },
-      ],
+      scanInstalled: async () => [{ id: "org.gnome.Nautilus", name: "Files" }],
     });
 
     await closedApp.setAccess("Files", "interact");
@@ -298,7 +290,7 @@ describe("the registry against a real config file", () => {
     const offline = createPermissionRegistry({
       configPath,
       readCensus: async () => ({ reachable: false, reason: "not running" }) as Census,
-      scanInstalled: () => installed,
+      scanInstalled: async () => installed,
     });
 
     const view = await offline.view();
@@ -402,15 +394,15 @@ describe("writing the three states through to the file", () => {
       { name: "Google-chrome", running: true, readable: false },
     ],
   };
-  const installed: DesktopEntryApp[] = [
-    { name: "Discord", desktopId: "discord.desktop", exec: "Discord" },
-    { name: "GIMP", desktopId: "gimp.desktop", exec: "gimp-2.10" },
+  const installed: InstalledApplication[] = [
+    { id: "discord", name: "Discord" },
+    { id: "gimp", name: "GIMP" },
   ];
   const registry = () =>
     createPermissionRegistry({
       configPath,
       readCensus: async () => census,
-      scanInstalled: () => installed,
+      scanInstalled: async () => installed,
     });
   const perApplication = (extra: Record<string, unknown> = {}) =>
     fs.writeFileSync(
@@ -499,9 +491,7 @@ describe("writing the three states through to the file", () => {
     const gnomeish = createPermissionRegistry({
       configPath,
       readCensus: async () => ({ reachable: true, applications: [] }) as Census,
-      scanInstalled: () => [
-        { name: "Files", desktopId: "org.gnome.Nautilus.desktop", exec: "nautilus" },
-      ],
+      scanInstalled: async () => [{ id: "org.gnome.Nautilus", name: "Files" }],
     });
 
     await gnomeish.setAccess("Files", "view");
@@ -586,7 +576,7 @@ describe("the global ceiling bounds what the page can offer", () => {
       const view = await createPermissionRegistry({
         configPath,
         readCensus: async () => ({ reachable: true, applications: [] }) as Census,
-        scanInstalled: () => [],
+        scanInstalled: async () => [],
       }).view();
       expect(view.ceiling).toEqual(["observe", "edit", "activate"]);
 
@@ -594,7 +584,7 @@ describe("the global ceiling bounds what the page can offer", () => {
       const bare = await createPermissionRegistry({
         configPath,
         readCensus: async () => ({ reachable: true, applications: [] }) as Census,
-        scanInstalled: () => [],
+        scanInstalled: async () => [],
       }).view();
       expect(bare.ceiling).toEqual(["observe"]);
     } finally {

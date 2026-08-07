@@ -1,4 +1,3 @@
-import os from "node:os";
 import path from "node:path";
 
 import { serve } from "@hono/node-server";
@@ -6,7 +5,6 @@ import { AuthStorage } from "@mastra/code-sdk/auth/storage";
 import { Mastra } from "@mastra/core/mastra";
 
 import { buildApp } from "./app.ts";
-import { defaultAuditPath } from "./audit/log.ts";
 import { buildAuditApp } from "./audit/routes.ts";
 import { createProviderAuth } from "./auth/index.ts";
 import { buildAutostartApp } from "./autostart/routes.ts";
@@ -22,14 +20,13 @@ import {
   createTouchLane,
 } from "./events/index.ts";
 import { prepareHub } from "./hub.ts";
+import { auditFile, configFile } from "./paths.ts";
 import { wrapTurnWithPermissionAwareness } from "./permissions/aware-turn.ts";
-import { defaultConfigPath } from "./permissions/config-file.ts";
 import { findDaemonSocket, readCensus } from "./permissions/daemon.ts";
-import { SYSTEM_APPLICATIONS_DIR, scanDesktopEntries } from "./permissions/desktop-entries.ts";
-import { createIconSource, defaultIconDirs } from "./permissions/icons.ts";
 import { createPermissionRegistry } from "./permissions/registry.ts";
 import { buildPermissionsApp } from "./permissions/routes.ts";
 import { createHubBrain, createLaneFaceSource, mountOrb } from "./orb/index.ts";
+import { applicationDirs, scanDesktopEntries } from "./platform/freedesktop/entries.ts";
 import { FileSettingsAudit } from "./settings/audit.ts";
 import { SettingsGate } from "./settings/gate.ts";
 import { FilePreferenceStore } from "./settings/preferences.ts";
@@ -89,14 +86,11 @@ const hub = await prepareHub(config, { settings, observe: touchLane.observe });
  * yet" context. brain, app and hub stay untouched — the signal is a wrapper,
  * not a rewrite.
  */
-const scanInstalled = () =>
-  scanDesktopEntries([SYSTEM_APPLICATIONS_DIR, config.applicationsDir]);
 const permissionRegistry = createPermissionRegistry({
-  configPath: defaultConfigPath(),
+  configPath: configFile(config.platform.paths),
   readCensus: () => readCensus(findDaemonSocket()),
-  scanInstalled,
+  scanInstalled: config.platform.scanInstalled,
 });
-const appIconSource = createIconSource(scanInstalled, defaultIconDirs(os.homedir()));
 const chat = wrapTurnWithPermissionAwareness(hub.chat, permissionRegistry);
 
 /**
@@ -107,13 +101,25 @@ const chat = wrapTurnWithPermissionAwareness(hub.chat, permissionRegistry);
  * an application is exactly the moment its launcher wants the flag. Both call
  * the same function, and it only ever rewrites launchers under the user's own
  * ~/.local/share/applications.
+ *
+ * Built only where the platform says the trick exists. The `.desktop` override
+ * has no equivalent on the other two families, so on those the function is
+ * never made and the route answers 501 instead of pretending. That flag is also
+ * why this is the one place the hub reads a freedesktop entry directly: curing
+ * needs the file a launcher was read from, which is a fact about this platform's
+ * launchers and has no neutral spelling in the port.
  */
-const cureNow = async (): Promise<CureReport> =>
-  cureChromiumApps({
-    rows: (await permissionRegistry.view()).applications,
-    entries: scanInstalled(),
-    userApplicationsDir: config.applicationsDir,
-  });
+const cureNow: (() => Promise<CureReport>) | undefined = config.platform.supports.shortcutCuring
+  ? async (): Promise<CureReport> =>
+      cureChromiumApps({
+        rows: (await permissionRegistry.view()).applications,
+        // The directory overrides are written to comes first, so a second run
+        // reads the cured file rather than the system copy it shadows — which
+        // is what makes curing idempotent instead of eternally rewriting.
+        entries: await scanDesktopEntries([config.applicationsDir, ...applicationDirs()]),
+        userApplicationsDir: config.applicationsDir,
+      })
+  : undefined;
 
 
 /**
@@ -193,15 +199,16 @@ const app = buildApp({
   auth: providerAuth.app,
   voice,
   orb,
-  permissions: buildPermissionsApp(permissionRegistry, appIconSource, cureNow),
-  audit: buildAuditApp(defaultAuditPath()),
+  permissions: buildPermissionsApp(permissionRegistry, config.platform.icons, cureNow),
+  audit: buildAuditApp(auditFile(config.platform.paths)),
   devices,
   /**
-   * No path is passed, so it edits the file the daemon actually reads. The hub
-   * runs as the user and rewrites the user's own file; nothing here reaches the
-   * daemon socket, which remains unable to author its own ceiling.
+   * The platform's own config directory, so it edits the file the daemon
+   * actually reads. The hub runs as the user and rewrites the user's own file;
+   * nothing here reaches the daemon socket, which remains unable to author its
+   * own ceiling.
    */
-  desktopConfig: buildDesktopConfigApp(),
+  desktopConfig: buildDesktopConfigApp({ file: configFile(config.platform.paths) }),
   /**
    * Writes the person's own XDG autostart entry through the platform port —
    * the session manager launches the widget at login, the hub only holds the
@@ -213,7 +220,7 @@ const app = buildApp({
 // Cure at boot, once, and never fatally: a launcher that could not be
 // rewritten leaves the application unreadable, which the permissions page
 // already shows plainly. It is not a reason to refuse to start the hub.
-void cureNow()
+void cureNow?.()
   .then((report) => {
     if (report.cured.length > 0) {
       console.log(

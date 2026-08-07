@@ -35,9 +35,9 @@ const MAX_DEPTH = 4;
 
 /** Roots the icon lookup searches, most-specific first. */
 export function iconDirs(env: NodeJS.ProcessEnv = process.env): string[] {
-  const home = env.HOME ?? os.homedir();
-  const dataHome = env.XDG_DATA_HOME ?? path.join(home, ".local", "share");
-  const dataDirs = (env.XDG_DATA_DIRS ?? "/usr/local/share:/usr/share")
+  const home = env.HOME || os.homedir();
+  const dataHome = env.XDG_DATA_HOME || path.join(home, ".local", "share");
+  const dataDirs = (env.XDG_DATA_DIRS || "/usr/local/share:/usr/share")
     .split(":")
     .filter((dir) => dir.length > 0);
   return [

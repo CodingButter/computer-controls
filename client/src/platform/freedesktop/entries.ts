@@ -26,13 +26,13 @@ export type DesktopEntry = InstalledApplication & {
  *
  * Order is the whole contract: a `.desktop` file a person installed into their
  * own data directory shadows the system copy of the same id, which is how
- * overrides work on this platform — and, when #115 lands, how a cured shortcut
- * will take effect without touching anything root owns.
+ * overrides work on this platform — and how a cured shortcut takes effect
+ * without touching anything root owns.
  */
 export function applicationDirs(env: NodeJS.ProcessEnv = process.env): string[] {
-  const home = env.HOME ?? os.homedir();
-  const dataHome = env.XDG_DATA_HOME ?? path.join(home, ".local", "share");
-  const dataDirs = (env.XDG_DATA_DIRS ?? "/usr/local/share:/usr/share")
+  const home = env.HOME || os.homedir();
+  const dataHome = env.XDG_DATA_HOME || path.join(home, ".local", "share");
+  const dataDirs = (env.XDG_DATA_DIRS || "/usr/local/share:/usr/share")
     .split(":")
     .filter((dir) => dir.length > 0);
   return [dataHome, ...dataDirs].map((dir) => path.join(dir, "applications"));

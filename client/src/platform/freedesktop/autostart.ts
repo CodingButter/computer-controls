@@ -16,10 +16,16 @@ import path from "node:path";
 
 import type { Autostart, AutostartEntry } from "../ports.ts";
 
-/** Where the session manager looks, with the spec's own default. */
+/**
+ * Where the session manager looks, with the spec's own default. Empty counts as
+ * unset, the same reading the rest of this adapter gives it: an empty
+ * `XDG_CONFIG_HOME` taken as an answer would write the entry to a relative
+ * `autostart/` beside wherever the hub was started, and the session manager
+ * would go on finding nothing at login.
+ */
 export function autostartDir(env: NodeJS.ProcessEnv = process.env): string {
-  const home = env.HOME ?? os.homedir();
-  return path.join(env.XDG_CONFIG_HOME ?? path.join(home, ".config"), "autostart");
+  const home = env.HOME || os.homedir();
+  return path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), "autostart");
 }
 
 /**
