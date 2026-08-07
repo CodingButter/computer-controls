@@ -99,6 +99,16 @@ describe("connecting to Gemini Live", () => {
     expect(first.setup.systemInstruction.parts[0].text).toBe(ORB_SYSTEM_INSTRUCTION);
   });
 
+  it("tells the voice that declining its offer is a complete turn", () => {
+    // The gate that holds the microphone open cannot read a transcript, so the
+    // only layer that can tell "no thanks" from a pause is the model. Without
+    // this, a user who answers no to 'can I help?' goes on being recorded
+    // until the quiet period runs out. Wording, not a phrase list: the
+    // instruction still leaves the judgement to the model.
+    expect(ORB_SYSTEM_INSTRUCTION).toContain("A plain no to an offer you made");
+    expect(ORB_SYSTEM_INSTRUCTION).toContain("call stop_listening");
+  });
+
   it("names the voice in setup, so the provider's default cannot move underneath it", async () => {
     const { socket } = await connected();
     const first = JSON.parse(socket.sent[0]);

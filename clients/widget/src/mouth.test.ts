@@ -123,12 +123,23 @@ describe("the disciplines, pinned in the source", () => {
     expect(handler.slice(branch, handler.indexOf("onRefusal"))).toContain("onDismiss?.()");
     // The renderer owns the face's state and the mouth reference, so the
     // dismissal is routed through it rather than closing the mouth behind
-    // its back and leaving a listening face with no session. And it puts the
-    // face away: being asked to go is the primary way this widget leaves the
-    // screen, ahead of any timer.
-    const dismissal = rendererSource.slice(rendererSource.indexOf("onDismiss: () =>"));
-    expect(dismissal).toContain("closeMouth()");
-    expect(dismissal.slice(0, 400)).toContain('applyGesture(state, { type: "dismiss" })');
+    // its back and leaving a listening face with no session. Ending the
+    // conversation is more than closing the mouth — the gate holding the
+    // microphone open closes too, instead of running out its quiet period on
+    // someone who has just said no. Whether the face leaves is the auto-hide
+    // setting's call, so the exit runs through fade and not the unconditional
+    // dismiss gesture.
+    const dismissal = rendererSource.slice(rendererSource.indexOf("onDismiss: () =>"), rendererSource.indexOf("onDismiss: () =>") + 400);
+    expect(dismissal).toContain("endConversation()");
+    expect(dismissal).toContain("fade(state, autoHide)");
+    expect(dismissal).not.toContain('applyGesture(state, { type: "dismiss" })');
+    // The mouth goes first so the onIdle that closing the gate fires re-enters
+    // with no mouth to tear down, and an idle gate is left alone for the same
+    // reason ears.plug() leaves it alone: close() on idle fires onIdle at a
+    // mouth that was never open.
+    const ending = rendererSource.slice(rendererSource.indexOf("function endConversation()"));
+    expect(ending.indexOf("closeMouth()")).toBeLessThan(ending.indexOf("ears?.gate.isOpen"));
+    expect(ending).toContain("if (ears?.gate.isOpen) ears.gate.close();");
   });
 
   test("the lane is checked before the acknowledgement that promises an answer", () => {

@@ -65,7 +65,10 @@ export const ORB_SYSTEM_INSTRUCTION =
   "user meant to stop; there is no phrase to match, and you should not make the " +
   "user remember an incantation. Ending the listening session does not cancel " +
   "anything you were asked to do; a task in progress keeps going. If you are " +
-  "unsure whether a request is real or a dismissal, ask briefly before acting.";
+  "unsure whether a request is real or a dismissal, ask briefly before acting. " +
+  "A plain no to an offer you made — 'no,' 'no thanks,' 'I'm good' — is a whole " +
+  "turn and an answer: acknowledge it in a few words and call stop_listening. " +
+  "Someone who has just declined help is not waiting to be asked again.";
 
 /** How long connect waits for the server's setupComplete before refusing. */
 export const SETUP_TIMEOUT_MS = 15_000;
