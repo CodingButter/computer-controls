@@ -298,3 +298,30 @@ export function fade(state, autoHide) {
   if (!autoHide) return state;
   return { ...state, presence: "hidden", caption: "", scouts: [] };
 }
+
+/**
+ * The auto-hide setting was applied; here is where the face belongs.
+ *
+ * `fade` is only half of the setting. It answers "may the face leave?", and
+ * answering "no" protects a face that is already on the desk — it cannot put
+ * one there. This is the other half: with auto-hide off the face is not merely
+ * un-faded, it is present, because a widget the user asked to keep on screen
+ * and cannot see is the setting failing quietly.
+ *
+ * Only presence moves. Every state that is really hidden — the first paint,
+ * the far side of a fade, a dismissed face — already rests at `listening` with
+ * no caption, so the face that comes back wears the listening posture and says
+ * nothing, without this transition having to name either.
+ *
+ * With auto-hide on the state comes back untouched: the face hides at rest and
+ * the timer still owns it, exactly as before.
+ *
+ * @param {WidgetState} state
+ * @param {boolean} autoHide
+ * @returns {WidgetState}
+ */
+export function keep(state, autoHide) {
+  if (autoHide) return state;
+  if (state.presence === "visible") return state;
+  return { ...state, presence: "visible" };
+}

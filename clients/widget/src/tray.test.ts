@@ -148,4 +148,20 @@ describe("the renderer is told, never asked", () => {
     expect(renderer).toMatch(/state = reduce\(state, event\);\s*\n\s*paint\(\);\s*\n\s*rewindFade\(\)/);
     expect(renderer).toContain("state = fade(state, autoHide)");
   });
+
+  test("the setting arriving from the tray can put the face on stage", () => {
+    // Both halves of auto-hide are applied where the setting lands: the page
+    // is told the stored value once at startup and again at every flip, so a
+    // face that is away when the user turns auto-hide off comes back.
+    expect(renderer).toContain("state = keep(state, autoHide)");
+  });
+
+  test("the shell hands the page the stored setting once the page can hear it", () => {
+    // The page starts hidden and has no way to read the setting itself; this
+    // send is the only thing that tells it, so a launch with auto-hide already
+    // off depends on it firing after the load.
+    expect(main).toMatch(
+      /on\("did-finish-load",[^)]*\(\) => \{\s*\n\s*window\.webContents\.send\("widget:tray-state"/,
+    );
+  });
 });
