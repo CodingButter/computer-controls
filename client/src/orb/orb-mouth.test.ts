@@ -188,6 +188,16 @@ describe("what the shipped mouth source promises", () => {
     expect(laneHandler).toContain('heldWords[i].kind === "progress"');
   });
 
+  it("drops the queued narration when the user barges in", () => {
+    // Stopping the sources fires `onended`, which drains `playing` and
+    // flushes the queue — so without this purge, interrupting the orb is
+    // precisely what makes it recite narration for steps already finished.
+    // The clear must come before the sources are stopped.
+    const barge = mouth.slice(mouth.indexOf("const bargeIn = () =>"));
+    expect(barge).toContain("heldWords.length = 0");
+    expect(barge.indexOf("heldWords.length = 0")).toBeLessThan(barge.indexOf("source.stop()"));
+  });
+
   it("is wired into the page the browser actually loads", () => {
     expect(html).toContain('id="talk"');
     expect(page).toContain('getElementById("talk")');

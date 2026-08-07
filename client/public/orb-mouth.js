@@ -192,6 +192,13 @@ export async function openMouth({ onCaption, onState, onReason }) {
       onState?.("speaking");
     };
     const bargeIn = () => {
+      // The user talking is the most significant signal there is, so the
+      // backlog dies here. Dropped, not deferred: these words describe steps
+      // that have already finished, and stopping the sources below fires
+      // `onended` — which drains `playing` and would flush this very queue.
+      // Left in place, an interruption is the exact thing that unloads stale
+      // narration at the person who interrupted.
+      heldWords.length = 0;
       for (const source of playing) {
         try {
           source.stop();
