@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { ModelPacksCard } from "@/components/models/model-packs";
 import { ProviderLogo } from "@/components/models/provider-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,7 @@ import { Field, Select } from "@/components/ui/select";
 import type {
   CatalogEntry,
   LoginFlow,
-  ModelPack,
+  ModelPacksView,
   ProviderFlow,
   RealtimeSettings,
   VoiceProvider,
@@ -228,53 +229,6 @@ function VoiceLane(props: { title: string; blurb: string; providers: readonly Vo
 }
 
 /**
- * The pack the runtime declared at boot, and which model each tier wears.
- *
- * Read-only on purpose: the pack is named in this build's configuration, not
- * chosen here, and a dropdown that cannot change anything would be a lie with
- * a chevron on it.
- */
-function ModelPackCard(props: { pack?: ModelPack }) {
-  if (!props.pack) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg text-foreground">Model pack</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted">The hub has not named a pack.</p>
-        </CardContent>
-      </Card>
-    );
-  }
-  const tiers = Object.entries(props.pack.tiers);
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg text-foreground">Model pack</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <div className="flex items-center gap-3">
-          <Badge variant="success">active</Badge>
-          <span className="font-medium text-foreground">{props.pack.pack}</span>
-        </div>
-        <ul className="flex flex-col gap-1 text-sm">
-          {tiers.map(([tier, model]) => (
-            <li key={tier} className="flex items-center justify-between gap-3">
-              <span className="text-muted capitalize">{tier}</span>
-              <span className="truncate text-foreground">{model}</span>
-            </li>
-          ))}
-        </ul>
-        <p className="text-xs text-muted">
-          Declared by this build at boot. Choosing a pack from here arrives with model selection.
-        </p>
-      </CardContent>
-    </Card>
-  );
-}
-
-/**
  * A picker over a curated catalog that still shows a value the catalog does
  * not name.
  *
@@ -412,7 +366,12 @@ function RealtimeVoiceCard(props: {
 export function ModelsPanel(props: {
   providers: readonly ProviderFlow[];
   voices: readonly VoiceProvider[];
-  pack?: ModelPack;
+  /** The packs, as the hub answers them. `null` while the answer is still in flight. */
+  packs: ModelPacksView | null;
+  /** The hub's own reason for refusing a pack change, shown where it was asked for. */
+  packRefusal?: string;
+  packUnreachable?: string;
+  packBusy?: boolean;
   flow?: LoginFlow;
   error?: string;
   /** Absent when the hub did not answer for them; `realtimeError` says why. */
@@ -426,6 +385,9 @@ export function ModelsPanel(props: {
   onCancelFlow: () => void;
   onChooseRealtimeModel: (model: string) => void;
   onChooseRealtimeVoice: (voice: string) => void;
+  onSelectPack: (id: string) => void;
+  onCreatePack: (name: string, models: Record<string, string>) => void;
+  onDeletePack: (id: string) => void;
 }) {
   const { providers, voices, flow } = props;
   const unconnected = providers.filter((entry) => !entry.connected);
@@ -435,8 +397,8 @@ export function ModelsPanel(props: {
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold text-foreground">Models</h1>
         <p className="text-sm text-muted">
-          Providers, the pack this build runs, and the voice the orb speaks with. Credentials stay
-          on this machine.
+          Providers, the pack this hub thinks with, and the voice the orb speaks with. Credentials
+          stay on this machine.
         </p>
       </div>
 
@@ -461,7 +423,15 @@ export function ModelsPanel(props: {
         </CardContent>
       </Card>
 
-      <ModelPackCard pack={props.pack} />
+      <ModelPacksCard
+        packs={props.packs}
+        {...(props.packRefusal ? { refused: props.packRefusal } : {})}
+        {...(props.packUnreachable ? { unreachable: props.packUnreachable } : {})}
+        busy={props.packBusy === true}
+        onSelect={props.onSelectPack}
+        onCreate={props.onCreatePack}
+        onDelete={props.onDeletePack}
+      />
 
       <div className="grid gap-4 md:grid-cols-2">
         <RealtimeVoiceCard

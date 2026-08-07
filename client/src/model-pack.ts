@@ -38,7 +38,7 @@ export type ModelPack = {
  * Which models these are is configuration, not architecture: swapping the three
  * strings is a supported edit, and nothing outside this record needs to know.
  */
-const DECLARED_PACK: ModelPack = {
+export const DECLARED_PACK: ModelPack = {
   id: "computer-controls-anthropic",
   models: {
     minimal: "anthropic/claude-haiku-4-5",
@@ -58,11 +58,14 @@ const DECLARED_PACK: ModelPack = {
 export const BANNED_MODEL_IDS: readonly string[] = ["anthropic/claude-fable-5"];
 
 /** The environment variable that re-points each tier, for a machine that runs something else. */
-const TIER_ENV: Record<BrainTier, string> = {
+export const TIER_ENV: Record<BrainTier, string> = {
   minimal: "COMCON_MODEL_MINIMAL",
   standard: "COMCON_MODEL_STANDARD",
   heavy: "COMCON_MODEL_HEAVY",
 };
+
+/** Every tier a pack must fill, in the order a person reads them. */
+export const TIERS = Object.keys(TIER_ENV) as readonly BrainTier[];
 
 /**
  * How much thinking each of the runtime's modes is worth.
@@ -87,7 +90,7 @@ export const THINKING_MODE = "build";
  * override fails on the line that set it, rather than three layers down as an
  * "Unknown model" from a component that never saw the environment.
  */
-function requireModelId(value: string | undefined, tier: BrainTier, source: string): string {
+export function requireModelId(value: string | undefined, tier: BrainTier, source: string): string {
   const id = value?.trim();
   if (!id) {
     throw new Error(
@@ -116,17 +119,38 @@ function requireModelId(value: string | undefined, tier: BrainTier, source: stri
  * set but empty, or a declaration somebody edited into an unusable state, throws
  * here — at boot, in the open — instead of letting the turn quietly resolve to
  * whatever the runtime would have picked on its own.
+ *
+ * `base` exists because a person can now choose a pack from the Models page, and
+ * a chosen pack has to pass through exactly this check rather than a lenient
+ * copy of it. The environment still has the last word over a chosen pack: a
+ * variable set on this machine is an operator pinning a tier, and a page that
+ * silently unpinned it would be changing a decision it was never told about.
+ * The page is told instead — see `tierOverrides`.
  */
-export function resolveModelPack(env: NodeJS.ProcessEnv = process.env): ModelPack {
+export function resolveModelPack(
+  env: NodeJS.ProcessEnv = process.env,
+  base: ModelPack = DECLARED_PACK,
+): ModelPack {
+  const label =
+    base.id === DECLARED_PACK.id ? `The declared pack "${base.id}"` : `The pack "${base.id}"`;
   const models = {} as Record<BrainTier, string>;
-  for (const tier of Object.keys(TIER_ENV) as BrainTier[]) {
+  for (const tier of TIERS) {
     const override = env[TIER_ENV[tier]];
     models[tier] =
       override === undefined
-        ? requireModelId(DECLARED_PACK.models[tier], tier, `The declared pack "${DECLARED_PACK.id}"`)
+        ? requireModelId(base.models[tier], tier, label)
         : requireModelId(override, tier, TIER_ENV[tier]);
   }
-  return { id: DECLARED_PACK.id, models };
+  return { id: base.id, models };
+}
+
+/** The tiers this machine's environment has pinned, and the variable doing the pinning. */
+export function tierOverrides(env: NodeJS.ProcessEnv = process.env): Partial<Record<BrainTier, string>> {
+  const pinned: Partial<Record<BrainTier, string>> = {};
+  for (const tier of TIERS) {
+    if (env[TIER_ENV[tier]] !== undefined) pinned[tier] = TIER_ENV[tier];
+  }
+  return pinned;
 }
 
 /** The model a tier resolves to. The tier logic decides how much thinking; the pack decides with what. */

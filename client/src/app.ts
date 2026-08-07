@@ -82,6 +82,12 @@ export type AppDeps = {
    * supplies it.
    */
   autostart?: Hono;
+  /**
+   * The Models page's pack surface: which pack thinks, and which packs exist.
+   * Optional like the rest, and a hub booted without one still runs the pack
+   * this build declared — the routes decide nothing the declaration does not.
+   */
+  modelPacks?: Hono;
 };
 
 /**
@@ -139,6 +145,7 @@ export function buildApp(deps: AppDeps): Hono {
   if (deps.devices) app.route("/", deps.devices);
   if (deps.desktopConfig) app.route("/", deps.desktopConfig);
   if (deps.autostart) app.route("/", deps.autostart);
+  if (deps.modelPacks) app.route("/", deps.modelPacks);
 
   app.get("*", (c) => {
     // The hub's own static root answers first — chat, the orb, the vendored

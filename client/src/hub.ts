@@ -13,6 +13,7 @@ import {
   modelForTier,
   resolveModelPack,
   THINKING_MODE,
+  type ModelPack,
 } from "./model-pack.ts";
 import { mountAllowedPlugins } from "./plugins.ts";
 import { createConfigSubagent } from "./settings/agent.ts";
@@ -52,6 +53,17 @@ export interface PrepareHubOptions {
    * before — which is what every test that does not care about faces boots.
    */
   observe?: (event: AgentControllerEvent) => void;
+
+  /**
+   * The pack a person picked on the Models page, asked once per turn.
+   *
+   * A function rather than a value because the whole point of choosing a pack
+   * from a page is that the choice outlives the click: reading it here means the
+   * next thing said in the browser runs on the new brain, without a restart.
+   * Absent — as in every test that does not care — leaves the declared pack
+   * standing, which is exactly how this hub behaved before the page existed.
+   */
+  activePack?: () => ModelPack;
 }
 
 export async function prepareHub(config: ClientConfig, options: PrepareHubOptions = {}) {
@@ -138,7 +150,8 @@ export async function prepareHub(config: ClientConfig, options: PrepareHubOption
    * one place the chain cannot be re-entered: declaring the pack on the modes
    * says what this hub runs, and naming it here makes it so.
    */
-  const thinkingModel = modelForTier(modelPack, MODE_BRAINS[THINKING_MODE]);
+  const currentPack = (): ModelPack => options.activePack?.() ?? modelPack;
+  const thinkingModel = (): string => modelForTier(currentPack(), MODE_BRAINS[THINKING_MODE]);
 
   const chat: AgentTurn = createAgentTurn({
     controller: base.controller,
@@ -173,9 +186,11 @@ export async function prepareHub(config: ClientConfig, options: PrepareHubOption
       refused,
     },
     model: {
-      pack: modelPack.id,
-      thinking: thinkingModel,
-      tiers: modelPack.models,
+      // The pack answering right now rather than the one this process booted
+      // with, so a page that says it switched can be checked against health.
+      pack: currentPack().id,
+      thinking: thinkingModel(),
+      tiers: currentPack().models,
     },
     // Which OS adapter booted, and what it admits it cannot do. Reported
     // because the adapters for the unscheduled OSes answer "nothing installed"

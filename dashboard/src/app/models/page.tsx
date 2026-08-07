@@ -6,18 +6,22 @@ import { ModelsPanel } from "@/components/models/models";
 import { UnreachableNotice } from "@/components/overview/overview";
 import {
   completeLogin,
+  createModelPack,
+  deleteModelPack,
   disconnectProvider,
   getFlows,
-  getHealth,
+  getModelPacks,
   getRealtimeSettings,
   getVoiceProviders,
   pollLogin,
+  putActivePack,
   putRealtimeSettings,
   saveApiKey,
   startLogin,
   type Fetched,
-  type ModelPack,
   type LoginFlow,
+  type ModelPacksFetch,
+  type ModelPacksView,
   type ProviderFlow,
   type RealtimeSettings,
   type VoiceProvider,
@@ -32,7 +36,10 @@ import {
 export default function ModelsPage() {
   const [providers, setProviders] = useState<Fetched<readonly ProviderFlow[]> | null>(null);
   const [voices, setVoices] = useState<readonly VoiceProvider[]>([]);
-  const [pack, setPack] = useState<ModelPack | undefined>(undefined);
+  const [packs, setPacks] = useState<ModelPacksView | null>(null);
+  const [packRefusal, setPackRefusal] = useState<string | undefined>(undefined);
+  const [packUnreachable, setPackUnreachable] = useState<string | undefined>(undefined);
+  const [packBusy, setPackBusy] = useState(false);
   const [flow, setFlow] = useState<LoginFlow | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [realtime, setRealtime] = useState<RealtimeSettings | undefined>(undefined);
@@ -40,12 +47,32 @@ export default function ModelsPage() {
   const [realtimeBusy, setRealtimeBusy] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
+  /**
+   * Every pack answer lands the same way, whether it came from a read or a
+   * write: the view when there is one, the hub's own sentence when it refused.
+   * A refusal keeps the packs already on screen — the change did not happen, so
+   * neither should the page pretend the list is gone.
+   */
+  const landPacks = useCallback((answer: ModelPacksFetch) => {
+    if (answer.kind === "ok") {
+      setPacks(answer.data);
+      setPackRefusal(undefined);
+      setPackUnreachable(undefined);
+      return;
+    }
+    if (answer.kind === "refused") {
+      setPackRefusal(answer.detail);
+      setPackUnreachable(undefined);
+      return;
+    }
+    setPackUnreachable(answer.detail);
+  }, []);
+
   const refresh = useCallback(async () => {
     setProviders(await getFlows());
     const voiceAnswer = await getVoiceProviders();
     setVoices(voiceAnswer.kind === "ok" ? voiceAnswer.data : []);
-    const health = await getHealth();
-    setPack(health.kind === "ok" ? health.data.model : undefined);
+    landPacks(await getModelPacks());
     const settings = await getRealtimeSettings();
     if (settings.kind === "ok") {
       setRealtime(settings.data);
@@ -56,7 +83,7 @@ export default function ModelsPage() {
       setRealtime(undefined);
       setRealtimeError(settings.detail);
     }
-  }, []);
+  }, [landPacks]);
 
   /**
    * Save one field and take the hub's answer as the new truth.
@@ -76,6 +103,18 @@ export default function ModelsPage() {
       setRealtimeBusy(false);
     }
   }, []);
+
+  /** One writer for all three pack writes, so the busy flag cannot be left on. */
+  const writePack = useCallback(
+    (work: () => Promise<ModelPacksFetch>) => {
+      setPackBusy(true);
+      void work()
+        .then(landPacks)
+        .catch((cause: unknown) => setPackUnreachable(String(cause)))
+        .finally(() => setPackBusy(false));
+    },
+    [landPacks],
+  );
 
   useEffect(() => {
     void refresh();
@@ -127,7 +166,10 @@ export default function ModelsPage() {
     <ModelsPanel
       providers={providers.data}
       voices={voices}
-      pack={pack}
+      packs={packs}
+      packRefusal={packRefusal}
+      packUnreachable={packUnreachable}
+      packBusy={packBusy}
       flow={flow}
       error={error}
       realtime={realtime}
@@ -158,6 +200,9 @@ export default function ModelsPage() {
         setFlow(undefined);
         setError(undefined);
       }}
+      onSelectPack={(id) => writePack(() => putActivePack(id))}
+      onCreatePack={(name, models) => writePack(() => createModelPack(name, models))}
+      onDeletePack={(id) => writePack(() => deleteModelPack(id))}
     />
   );
 }

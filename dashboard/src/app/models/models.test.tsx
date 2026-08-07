@@ -4,12 +4,17 @@ import { afterEach, expect, test, vi } from "vitest";
 import { ModelsPanel } from "@/components/models/models";
 import {
   completeLogin,
+  createModelPack,
+  deleteModelPack,
   parseFlows,
+  parseModelPacks,
   parseVoiceProviders,
+  putActivePack,
   saveApiKey,
   startLogin,
   parseRealtimeSettings,
   putRealtimeSettings,
+  type ModelPacksView,
   type ProviderFlow,
   type RealtimeSettings,
   type VoiceProvider,
@@ -41,6 +46,41 @@ const REALTIME: RealtimeSettings = {
   warnings: [],
 };
 
+const PACKS: ModelPacksView = {
+  active: {
+    id: "computer-controls-anthropic",
+    name: "computer-controls-anthropic",
+    models: { minimal: "anthropic/claude-haiku-4-5", standard: "anthropic/claude-sonnet-4-6", heavy: "anthropic/claude-opus-4-6" },
+    thinking: "anthropic/claude-sonnet-4-6",
+  },
+  thinkingTier: "standard",
+  tiers: ["minimal", "standard", "heavy"],
+  overrides: {},
+  packs: [
+    {
+      id: "computer-controls-anthropic",
+      name: "computer-controls-anthropic",
+      source: "built-in",
+      models: { minimal: "anthropic/claude-haiku-4-5", standard: "anthropic/claude-sonnet-4-6", heavy: "anthropic/claude-opus-4-6" },
+      active: true,
+      selectable: true,
+    },
+    {
+      id: "custom:cheap-day",
+      name: "Cheap day",
+      source: "custom",
+      models: { minimal: "google/gemini-3.5-flash", standard: "google/gemini-3.5-flash", heavy: "google/gemini-3-pro" },
+      active: false,
+      selectable: false,
+      reason: "Google has no key on this machine, so this pack cannot answer a turn.",
+    },
+  ],
+  providers: [
+    { provider: "anthropic", name: "Anthropic", connected: true, models: ["anthropic/claude-haiku-4-5", "anthropic/claude-opus-4-6"] },
+    { provider: "google", name: "Google", connected: false, models: ["google/gemini-3.5-flash"] },
+  ],
+};
+
 const noop = () => {};
 
 function panel(overrides: Partial<Parameters<typeof ModelsPanel>[0]> = {}) {
@@ -48,6 +88,7 @@ function panel(overrides: Partial<Parameters<typeof ModelsPanel>[0]> = {}) {
     <ModelsPanel
       providers={PROVIDERS}
       voices={VOICES}
+      packs={PACKS}
       onConnect={noop}
       onDisconnect={noop}
       onSaveKey={noop}
@@ -55,6 +96,9 @@ function panel(overrides: Partial<Parameters<typeof ModelsPanel>[0]> = {}) {
       onCancelFlow={noop}
       onChooseRealtimeModel={noop}
       onChooseRealtimeVoice={noop}
+      onSelectPack={noop}
+      onCreatePack={noop}
+      onDeletePack={noop}
       {...overrides}
     />,
   );
@@ -81,16 +125,58 @@ test("providers render with their connection state and the affordance each one h
   expect((html.match(/<svg/g) ?? []).length).toBeGreaterThanOrEqual(3);
 });
 
-test("the pack this build declared is shown with every tier's model, read-only", () => {
-  const html = panel({
-    pack: { pack: "computer-controls-anthropic", tiers: { minimal: "haiku-4-5", heavy: "opus-4-6" } },
-  });
-  expect(html).toContain("Model pack");
+test("every pack is listed with its tiers, and the active one is marked", () => {
+  const html = panel();
+  expect(html).toContain("Model packs");
   expect(html).toContain("computer-controls-anthropic");
-  expect(html).toContain("haiku-4-5");
-  expect(html).toContain("opus-4-6");
-  // No pack is a sentence, not an empty card.
-  expect(panel()).toContain("The hub has not named a pack.");
+  expect(html).toContain("anthropic/claude-opus-4-6");
+  expect(html).toContain("Cheap day");
+  expect(html).toContain("active");
+  // The tier a browser turn actually runs at is named, so the page says which
+  // row answers a person rather than leaving three equal-looking models.
+  expect(html).toContain("thinks");
+  expect(html).toContain("anthropic/claude-sonnet-4-6");
+});
+
+test("a pack that cannot be picked keeps its button off and says why", () => {
+  const html = panel();
+  // The unusable pack is offered as a fact with a reason, never as a control
+  // that would fail at the next turn instead of here.
+  expect(html).toContain("Google has no key on this machine");
+  expect((html.match(/<button[^>]*disabled/g) ?? []).length).toBeGreaterThanOrEqual(1);
+  // The active pack offers no "use" button — there is nothing to change.
+  expect((html.match(/Use this pack/g) ?? []).length).toBe(1);
+});
+
+test("built-ins cannot be deleted, but can be duplicated into a starting point", () => {
+  const html = panel();
+  expect((html.match(/Delete/g) ?? []).length).toBe(1);
+  expect((html.match(/Duplicate/g) ?? []).length).toBe(2);
+});
+
+test("the maker offers every tier, and marks providers this machine has no key for", () => {
+  const html = panel();
+  expect(html).toContain('aria-label="Pack name"');
+  expect(html).toContain('aria-label="minimal model"');
+  expect(html).toContain('aria-label="standard model"');
+  expect(html).toContain('aria-label="heavy model"');
+  expect(html).toContain("Google — no key on this machine");
+  // No key, no offer: the models are visible in every tier's list, and not
+  // selectable in any of them.
+  expect((html.match(/<optgroup[^>]*disabled=""/g) ?? []).length).toBe(PACKS.tiers.length);
+});
+
+test("an environment override is named, because no pack choice can move that tier", () => {
+  const html = panel({ packs: { ...PACKS, overrides: { heavy: "COMCON_MODEL_HEAVY" } } });
+  expect(html).toContain("COMCON_MODEL_HEAVY");
+});
+
+test("a hub that refuses a pack change says so verbatim, and keeps the list on screen", () => {
+  const html = panel({ packRefusal: "computer-controls-anthropic is declared by this build." });
+  expect(html).toContain("computer-controls-anthropic is declared by this build.");
+  expect(html).toContain("Cheap day");
+  // Still asking is a sentence, not an empty card.
+  expect(panel({ packs: null })).toContain("Asking the hub…");
 });
 
 test("the realtime model and voice are pickers over what the hub offers, with what it holds selected", () => {
@@ -298,4 +384,73 @@ test("nothing token-shaped survives parsing: the page only ever sees named field
   });
   expect(JSON.stringify(voices)).not.toContain("leaked");
   expect(() => parseFlows({ nope: true })).toThrow();
+});
+
+test("the pack calls address the hub's own routes with the change in the body", async () => {
+  const calls: Array<[string, RequestInit | undefined]> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push([url, init]);
+      return { ok: true, status: 200, json: async () => ({ packs: [] }) };
+    }),
+  );
+
+  await putActivePack("custom:cheap-day");
+  await createModelPack("Cheap day", { minimal: "google/gemini-3.5-flash" });
+  await deleteModelPack("custom:cheap day");
+
+  expect(calls.map(([url]) => url)).toEqual([
+    "/api/model-packs/active",
+    "/api/model-packs",
+    // The id is a path segment, so it is encoded rather than pasted in.
+    "/api/model-packs/custom%3Acheap%20day",
+  ]);
+  expect(calls[0]?.[1]).toMatchObject({
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: "custom:cheap-day" }),
+  });
+  expect(calls[1]?.[1]).toMatchObject({ method: "POST" });
+  expect(calls[2]?.[1]).toMatchObject({ method: "DELETE" });
+});
+
+test("a refused pack change is a reason, an unreachable hub is not", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "A pack named Cheap day already exists." }),
+    })),
+  );
+  expect(await createModelPack("Cheap day", {})).toEqual({
+    kind: "refused",
+    detail: "A pack named Cheap day already exists.",
+  });
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      throw new Error("connection refused");
+    }),
+  );
+  expect(await putActivePack("x")).toEqual({ kind: "unreachable", detail: "connection refused" });
+});
+
+test("a pack answer keeps only named fields, and an unrecognisable one is refused", () => {
+  const view = parseModelPacks({
+    active: { id: "a", name: "A", models: { standard: "anthropic/claude-sonnet-4-6" }, thinking: "anthropic/claude-sonnet-4-6" },
+    thinkingTier: "standard",
+    tiers: ["standard"],
+    overrides: {},
+    packs: [
+      { id: "a", name: "A", source: "built-in", models: { standard: "m" }, active: true, selectable: true, apiKey: "sk-leaked" },
+      { junk: true },
+    ],
+    providers: [{ provider: "anthropic", name: "Anthropic", connected: true, models: ["m"], apiKey: "sk-leaked" }],
+  });
+  expect(view.packs).toHaveLength(1);
+  expect(JSON.stringify(view)).not.toContain("leaked");
+  expect(() => parseModelPacks({ nope: true })).toThrow("not a model-packs response");
 });
