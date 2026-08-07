@@ -1,13 +1,24 @@
 "use client";
 
 import { Check, Mic, Square } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { assembleTemplates, TARGET_TAKES } from "@hub/wake/enrollment";
 import { putWakeTemplates, type WakeTemplate, type WakeTemplatesView } from "@/lib/hub";
 import { CAPTURE_RATE, recordTake as defaultRecordTake, type RecordTake } from "@/lib/wake-capture";
+import {
+  COUNTDOWN_TICK_MS,
+  IDLE,
+  afterTake,
+  afterTick,
+  isRunning,
+  startAt,
+  walkthroughMessage,
+  walkthroughProgress,
+  type Walkthrough,
+} from "@/lib/wake-walkthrough";
 import { cn } from "@/lib/utils";
 
 /**
@@ -15,8 +26,16 @@ import { cn } from "@/lib/utils";
  *
  * The wake phrase is not a word in a transcript any more — it is a shape in the
  * audio, and the shape it compares against has to be yours. This is where you
- * hand it over: three takes, a score under each one, and a save that every
- * listening surface on this hub reads afterwards.
+ * hand it over: a guided run through every take, a score under each one, and a
+ * save that every listening surface on this hub reads afterwards.
+ *
+ * It is a walkthrough rather than a row of buttons because of what it is asking
+ * for. The takes are meant to be the same phrase said the same way, and a
+ * person who has to find and press a button between each one says it a little
+ * differently each time — a bit clipped, a bit rushed, aimed at the mouse. One
+ * press, a countdown, and a beep at each end leaves their hands and their
+ * attention where the microphone is, and the recording is of somebody talking
+ * rather than somebody operating a form.
  *
  * The score is not decoration. It is computed with the same matcher the gate
  * runs later, so a take that reads below half is a take the gate would refuse,
@@ -40,17 +59,21 @@ export type Take = { samples: Int16Array; score: number };
 /**
  * The take sequence after recording into a slot.
  *
- * Re-recording take two drops take three: the scores describe a sequence, and
- * keeping a later take that was scored against the one just replaced would put
- * a number on screen that nothing computed.
+ * The scores describe a sequence — each take against the ones before it — so
+ * replacing take two invalidates the numbers under takes three and four. They
+ * are rescored rather than discarded. Dropping them was the older answer, and
+ * it was answering the right question: a take kept with a score computed
+ * against a recording that no longer exists is a number nothing stands behind.
+ * Rescoring removes the reason instead of paying for it, and nobody loses three
+ * good takes to fix one bad one.
  */
 export function takesAfterRecording(
   previous: readonly Take[],
   slot: number,
   samples: Int16Array,
 ): Take[] {
-  const kept = previous.slice(0, slot).map((take) => take.samples);
-  const next = [...kept, samples];
+  const next = previous.map((take) => take.samples);
+  next[slot] = samples;
   const { scores } = assembleTemplates(next, {
     phrase: ENROLL_PHRASE,
     sampleRate: CAPTURE_RATE,
@@ -77,19 +100,23 @@ export function captureProblem(error: unknown): string {
 export type WakeTrainingViewProps = {
   current: WakeTemplatesView | null;
   takes: readonly Take[];
-  /** The slot currently recording, or null when the microphone is closed. */
-  recording: number | null;
+  /** Where the walkthrough has got to. */
+  phase: Walkthrough;
   saving: boolean;
   saved: WakeTemplatesView | null;
   problem: string | null;
-  onRecord: (slot: number) => void;
+  onStart: () => void;
+  onStop: () => void;
+  onRerecord: (slot: number) => void;
   onSave: () => void;
 };
 
 export function WakeTrainingView(props: WakeTrainingViewProps) {
-  const { current, takes, recording, saving, saved, problem } = props;
+  const { current, takes, phase, saving, saved, problem } = props;
   const slots = Array.from({ length: TARGET_TAKES }, (_, i) => i);
   const complete = takes.length >= TARGET_TAKES;
+  const running = isRunning(phase);
+  const progress = walkthroughProgress(phase, takes.length);
 
   return (
     <Card>
@@ -98,40 +125,58 @@ export function WakeTrainingView(props: WakeTrainingViewProps) {
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
         <p className="text-sm text-muted">
-          Say <span className="font-medium text-fg">“{ENROLL_PHRASE}”</span> three times, the way
-          you would actually say it. The recording stays in this browser; what reaches the hub is a
-          fingerprint of the sound, not the sound.
+          Say <span className="font-medium text-fg">“{ENROLL_PHRASE}”</span> {TARGET_TAKES} times,
+          the way you would actually say it. Press start once and it will count you in and beep for
+          each take — you should not need the keyboard again. The recording stays in this browser;
+          what reaches the hub is a fingerprint of the sound, not the sound.
         </p>
+
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-well/40 p-3">
+          {running ? (
+            <Button variant="outline" onClick={props.onStop} disabled={saving}>
+              <Square className="h-4 w-4" />
+              <span>Stop</span>
+            </Button>
+          ) : (
+            <Button onClick={props.onStart} disabled={saving}>
+              <Mic className="h-4 w-4" />
+              <span>{takes.length > 0 ? "Start over" : "Start"}</span>
+            </Button>
+          )}
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span data-testid="walkthrough-status" role="status" className="text-sm text-fg">
+              {walkthroughMessage(phase, ENROLL_PHRASE)}
+            </span>
+            <span data-testid="walkthrough-progress" className="text-xs text-muted">
+              Take {progress.step} of {progress.of}
+            </span>
+          </div>
+        </div>
 
         <ol className="flex flex-col gap-2">
           {slots.map((slot) => {
             const take = takes[slot];
-            const busy = recording === slot;
-            // A person cannot record take three before take two: the score of a
-            // take is a statement about the ones before it.
-            const reachable = slot <= takes.length;
+            const busy = phase.kind === "recording" && phase.slot === slot;
+            const counting = phase.kind === "countdown" && phase.slot === slot;
             return (
               <li
                 key={slot}
                 data-testid="take-row"
-                className="flex items-center gap-3 rounded-xl border border-border bg-well/40 p-3"
+                className={cn(
+                  "flex items-center gap-3 rounded-xl border border-border bg-well/40 p-3",
+                  (busy || counting) && "border-accent",
+                )}
               >
-                <Button
-                  variant={take ? "outline" : "default"}
-                  disabled={!reachable || recording !== null || saving}
-                  onClick={() => props.onRecord(slot)}
-                  aria-label={take ? `Re-record take ${slot + 1}` : `Record take ${slot + 1}`}
-                >
-                  {busy ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                  <span>{busy ? "Listening…" : take ? "Re-record" : `Take ${slot + 1}`}</span>
-                </Button>
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="text-sm text-fg">
+                    Take {slot + 1} —{" "}
                     {busy
-                      ? `Say “${ENROLL_PHRASE}” now.`
-                      : take
-                        ? scoreLabel(take.score, slot)
-                        : "Not recorded yet."}
+                      ? `say “${ENROLL_PHRASE}” now.`
+                      : counting
+                        ? "coming up."
+                        : take
+                          ? scoreLabel(take.score, slot)
+                          : "not recorded yet."}
                   </span>
                   {take && slot > 0 ? (
                     <span
@@ -142,6 +187,19 @@ export function WakeTrainingView(props: WakeTrainingViewProps) {
                     </span>
                   ) : null}
                 </div>
+                {/* Only a take that exists can be replaced, and only while the
+                    microphone is free — one take at a time, always. */}
+                {take ? (
+                  <Button
+                    variant="outline"
+                    disabled={running || saving}
+                    onClick={() => props.onRerecord(slot)}
+                    aria-label={`Re-record take ${slot + 1}`}
+                  >
+                    <Mic className="h-4 w-4" />
+                    <span>Re-record</span>
+                  </Button>
+                ) : null}
               </li>
             );
           })}
@@ -162,7 +220,7 @@ export function WakeTrainingView(props: WakeTrainingViewProps) {
         ) : null}
 
         <div className="flex items-center gap-3">
-          <Button disabled={!complete || saving || recording !== null} onClick={props.onSave}>
+          <Button disabled={!complete || saving || running} onClick={props.onSave}>
             {saving ? "Saving…" : "Save my voice"}
           </Button>
           <span className="text-xs text-muted">
@@ -188,27 +246,58 @@ export type WakeTrainingProps = {
 export function WakeTraining(props: WakeTrainingProps) {
   const recordTake = props.recordTake ?? defaultRecordTake;
   const [takes, setTakes] = useState<Take[]>([]);
-  const [recording, setRecording] = useState<number | null>(null);
+  const collected = useRef<Take[]>([]);
+  const [phase, setPhase] = useState<Walkthrough>(IDLE);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<WakeTemplatesView | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
-  const record = useCallback(
-    async (slot: number) => {
-      setProblem(null);
-      setSaved(null);
-      setRecording(slot);
+  /**
+   * The clock and the microphone, driven by the phase.
+   *
+   * Everything that decides anything is in `wake-walkthrough.ts`; this only
+   * waits. A countdown sets one timer, a recording opens the microphone once,
+   * and the cleanup cancels both — a walkthrough that keeps ticking after Stop
+   * is a page that beeps at somebody who has walked away.
+   */
+  useEffect(() => {
+    if (phase.kind === "countdown") {
+      const timer = setTimeout(() => setPhase(afterTick), COUNTDOWN_TICK_MS);
+      return () => clearTimeout(timer);
+    }
+    if (phase.kind !== "recording") return;
+
+    const slot = phase.slot;
+    let abandoned = false;
+    void (async () => {
       try {
         const samples = await recordTake();
-        setTakes((previous) => takesAfterRecording(previous, slot, samples));
+        if (abandoned) return;
+        // This is the only place takes are written, so the ref and the state
+        // cannot disagree — and reading the ref keeps the phase transition out
+        // of a state updater, which has to stay pure.
+        const next = takesAfterRecording(collected.current, slot, samples);
+        collected.current = next;
+        setTakes(next);
+        setPhase(afterTake(next.length));
       } catch (error) {
+        if (abandoned) return;
+        // A microphone that will not open will not open on the next take
+        // either. Stop, say why, and let them fix it and press start again.
         setProblem(captureProblem(error));
-      } finally {
-        setRecording(null);
+        setPhase(IDLE);
       }
-    },
-    [recordTake],
-  );
+    })();
+    return () => {
+      abandoned = true;
+    };
+  }, [phase, recordTake]);
+
+  const start = useCallback((slot: number) => {
+    setProblem(null);
+    setSaved(null);
+    setPhase(startAt(slot));
+  }, []);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -231,11 +320,19 @@ export function WakeTraining(props: WakeTrainingProps) {
     <WakeTrainingView
       current={props.current}
       takes={takes}
-      recording={recording}
+      phase={phase}
       saving={saving}
       saved={saved}
       problem={problem}
-      onRecord={(slot) => void record(slot)}
+      // Start is start over: the takes are a sequence scored against each
+      // other, and beginning again means beginning at the first one.
+      onStart={() => {
+        collected.current = [];
+        setTakes([]);
+        start(0);
+      }}
+      onStop={() => setPhase(IDLE)}
+      onRerecord={(slot) => start(slot)}
       onSave={() => void save()}
     />
   );
