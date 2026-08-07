@@ -28,6 +28,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
  * @typedef {{
  *   toggleAutoHide: () => void,
  *   toggleDisabled: () => void,
+ *   toggleDemo: () => void,
  *   openDashboard: () => void,
  *   quit: () => void,
  * }} TrayActions
@@ -77,6 +78,18 @@ export function menuTemplateFor(state, actions) {
     {
       label: state.disabled ? "Enable widget" : "Disable widget",
       click: actions.toggleDisabled,
+    },
+    {
+      // Named for what it costs, not for what it enables. Turning this on
+      // makes the window one the desktop manages — findable in a screen
+      // recorder and in this project's own window capture — and also one that
+      // alt-tab can land on, which is why nobody should discover they left it
+      // on. The restart is in the label because the window's kind is decided
+      // when it is created and cannot be changed underneath a running face.
+      label: "Demo mode (restarts the face)",
+      type: "checkbox",
+      checked: state.demo,
+      click: actions.toggleDemo,
     },
     { type: "separator" },
     { label: "Open the dashboard", click: actions.openDashboard },

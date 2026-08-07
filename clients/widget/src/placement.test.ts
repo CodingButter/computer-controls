@@ -7,6 +7,7 @@ import {
   HEIGHT,
   SNAP_ZONE_PX,
   WIDTH,
+  captureRect,
   dragPlacement,
   readDragRequest,
   restorePlacement,
@@ -220,6 +221,78 @@ describe("the stage the face opens on", () => {
     const { orb } = stageFor(offset, "corner");
     expect(orb.x).toBeLessThan(0);
     expect(orb.x).toBe(-1920 + Math.max(0, 1920 - WIDTH - 24));
+  });
+});
+
+describe("the rectangle a photograph of the face may contain", () => {
+  // The window is a whole transparent display. Everything outside the orb's
+  // own box is desk — other people's windows, other people's work — so the
+  // rectangle is the security boundary of the capture route, not a detail of
+  // it, and it is checked here where it can be checked without a screen.
+  const display = {
+    bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+    workArea: { x: 0, y: 0, width: 1920, height: 1080 },
+  };
+
+  test("is the orb's box, in the window's own coordinates", () => {
+    const stage = stageFor(display, { x: 300, y: 400 });
+    const rect = captureRect(stage, stage.orb);
+
+    expect(rect).toEqual({ x: 300, y: 400, width: WIDTH, height: HEIGHT });
+    // Never the window. A capture the size of the stage is a screenshot.
+    expect(rect.width).toBeLessThan(stage.width);
+    expect(rect.height).toBeLessThan(stage.height);
+  });
+
+  test("is measured from the window, not from the desk", () => {
+    // A monitor to the left starts at a negative x. A rectangle handed to the
+    // platform in screen coordinates would be off the window entirely, and
+    // whatever it captured would not be the face.
+    const left = {
+      bounds: { x: -1920, y: 0, width: 1920, height: 1080 },
+      workArea: { x: -1920, y: 0, width: 1920, height: 1080 },
+    };
+    const stage = stageFor(left, { x: -1620, y: 200 });
+
+    expect(captureRect(stage, stage.orb)).toEqual({
+      x: 300,
+      y: 200,
+      width: WIDTH,
+      height: HEIGHT,
+    });
+  });
+
+  test("never runs off the window, however the face was dragged", () => {
+    const stage = stageFor(display, "corner");
+
+    // Past every edge in turn, including places a drag cannot reach but a
+    // stale placement file can. A rectangle that overhangs the window is one
+    // the platform is free to interpret, and the interpretations include
+    // giving back pixels from outside it.
+    for (const orb of [
+      { x: -500, y: -500 },
+      { x: 5000, y: 5000 },
+      { x: stage.x + stage.width - 10, y: stage.y + stage.height - 10 },
+    ]) {
+      const rect = captureRect(stage, orb);
+      expect(rect.x, JSON.stringify(orb)).toBeGreaterThanOrEqual(0);
+      expect(rect.y, JSON.stringify(orb)).toBeGreaterThanOrEqual(0);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(stage.width);
+      expect(rect.y + rect.height).toBeLessThanOrEqual(stage.height);
+    }
+  });
+
+  test("a window smaller than the orb yields a rectangle inside it, not around it", () => {
+    // Nobody ships a display this small, but the clamp is arithmetic and the
+    // failure mode is asking for pixels the window does not have.
+    const tiny = {
+      bounds: { x: 0, y: 0, width: 200, height: 150 },
+      workArea: { x: 0, y: 0, width: 200, height: 150 },
+    };
+    const stage = stageFor(tiny, "corner");
+    const rect = captureRect(stage, stage.orb);
+
+    expect(rect).toEqual({ x: 0, y: 0, width: 200, height: 150 });
   });
 });
 

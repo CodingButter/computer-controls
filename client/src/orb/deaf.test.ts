@@ -98,9 +98,15 @@ describe("the hub process contains no audio code", () => {
     // and none of its job. The wake gate decided when the hub was listening;
     // this one decides which controller events are worth a sentence, and
     // touches no audio to do it.
+    //
+    // capture.ts answers too: it asks a face to photograph itself and carries
+    // the picture back. Pictures are not sound, and it opens no device of its
+    // own — the widget's shell takes the image and posts it here.
     expect(remaining).toEqual([
       "brain.test.ts",
       "brain.ts",
+      "capture.test.ts",
+      "capture.ts",
       "credentials.test.ts",
       "credentials.ts",
       "deaf.test.ts",

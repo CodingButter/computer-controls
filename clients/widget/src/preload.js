@@ -176,6 +176,21 @@ contextBridge.exposeInMainWorld("widget", {
   },
 
   /**
+   * The hub asked what the face looks like; pass the id along.
+   *
+   * Send-only, and the id is all that crosses. The page cannot take a picture
+   * — it has no capture API and the boundary tests keep it that way — and it
+   * learns nothing from this call either: there is no return value, so a skin
+   * that called it in a loop would get pixels it never sees, sent to a hub
+   * that only hands them to whoever asked over loopback.
+   *
+   * @param {string} id
+   */
+  capture(id) {
+    ipcRenderer.send("widget:capture", String(id));
+  },
+
+  /**
    * End this process.
    *
    * Quit is a process-level action, not a conversation gesture. It does not

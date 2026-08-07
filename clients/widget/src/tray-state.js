@@ -4,12 +4,12 @@ import path from "node:path";
 /**
  * How the user left the tray, remembered between runs.
  *
- * Two booleans: whether the face may hide itself after a quiet while, and
- * whether the widget is disabled outright. Both are the user's choices, made
- * in the tray menu, and a choice that reset itself every launch would not be
- * a choice — so they are written down beside `placement.json`, with the same
- * discipline placement-store established: every failure is silent and lands
- * on the defaults.
+ * Three booleans: whether the face may hide itself after a quiet while,
+ * whether the widget is disabled outright, and whether it is opening in demo
+ * mode. All three are the user's choices, made in the tray menu, and a choice
+ * that reset itself every launch would not be a choice — so they are written
+ * down beside `placement.json`, with the same discipline placement-store
+ * established: every failure is silent and lands on the defaults.
  *
  * The defaults are the product's posture, not an accident: auto-hide on
  * (a resident face that never left would be furniture) and disabled off
@@ -21,9 +21,21 @@ import path from "node:path";
  * buy nothing.
  */
 
-/** @typedef {{ autoHide: boolean, disabled: boolean }} TrayState */
+/** @typedef {{ autoHide: boolean, disabled: boolean, demo: boolean }} TrayState */
 
-export const DEFAULT_TRAY_STATE = Object.freeze({ autoHide: true, disabled: false });
+/**
+ * Demo mode defaults off, and that is a decision rather than a default.
+ *
+ * It is the mode where the window is focusable and in the switcher, which is
+ * what makes it recordable — and also what makes it something a stray alt-tab
+ * can land on. The resident posture is the one people run all day; the
+ * demonstrable one is the one they turn on for twenty minutes.
+ */
+export const DEFAULT_TRAY_STATE = Object.freeze({
+  autoHide: true,
+  disabled: false,
+  demo: false,
+});
 
 /**
  * Read a stored tray state out of text, defaulting anything that is not one.
@@ -48,6 +60,7 @@ export function decodeTrayState(raw) {
       typeof parsed.autoHide === "boolean" ? parsed.autoHide : DEFAULT_TRAY_STATE.autoHide,
     disabled:
       typeof parsed.disabled === "boolean" ? parsed.disabled : DEFAULT_TRAY_STATE.disabled,
+    demo: typeof parsed.demo === "boolean" ? parsed.demo : DEFAULT_TRAY_STATE.demo,
   };
 }
 
@@ -59,6 +72,7 @@ export function encodeTrayState(state) {
   return JSON.stringify({
     autoHide: Boolean(state.autoHide),
     disabled: Boolean(state.disabled),
+    demo: Boolean(state.demo),
   });
 }
 

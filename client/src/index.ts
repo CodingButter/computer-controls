@@ -30,7 +30,12 @@ import { wrapTurnWithPermissionAwareness } from "./permissions/aware-turn.ts";
 import { findDaemonSocket, readCensus } from "./permissions/daemon.ts";
 import { createPermissionRegistry } from "./permissions/registry.ts";
 import { buildPermissionsApp } from "./permissions/routes.ts";
-import { createHubBrain, createLaneFaceSource, mountOrb } from "./orb/index.ts";
+import {
+  createCaptureRequests,
+  createHubBrain,
+  createLaneFaceSource,
+  mountOrb,
+} from "./orb/index.ts";
 import { createDesktopCapture } from "./desktop-capture.ts";
 import { applicationDirs, scanDesktopEntries } from "./platform/freedesktop/entries.ts";
 import { FileSettingsAudit } from "./settings/audit.ts";
@@ -201,6 +206,14 @@ const voice = {
 const faces = createLaneFaceSource();
 
 /**
+ * The self-capture round trip: an ask that rides out on the lane, an answer
+ * that comes back as PNG bytes over loopback. Built here because it is both a
+ * route and an event source, and the two halves must be the same object — the
+ * id the route is waiting on is the id the lane sent.
+ */
+const captures = createCaptureRequests();
+
+/**
  * The orb's hub side: the token mint, the realtime settings, the status route,
  * and the SSE face — deaf by design. It comes up refused only when there is
  * no Google credential, and the reason travels to the page through
@@ -211,6 +224,7 @@ const orb = await mountOrb({
   settingsPath: path.join(config.root, config.configDir, "settings.json"),
   faces: { mouths: faces.mouths, subscribe: faces.subscribeFace },
   captureFrame: createDesktopCapture(),
+  captures,
 });
 
 /**
@@ -320,10 +334,10 @@ export const server = serve(
  * word said twice is noise.
  *
  * A face opens one connection and hears one vocabulary; whether a given word
- * came from the conversation or from the agent's hands is the hub's business,
- * not the face's.
+ * came from the conversation, from the agent's hands, or from somebody asking
+ * the face to photograph itself is the hub's business, not the face's.
  */
-export const eventSource = combineEventSources(faces.source, touchLane);
+export const eventSource = combineEventSources(faces.source, touchLane, captures.source);
 
 /**
  * The lane's brain rides the same wrapped turn as the typed route's — an

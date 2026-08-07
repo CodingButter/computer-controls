@@ -250,6 +250,22 @@ export const UNDERSTOOD_EVENTS = Object.freeze([
 ]);
 
 /**
+ * Words the hub says to the shell, which change nothing about what is drawn.
+ *
+ * `capture_request` is the only one: somebody asked what the face looks like,
+ * and the answer is a picture taken by the process that owns the window, sent
+ * back over loopback HTTP. Nothing about the widget's appearance changes when
+ * it is photographed — a face that flinched when observed would be showing the
+ * observer something that was not there before they looked.
+ *
+ * Kept as its own list rather than as a silent gap in `UNDERSTOOD_EVENTS`
+ * because the parity test adds the two together and compares against the hub's
+ * vocabulary. A word can be a word this face draws or a word this shell
+ * answers, and it has to be one of them on purpose.
+ */
+export const SHELL_EVENTS = Object.freeze(["capture_request"]);
+
+/**
  * Every gesture the widget can ask for. Same reasoning, same parity test.
  *
  * The last four are the mouth's words — ask, voice_open, voice_close, caption

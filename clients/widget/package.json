@@ -12,9 +12,11 @@
   },
   "license": "MIT",
   "devDependencies": {
+    "@hono/node-server": "^2.0.12",
     "@types/node": "^26.1.2",
     "@types/ws": "^8.18.1",
     "electron": "^40.0.0",
+    "hono": "^4.12.33",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10",
     "ws": "^8.21.2"

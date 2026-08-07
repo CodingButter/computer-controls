@@ -17,6 +17,7 @@ import { Hono } from "hono";
 
 import type { StateEvent } from "../events/types.ts";
 import { isRefusal, resolveOrbCredential } from "./credentials.ts";
+import { buildCaptureApp, type CaptureRequests } from "./capture.ts";
 import { buildRealtimeSettingsApp } from "./realtime-settings.ts";
 import { buildTokenMintApp } from "./token-mint.ts";
 import { buildOrbApp } from "./routes.ts";
@@ -40,7 +41,17 @@ export {
 export type { RealtimeProviderId, RealtimeProviderDescriptor } from "./providers.ts";
 export { createHubBrain } from "./brain.ts";
 export { createLaneFaceSource } from "./face-source.ts";
+export {
+  CAPTURE_PATH,
+  CAPTURE_TIMEOUT_MS,
+  MAX_CAPTURE_BYTES,
+  NO_FACE_ANSWERED,
+  NO_SUCH_REQUEST,
+  buildCaptureApp,
+  createCaptureRequests,
+} from "./capture.ts";
 
+export type { CaptureRequests } from "./capture.ts";
 export type { OrbEvent, OrbState, OrbStatus, CaptureFrame, CaptureFrameResult } from "./routes.ts";
 export type { HubBrain } from "./brain.ts";
 export type { LaneFaceSource } from "./face-source.ts";
@@ -69,6 +80,14 @@ export type OrbMountOptions = {
    * route stays unit-testable with a stub.
    */
   captureFrame?: CaptureFrame;
+
+  /**
+   * The self-capture round trip, when the hub has one. Mounted unconditionally
+   * alongside the settings and the mint for the same reason they are: whether
+   * the face can be photographed is a machine fact, not session state, and a
+   * hub with no Google credential still has a face on somebody's desk.
+   */
+  captures?: CaptureRequests;
 };
 
 export type OrbMount = {
@@ -92,6 +111,7 @@ export async function mountOrb(options: OrbMountOptions): Promise<OrbMount> {
   // still answers, with the one sentence that says what to fix.
   const composeSettings = (app: Hono): Hono => {
     if (options.settingsPath) app.route("/", buildRealtimeSettingsApp(options.settingsPath));
+    if (options.captures) app.route("/", buildCaptureApp({ requests: options.captures }));
     app.route(
       "/",
       buildTokenMintApp({

@@ -5,7 +5,15 @@ import { describe, expect, test } from "vitest";
 // The shell's manners, importable without starting Electron. `main.js` itself
 // is read as text below rather than imported, because importing it would mean
 // this suite could only run on a machine with a display.
-import { GRANTED_PERMISSIONS, HEIGHT, placeOrb, stageFor } from "./window-shape.js";
+import {
+  GRANTED_PERMISSIONS,
+  HEIGHT,
+  demoRequested,
+  placeOrb,
+  stageFor,
+  windowOptionsFor,
+} from "./window-shape.js";
+import { DEFAULT_TRAY_STATE } from "./tray-state.js";
 import { hubEventsUrl, nextRetryDelay } from "./connection.js";
 import { dashboardUrl } from "./dashboard.js";
 
@@ -211,6 +219,37 @@ describe("the permissions", () => {
     expect(main).toContain("callback({ video: undefined, audio: undefined })");
   });
 
+  test("the face may photograph itself, and there is no second thing it can photograph", () => {
+    // The one capture this widget can perform, and the reason it is not the
+    // hole the test above closes.
+    //
+    // `capturePage` is a main-process method on a `webContents` — it takes a
+    // picture of the page that `webContents` is rendering, and there is no
+    // argument that redirects it at another window or at the desktop. That is
+    // categorically different from `desktopCapturer` and `getDisplayMedia`,
+    // which are ways of asking the desktop for pixels and which stay banned in
+    // every file, forever. So this one is allowed, in one file, on one
+    // receiver, and both halves are checked: the name may appear only in
+    // main.js, and every call must be made on this window's own webContents.
+    for (const name of shipped.filter((file) => file !== "main.js")) {
+      expect(code(name), `${name} must not reach for capturePage`).not.toContain("capturePage");
+    }
+    expect(face, "the face must not reach for capturePage").not.toContain("capturePage");
+
+    const main = code("main.js");
+    const receivers = [...main.matchAll(/([A-Za-z0-9_.]*)\.capturePage\(/g)].map((m) => m[1]);
+    expect(receivers, "capturePage may only be called on this window").toEqual([
+      "window.webContents",
+    ]);
+
+    // And the rectangle is the orb's, not the window's. The window is a whole
+    // transparent display, so a capture with no rectangle — or with one this
+    // file computed itself — is a picture of the desktop behind the face,
+    // which is the exact capability the suite exists to deny. The geometry
+    // comes from the shared helper, which is tested against the stage.
+    expect(main).toContain("window.webContents.capturePage(captureRect(stage, orb))");
+  });
+
   test("the renderer stays a document", () => {
     // Node inside the page would be a way around every line above, since a
     // page with `require` does not need a permission to read a device.
@@ -243,19 +282,28 @@ describe("the network", () => {
     expect(connection).not.toContain("process.env.COMCON_WIDGET_HOST");
   });
 
-  test("main holds exactly one HTTP client, aimed at the hub's token mint", () => {
-    // The one fetch this segment opened: the mint rides main so the renderer
-    // never learns the hub's port twice. It is one call, to a loopback
-    // address built from a constant host — and every other file still holds
-    // no HTTP client, no telemetry, no second socket.
+  test("main holds the only HTTP client, and it dials the hub and nothing else", () => {
+    // Two calls, both to the hub, both to a loopback address built from the
+    // one constant host: the token mint, so the renderer never learns the
+    // hub's port twice, and the capture answer, which carries the picture the
+    // face took of itself back to whoever asked for it. Every other file still
+    // holds no HTTP client, no telemetry, no second socket.
+    //
+    // Pinned by count as well as by address. A third fetch appearing in main
+    // is a new place bytes can leave this machine, and it should have to be
+    // written into this test by a person before it ships.
     const main = code("main.js");
     const fetches = [...main.matchAll(/fetch\(/g)];
-    // Two, and both of them the hub: the token the mouth dials with, and the
-    // shapes the ears listen for. Training moved to the dashboard, so the
-    // widget asks for the voice print instead of holding a copy of one.
-    expect(fetches).toHaveLength(2);
+    // Three, and every one of them the hub on loopback: the token the mouth
+    // dials with, the shapes the ears listen for, and the picture of its own
+    // face. Training moved to the dashboard, so the widget asks for the voice
+    // print instead of holding a copy of one.
+    expect(fetches).toHaveLength(3);
     expect(main).toContain("`http://127.0.0.1:${hubPort()}/api/orb/token`");
     expect(main).toContain("`http://127.0.0.1:${hubPort()}/api/wake/templates`");
+    expect(main).toContain(
+      "`http://127.0.0.1:${hubPort()}/api/orb/capture/${encodeURIComponent(id)}`",
+    );
 
     for (const name of shipped.filter((file) => file !== "main.js")) {
       const body = code(name);
@@ -324,13 +372,25 @@ describe("the network", () => {
 describe("the shell", () => {
   test("draws and does nothing else", () => {
     const main = read("main.js");
+    const resident = windowOptionsFor({ demo: false });
 
     // Frameless, transparent, on top, and out of the taskbar: an orb on the
-    // desk rather than an application window.
-    expect(main).toContain("frame: false");
-    expect(main).toContain("transparent: true");
-    expect(main).toContain("alwaysOnTop: true");
-    expect(main).toContain("skipTaskbar: true");
+    // desk rather than an application window. Asserted on the value the shell
+    // actually opens with rather than on the text of an object literal, now
+    // that the options are computed.
+    expect(resident.frame).toBe(false);
+    expect(resident.transparent).toBe(true);
+    expect(resident.alwaysOnTop).toBe(true);
+    expect(resident.skipTaskbar).toBe(true);
+
+    // And the shell opens with exactly that value: the options are spread in
+    // whole, with nothing set beside them, so the diff test below is a claim
+    // about the window and not merely about a helper nobody calls.
+    expect(main).toContain("...windowOptionsFor({ demo })");
+    const constructed = main.slice(main.indexOf("new BrowserWindow("));
+    for (const inline of ["frame:", "transparent:", "focusable:", "skipTaskbar:"]) {
+      expect(constructed, `${inline} must come from windowOptionsFor`).not.toContain(inline);
+    }
 
     // Clicks fall through the transparent rectangle by default.
     expect(main).toContain("setIgnoreMouseEvents(true");
@@ -345,13 +405,67 @@ describe("the shell", () => {
     expect(flips).toEqual(["true", "!over"]);
 
     // It never steals what the user was typing into.
-    expect(main).toContain("focusable: false");
+    expect(resident.focusable).toBe(false);
     expect(main).toContain("showInactive()");
 
     // It cannot become a browser: no new windows, no navigation, no webviews.
     expect(main).toContain('action: "deny"');
     expect(main).toContain("will-navigate");
     expect(main).toContain("webviewTag: false");
+  });
+
+  test("being demonstrable changes the window's manners and nothing else", () => {
+    // Demo mode exists because an unfocusable window is override-redirect on
+    // X11 and therefore absent from every list of windows — unrecordable by
+    // OBS, by a screen recorder, and by this project's own window capture.
+    // It buys that back with exactly three options. This is the assertion
+    // that keeps it three: any future option that leaks into the demo branch
+    // fails here, including one that loosened something that matters.
+    const resident = windowOptionsFor({ demo: false });
+    const demo = windowOptionsFor({ demo: true });
+
+    expect(Object.keys(demo).sort()).toEqual(Object.keys(resident).sort());
+    const differing = Object.keys(resident).filter(
+      (key) => (resident as Record<string, unknown>)[key] !== (demo as Record<string, unknown>)[key],
+    );
+    expect(differing.sort()).toEqual(["focusable", "skipTaskbar", "title"]);
+
+    // And in the direction the mode is for: managed by the window manager,
+    // in the switcher, and carrying a name a person can pick out of a list.
+    expect(demo.focusable).toBe(true);
+    expect(demo.skipTaskbar).toBe(false);
+    expect(demo.title).toBe("Mastra CC");
+
+    // The resident window is still the default. Nobody's face becomes
+    // alt-tabbable because they installed an update.
+    expect(DEFAULT_TRAY_STATE.demo).toBe(false);
+    expect(demoRequested(DEFAULT_TRAY_STATE, ["/usr/bin/electron", "."])).toBe(false);
+    expect(demoRequested(DEFAULT_TRAY_STATE, ["/usr/bin/electron", ".", "--comcon-demo"])).toBe(
+      true,
+    );
+    expect(demoRequested({ demo: true }, ["/usr/bin/electron", "."])).toBe(true);
+
+    // One door, not two: the flag and the stored choice, and no environment
+    // variable quietly turning it on for a process nobody launched by hand.
+    expect(read("main.js")).not.toContain("COMCON_DEMO");
+    expect(read("window-shape.js")).not.toContain("COMCON_DEMO");
+  });
+
+  test("demo mode is not a looser program", () => {
+    // The mode makes the window findable. It must not make the widget more
+    // permissive: the microphone carve-out, the permanent refusal of display
+    // capture, and the click-through are not conditioned on it anywhere.
+    const main = read("main.js");
+    const guard = main.slice(main.indexOf("function guardPermissions"), main.indexOf("app.whenReady"));
+    expect(guard).not.toContain("demo");
+    expect(main).toContain("setDisplayMediaRequestHandler");
+
+    const shape = read("window-shape.js");
+    const options = shape.slice(shape.indexOf("export function windowOptionsFor"));
+    const body = options.slice(0, options.indexOf("\n}"));
+    for (const forbidden of ["webPreferences", "nodeIntegration", "sandbox", "contextIsolation"]) {
+      expect(body, `${forbidden} is not a window manner`).not.toContain(forbidden);
+    }
   });
 
   test("hands the page what it needs and nothing it shouldn't", () => {

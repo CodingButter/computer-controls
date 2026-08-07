@@ -1,12 +1,15 @@
-import { createServer } from "node:http";
+import { serve } from "@hono/node-server";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import WebSocket from "ws";
 
 import { ScriptedEventSource } from "../../../client/src/events/source.ts";
 import { attachEventSocket } from "../../../client/src/events/socket.ts";
+import { combineEventSources } from "../../../client/src/events/touch-lane.ts";
+import { buildCaptureApp, createCaptureRequests } from "../../../client/src/orb/capture.ts";
 import { INITIAL_STATE, applyGesture, fade, reduce } from "./state-machine.js";
 import { paintCaption, scoutRects } from "./paint.js";
+import { captureRect, stageFor } from "./window-shape.js";
 
 /**
  * A turn, from the hub's mouth to the widget's face.
@@ -23,19 +26,22 @@ import { paintCaption, scoutRects } from "./paint.js";
  * runs, which is exactly the seam most likely to break.
  */
 
-let server: ReturnType<typeof createServer>;
+let server: ReturnType<typeof serve>;
 let source: ScriptedEventSource;
+let captures: ReturnType<typeof createCaptureRequests>;
 let socket: ReturnType<typeof attachEventSocket>;
 let port: number;
 
 beforeEach(async () => {
-  server = createServer((_request, response) => {
-    response.writeHead(404);
-    response.end();
-  });
   source = new ScriptedEventSource();
-  socket = attachEventSocket(server, source);
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  captures = createCaptureRequests();
+  // The hub's own routes, not a stand-in: the capture round trip is half HTTP
+  // and half socket, and a test that faked either half would be checking the
+  // half it wrote.
+  const app = buildCaptureApp({ requests: captures });
+  server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 0 });
+  socket = attachEventSocket(server, combineEventSources(source, captures.source));
+  await new Promise<void>((resolve) => server.once("listening", () => resolve()));
   port = (server.address() as AddressInfo).port;
 });
 
@@ -44,15 +50,37 @@ afterEach(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-/** A widget: the real modules, wired the way the renderer wires them. */
-function widget() {
+/**
+ * A widget: the real modules, wired the way the renderer wires them.
+ *
+ * `shell` stands in for the one thing that cannot run here — Electron taking a
+ * picture of its own window. Everything around it is real: the lane word, the
+ * rectangle the real geometry helper computes, the loopback POST main makes,
+ * and the hub route on the other end.
+ */
+function widget(shell?: { capturePage(rect: Rect): Uint8Array | undefined }) {
   const ws = new WebSocket(`ws://127.0.0.1:${port}/events`);
   let state = INITIAL_STATE;
   const painted = { textContent: "" };
   const captions: string[] = [];
+  const photographed: Rect[] = [];
 
-  ws.on("message", (raw: Buffer) => {
-    state = reduce(state, JSON.parse(raw.toString()));
+  ws.on("message", async (raw: Buffer) => {
+    const event = JSON.parse(raw.toString());
+    if (event.type === "capture_request" && shell) {
+      const stage = stageFor(DISPLAY, "corner");
+      const rect = captureRect(stage, stage.orb);
+      photographed.push(rect);
+      const png = shell.capturePage(rect);
+      if (png) {
+        await fetch(`http://127.0.0.1:${port}/api/orb/capture/${event.id}`, {
+          method: "POST",
+          headers: { "content-type": "image/png" },
+          body: png.slice(),
+        });
+      }
+    }
+    state = reduce(state, event);
     paintCaption(painted, state.caption);
     captions.push(painted.textContent);
   });
@@ -67,6 +95,7 @@ function widget() {
       return painted.textContent;
     },
     captions,
+    photographed,
     gesture(g: { type: string; x?: number; y?: number }) {
       state = applyGesture(state, g);
       ws.send(JSON.stringify(g));
@@ -76,6 +105,17 @@ function widget() {
 
 /** Let everything in flight arrive. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 40));
+
+type Rect = { x: number; y: number; width: number; height: number };
+
+/** One ordinary monitor, so the geometry in the capture test is checkable by hand. */
+const DISPLAY = {
+  bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+  workArea: { x: 0, y: 0, width: 1920, height: 1080 },
+};
+
+/** The smallest thing that is a PNG as far as every reader is concerned. */
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01, 0x02]);
 
 test("a turn: the face arrives when spoken to, says what was said, and fades", async () => {
   const face = widget();
@@ -258,4 +298,77 @@ test("the hub keeps talking after a face disappears mid-sentence", async () => {
   expect(replacement.onScreen).toBe("back again");
 
   replacement.ws.close();
+});
+
+test("an agent asks what the face looks like and gets the face's own pixels", async () => {
+  const face = widget({ capturePage: () => PNG });
+  await face.opened;
+  source.emit({ type: "wake_opened" });
+  await settle();
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/orb/capture`);
+
+  expect(response.status).toBe(200);
+  expect(response.headers.get("content-type")).toBe("image/png");
+  expect(new Uint8Array(await response.arrayBuffer())).toEqual(PNG);
+
+  // The rectangle the face was asked for is the orb's box, not the window's.
+  // This is the whole security claim of the lane, checked end to end: the
+  // window covers a 1920x1080 display and the picture is 360x260 of it.
+  expect(face.photographed).toEqual([{ x: 1536, y: 796, width: 360, height: 260 }]);
+
+  // And being photographed changed nothing about what is drawn.
+  expect(face.state.activity).toBe("listening");
+  expect(face.onScreen).toBe("");
+
+  face.ws.close();
+});
+
+test("nobody is watching, so the hub says so instead of waiting forever", async () => {
+  // No face attached at all. A request that hung would be worse than a refusal:
+  // an agent waiting on a widget that is not running has no way to find out.
+  const started = Date.now();
+  const response = await fetch(`http://127.0.0.1:${port}/api/orb/capture`);
+
+  expect(response.status).toBe(504);
+  expect(await response.json()).toEqual({ error: "No face answered within two seconds." });
+  expect(Date.now() - started).toBeLessThan(4_000);
+}, 10_000);
+
+test("a face that hears the ask and cannot take the picture is the same as no face", async () => {
+  // A hidden or disabled widget declines rather than sending a stale frame. The
+  // hub's answer is the truth either way: nobody answered.
+  const face = widget({ capturePage: () => undefined });
+  await face.opened;
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/orb/capture`);
+
+  expect(response.status).toBe(504);
+  expect(face.photographed).toHaveLength(1);
+
+  face.ws.close();
+}, 10_000);
+
+test("a stranger cannot post a picture into somebody else's request", async () => {
+  // The ids are what stand between a caller on this machine and a picture of a
+  // desk corner, so an id nobody is waiting on gets one shape of refusal — the
+  // same one an expired id and an already-answered id get.
+  const face = widget({ capturePage: () => PNG });
+  await face.opened;
+
+  const posted = await fetch(`http://127.0.0.1:${port}/api/orb/capture/not-a-real-id`, {
+    method: "POST",
+    headers: { "content-type": "image/png" },
+    body: PNG.slice(),
+  });
+
+  expect(posted.status).toBe(404);
+  expect(await posted.json()).toEqual({ error: "No capture was waiting under that id." });
+
+  // And the real round trip still works afterwards: a refused stranger is not a
+  // hub that stopped answering.
+  const response = await fetch(`http://127.0.0.1:${port}/api/orb/capture`);
+  expect(response.status).toBe(200);
+
+  face.ws.close();
 });

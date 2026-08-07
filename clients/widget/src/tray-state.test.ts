@@ -23,10 +23,11 @@ import {
  */
 
 describe("the defaults", () => {
-  test("auto-hide on, disabled off", () => {
+  test("auto-hide on, disabled off, demo off", () => {
     // The product's posture for a fresh install: a face that tidies itself
-    // away, and a widget that works because it was installed.
-    expect(DEFAULT_TRAY_STATE).toEqual({ autoHide: true, disabled: false });
+    // away, a widget that works because it was installed, and the resident
+    // window rather than the recordable one.
+    expect(DEFAULT_TRAY_STATE).toEqual({ autoHide: true, disabled: false, demo: false });
   });
 
   test("an absent file is a first run", () => {
@@ -47,22 +48,24 @@ describe("reading it back", () => {
   });
 
   test("what was written is what comes back", () => {
-    writeTrayState(file(), { autoHide: false, disabled: true });
-    expect(readTrayState(file())).toEqual({ autoHide: false, disabled: true });
+    writeTrayState(file(), { autoHide: false, disabled: true, demo: true });
+    expect(readTrayState(file())).toEqual({ autoHide: false, disabled: true, demo: true });
   });
 
   test("every combination survives the round trip", () => {
     for (const autoHide of [true, false]) {
       for (const disabled of [true, false]) {
-        writeTrayState(file(), { autoHide, disabled });
-        expect(readTrayState(file())).toEqual({ autoHide, disabled });
+        for (const demo of [true, false]) {
+          writeTrayState(file(), { autoHide, disabled, demo });
+          expect(readTrayState(file())).toEqual({ autoHide, disabled, demo });
+        }
       }
     }
   });
 
   test("writing creates the directory it needs", () => {
     const nested = path.join(dir, "made", "up", "tray-state.json");
-    writeTrayState(nested, { autoHide: false, disabled: false });
+    writeTrayState(nested, { autoHide: false, disabled: false, demo: false });
     expect(existsSync(nested)).toBe(true);
     expect(readTrayState(nested).autoHide).toBe(false);
   });
@@ -83,10 +86,10 @@ describe("reading it back", () => {
     // A user who turned auto-hide off keeps that choice even if the other
     // boolean got hand-edited into noise.
     writeFileSync(file(), JSON.stringify({ autoHide: false, disabled: "yes please" }));
-    expect(readTrayState(file())).toEqual({ autoHide: false, disabled: false });
+    expect(readTrayState(file())).toEqual({ autoHide: false, disabled: false, demo: false });
 
-    writeFileSync(file(), JSON.stringify({ autoHide: "sometimes", disabled: true }));
-    expect(readTrayState(file())).toEqual({ autoHide: true, disabled: true });
+    writeFileSync(file(), JSON.stringify({ autoHide: "sometimes", disabled: true, demo: true }));
+    expect(readTrayState(file())).toEqual({ autoHide: true, disabled: true, demo: true });
   });
 
   test("a failed write is silent, and the tray is still a tray", () => {
@@ -100,26 +103,43 @@ describe("reading it back", () => {
 });
 
 describe("what lands on disk", () => {
-  test("two booleans and nothing else", () => {
+  test("three booleans and nothing else", () => {
     // Deliberately tiny, like the placement file: nothing here for a future
     // feature to smuggle a preference into.
-    expect(JSON.parse(encodeTrayState({ autoHide: true, disabled: false }))).toEqual({
+    expect(JSON.parse(encodeTrayState({ autoHide: true, disabled: false, demo: false }))).toEqual({
       autoHide: true,
       disabled: false,
+      demo: false,
     });
   });
 
   test("whatever truthiness arrives, booleans leave", () => {
     const parsed = JSON.parse(
-      encodeTrayState({ autoHide: 1 as unknown as boolean, disabled: 0 as unknown as boolean }),
+      encodeTrayState({
+        autoHide: 1 as unknown as boolean,
+        disabled: 0 as unknown as boolean,
+        demo: "yes" as unknown as boolean,
+      }),
     );
-    expect(parsed).toEqual({ autoHide: true, disabled: false });
+    expect(parsed).toEqual({ autoHide: true, disabled: false, demo: true });
   });
 
   test("decode is field-by-field, not all-or-nothing", () => {
     expect(decodeTrayState(JSON.stringify({ disabled: true }))).toEqual({
       autoHide: true,
       disabled: true,
+      demo: false,
+    });
+  });
+
+  test("a settings file written before demo mode existed opens the resident window", () => {
+    // The upgrade path, stated as a test: the field the old file has never
+    // heard of defaults off, so nobody's face becomes alt-tabbable because
+    // they installed an update.
+    expect(decodeTrayState(JSON.stringify({ autoHide: false, disabled: false }))).toEqual({
+      autoHide: false,
+      disabled: false,
+      demo: false,
     });
   });
 
@@ -128,9 +148,11 @@ describe("what lands on disk", () => {
     // never an append or a partial update.
     const dir = mkdtempSync(path.join(tmpdir(), "tray-state-"));
     const file = path.join(dir, "tray-state.json");
-    writeTrayState(file, { autoHide: true, disabled: true });
-    writeTrayState(file, { autoHide: false, disabled: false });
-    expect(readFileSync(file, "utf8")).toBe(encodeTrayState({ autoHide: false, disabled: false }));
+    writeTrayState(file, { autoHide: true, disabled: true, demo: true });
+    writeTrayState(file, { autoHide: false, disabled: false, demo: false });
+    expect(readFileSync(file, "utf8")).toBe(
+      encodeTrayState({ autoHide: false, disabled: false, demo: false }),
+    );
     rmSync(dir, { recursive: true, force: true });
   });
 });
