@@ -95,7 +95,9 @@ export function Overview(props: {
         }
         detail={[
           h.plugins.admitted.join(", "),
-          h.plugins.refused.length > 0 ? `refused: ${h.plugins.refused.join(", ")}` : "",
+          h.plugins.refused.length > 0
+            ? `refused: ${h.plugins.refused.map((plugin) => plugin.name).join(", ")}`
+            : "",
         ]
           .filter(Boolean)
           .join(" — ")}

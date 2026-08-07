@@ -13,11 +13,21 @@ export type ModelPack = {
   tiers: Record<string, string>;
 };
 
+/**
+ * A plugin the hub found installed and did not mount.
+ *
+ * The reason is optional because today's hub reports refusals as bare ids. A
+ * refusal without a reason is a defect worth showing rather than hiding, so
+ * the shape keeps the gap visible instead of inventing a sentence for it —
+ * and reads the reason the day the hub starts sending one.
+ */
+export type RefusedPlugin = { name: string; reason?: string };
+
 export type HubHealth = {
   ok: boolean;
   tools: readonly string[];
   desktopScope?: string;
-  plugins: { admitted: readonly string[]; refused: readonly string[] };
+  plugins: { admitted: readonly string[]; refused: readonly RefusedPlugin[] };
   model?: ModelPack;
   voice?: CapabilityStatus;
   orb?: CapabilityStatus;
@@ -54,12 +64,36 @@ export function parseHealth(body: unknown): HubHealth {
     desktopScope: typeof raw.desktopScope === "string" ? raw.desktopScope : undefined,
     plugins: {
       admitted: asStringArray(plugins.admitted),
-      refused: asStringArray(plugins.refused),
+      refused: parseRefused(plugins.refused),
     },
     model: parseModel(raw.model),
     voice: parseCapability(raw.voice),
     orb: parseCapability(raw.orb),
   };
+}
+
+/**
+ * Refusals, whether the hub names them or explains them.
+ *
+ * A bare id is the shape the hub sends today; an object with a reason is the
+ * shape it may send later. An entry that is neither is dropped, because a row
+ * with no name is nothing a person can act on.
+ */
+function parseRefused(value: unknown): readonly RefusedPlugin[] {
+  if (!Array.isArray(value)) return [];
+  const refused: RefusedPlugin[] = [];
+  for (const entry of value) {
+    if (typeof entry === "string") {
+      refused.push({ name: entry });
+      continue;
+    }
+    if (typeof entry !== "object" || entry === null) continue;
+    const raw = entry as Record<string, unknown>;
+    const name = typeof raw.name === "string" ? raw.name : typeof raw.id === "string" ? raw.id : undefined;
+    if (name === undefined) continue;
+    refused.push(typeof raw.reason === "string" ? { name, reason: raw.reason } : { name });
+  }
+  return refused;
 }
 
 function parseModel(value: unknown): ModelPack | undefined {

@@ -11,7 +11,7 @@ const HEALTH: Fetched<HubHealth> = {
     ok: true,
     tools: Array.from({ length: 37 }, (_, i) => `tool_${i}`),
     desktopScope: "observe",
-    plugins: { admitted: ["desktop-control", "memorease"], refused: ["plan"] },
+    plugins: { admitted: ["desktop-control", "memorease"], refused: [{ name: "plan" }] },
     model: {
       pack: "computer-controls-anthropic",
       tiers: { minimal: "anthropic/claude-haiku-4-5", heavy: "anthropic/claude-opus-4-6" },
