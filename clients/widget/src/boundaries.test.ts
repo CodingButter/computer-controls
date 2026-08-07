@@ -77,7 +77,6 @@ describe("the ears", () => {
     expect(shipped).toContain("preload.js");
     expect(shipped).toContain("ears.js");
     expect(shipped).toContain("mouth.js");
-    expect(shipped).toContain("ear-worker.js");
     expect(shipped.length).toBeGreaterThan(8);
 
     // The doors this segment opened, each in one named file. The ears own
@@ -159,17 +158,20 @@ describe("the ears", () => {
     expect(ears).toContain('from "./vendor/live/gate.js"');
   });
 
-  test("the ear's model runs from disk, never the network", () => {
-    const worker = read("ear-worker.js");
-    // A missing model is a widget with no ear — never a widget that quietly
-    // phones Hugging Face at first run.
-    expect(worker).toContain("env.allowRemoteModels = false");
-    expect(worker).toContain("env.allowLocalModels = true");
-    expect(worker).toContain('env.localModelPath = new URL("./vendor/ear/model/"');
-    expect(worker).toContain('new URL("./vendor/ear/lib/"');
-    // One thread: more would need SharedArrayBuffer, which needs COOP/COEP,
-    // which the spike proved unnecessary.
-    expect(worker).toContain("numThreads = 1");
+  test("the wake decision is a shape, and nothing here writes down what was said", () => {
+    const ears = read("ears.js");
+    // The matcher is the hub's own, vendored and pinned byte-for-byte — not a
+    // local reimplementation whose threshold nobody measured.
+    expect(ears).toContain('from "./vendor/live/fingerprint.js"');
+    // No transcriber, in any file: the twenty-six megabyte model that used to
+    // read every utterance in this room is gone, and re-introducing one would
+    // put words back in a decision that no longer needs them.
+    for (const name of shipped) {
+      const body = code(name);
+      for (const gone of ["transformers", "ear-worker", "transcribe", "pipeline("]) {
+        expect(body, `${name} must not reach for ${gone}`).not.toContain(gone);
+      }
+    }
   });
 });
 
@@ -248,8 +250,12 @@ describe("the network", () => {
     // no HTTP client, no telemetry, no second socket.
     const main = code("main.js");
     const fetches = [...main.matchAll(/fetch\(/g)];
-    expect(fetches).toHaveLength(1);
+    // Two, and both of them the hub: the token the mouth dials with, and the
+    // shapes the ears listen for. Training moved to the dashboard, so the
+    // widget asks for the voice print instead of holding a copy of one.
+    expect(fetches).toHaveLength(2);
     expect(main).toContain("`http://127.0.0.1:${hubPort()}/api/orb/token`");
+    expect(main).toContain("`http://127.0.0.1:${hubPort()}/api/wake/templates`");
 
     for (const name of shipped.filter((file) => file !== "main.js")) {
       const body = code(name);
@@ -388,12 +394,14 @@ describe("the shell", () => {
         !after.startsWith('.invoke("wid'),
     );
     expect(passedAlong, "ipcRenderer may only be used on a named channel").toEqual([]);
-    // And the ask is exactly one channel: the mint. A second invoke is a
-    // second question this bridge was never designed to carry.
+    // And the asks are exactly two channels, both of them the hub answering
+    // through the shell: the token to dial with, and the shapes to listen
+    // for. Anything else is a question this bridge was never designed to
+    // carry.
     const invokes = [...body.matchAll(/ipcRenderer\.invoke\(\s*("[^"]*")/g)].map(
       (match) => match[1],
     );
-    expect(invokes).toEqual(['"widget:mint-token"']);
+    expect(invokes).toEqual(['"widget:mint-token"', '"widget:wake-templates"']);
   });
 
   test("sits out of the way by default and centres only when asked", () => {

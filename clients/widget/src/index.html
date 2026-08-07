@@ -81,21 +81,6 @@
       <button id="menu-dismiss" type="button">Dismiss</button>
       <button id="menu-quit" type="button">Quit</button>
     </div>
-    <!--
-      The enrollment surface: tune the wake word to the user's own voice.
-      Shown on first launch and from the tray menu; claims the pointer while
-      open, like the menu above. The phrase is fixed, the takes are recorded
-      on this page (the one document with a microphone), and the scores are
-      per-take consistency against what was recorded so far.
-    -->
-    <div id="enrollment" class="hidden">
-      <p>Say: <span data-enroll-phrase>hey mastra</span></p>
-      <div data-enroll-takes></div>
-      <div>
-        <button type="button" data-enroll-save disabled>Save</button>
-        <button type="button" data-enroll-skip>Skip</button>
-      </div>
-    </div>
     <script type="module" src="renderer.js"></script>
   </body>
 </html>

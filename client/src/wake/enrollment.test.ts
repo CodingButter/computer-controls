@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, test } from "vitest";
 
 import { ENROLLED_WAKE_WEIGHT } from "../live/fingerprint.ts";
 import {
@@ -9,6 +9,7 @@ import {
   scoreTake,
   SCORE_FLOOR_DISTANCE,
   TARGET_TAKES,
+  trimToSpeech,
 } from "./enrollment.ts";
 
 const RATE = 16_000;
@@ -79,7 +80,7 @@ describe("the score under a take", () => {
 
 describe("assembling an enrolment", () => {
   it("returns one template and one score per take", () => {
-    const takes = [utterance(0), utterance(0), utterance(0)];
+    const takes = Array.from({ length: TARGET_TAKES }, () => utterance(0));
     const { templates, scores } = assembleTemplates(takes, { phrase: "hey mastra", sampleRate: RATE });
     expect(templates).toHaveLength(TARGET_TAKES);
     expect(scores).toHaveLength(TARGET_TAKES);
@@ -108,5 +109,46 @@ describe("assembling an enrolment", () => {
     });
     const last = (s: number[]) => s[s.length - 1] ?? 0;
     expect(last(consistent.scores)).toBeGreaterThan(last(wandering.scores));
+  });
+});
+
+describe("a template is the phrase, not the window it was recorded in", () => {
+  test("silence either side of the speech is cut away before any frame is made", () => {
+    const rate = 16_000;
+    const samples = new Int16Array(rate * 2); // two seconds, nearly all silence
+    // Half a second of speech, starting half a second in.
+    for (let i = rate / 2; i < rate; i += 1) {
+      samples[i] = Math.round(8000 * Math.sin((2 * Math.PI * 220 * i) / rate));
+    }
+    const trimmed = trimToSpeech(samples, rate);
+    // The speech plus the padding either side, and nothing like the two
+    // seconds it was recorded in.
+    expect(trimmed.length).toBeGreaterThan(rate / 2);
+    expect(trimmed.length).toBeLessThan(rate);
+  });
+
+  test("a take with nothing in it is handed back whole rather than emptied", () => {
+    const samples = new Int16Array(16_000);
+    expect(trimToSpeech(samples, 16_000).length).toBe(16_000);
+  });
+
+  test("the same phrase recorded in a longer window makes the same template", () => {
+    const rate = 16_000;
+    // As long as the phrase actually is: "hey mastra" runs about this.
+    const speech = new Int16Array(Math.round(rate * 1.3));
+    for (let i = 0; i < speech.length; i += 1) {
+      speech[i] = Math.round(6000 * Math.sin((2 * Math.PI * 180 * i) / rate));
+    }
+    // The window the dashboard records into, with the phrase somewhere inside.
+    const padded = new Int16Array(Math.round(rate * 2.5));
+    padded.set(speech, rate / 2);
+    // This is the bug the trimming exists for: an unpadded live utterance and
+    // a padded enrolled take have to produce templates of comparable length,
+    // or the matcher's band refuses them before it has looked at the voice.
+    const tight = extractFeatures(speech, rate);
+    const wide = extractFeatures(padded, rate);
+    // Inside the matcher's band, which is what "comparable" means here: a
+    // template more than a quarter longer than the utterance is unmatchable.
+    expect(Math.abs(tight.length - wide.length)).toBeLessThan(tight.length * 0.25);
   });
 });

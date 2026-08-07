@@ -1,27 +1,19 @@
 /**
- * The proof-of-concept ear chain: enough ear to hold the seams open.
+ * The detectors that are not the matcher.
  *
- * The real tier-one ear — a local Moonshine transcriber — and the real Tier 0.5
- * wake-word detector — openWakeWord configured for "Mastra" — have not landed
- * yet. The proof of concept does not wait for them. What this file supplies is
- * the minimum that keeps every interface honest in the meantime.
+ * The VAD here is real and is what ships — a plain amplitude threshold, which
+ * is enough for the gate's silence accounting and cheap enough to run on every
+ * frame. The two wake-word detectors are ends of the range rather than
+ * placeholders: one that never hears the phrase and one that always does.
  *
- * The VAD is real — a plain amplitude threshold, which is enough for the gate's
- * silence accounting. The wake word and the ear are deliberately deaf: the name
- * is never heard and nothing is transcribed, so the wake path CANNOT open the
- * gate. That is not a gap, it is the proof-of-concept's shape stated in code:
- * the only way this gate opens is the deliberate act of a person, and swapping
- * in a real wake word and ear later widens nothing silently.
+ * Both still earn their place now that a real matcher exists. A test proving
+ * that idle audio stays home wants a detector that cannot open the gate, and a
+ * test exercising everything downstream of the gate wants one that cannot keep
+ * it shut. Neither test should have to synthesise a waveform that happens to
+ * match a cepstral template in order to say what it means.
  */
 
-import type {
-  AudioFrame,
-  Classifier,
-  LocalEar,
-  VoiceActivityDetector,
-  WakeWordDetector,
-} from "./ear.ts";
-import { createWakeWordClassifier } from "./ear.ts";
+import type { AudioFrame, VoiceActivityDetector, WakeWordDetector } from "./ear.ts";
 
 /**
  * Mean absolute amplitude above which a frame counts as speech. Int16 samples
@@ -45,27 +37,11 @@ export function createAmplitudeVad(
 }
 
 /**
- * An ear that hears nothing, on purpose.
+ * A wake-word detector that never hears the phrase, on purpose.
  *
- * An empty transcript is a closed gate — the gate discards untranscribable
- * utterances rather than opening on them — so this ear is the safest possible
- * placeholder: it can never turn ambient speech into network audio.
- */
-export const deafEar: LocalEar = {
-  languages: [],
-  async transcribe(): Promise<string> {
-    return "";
-  },
-};
-
-/**
- * A wake-word detector that never hears the name, on purpose.
- *
- * A false negative on the wake word costs a repeated sentence; a false positive
- * costs audio leaving the machine. So the safe placeholder never answers true:
- * speech never reaches the ear from here, which is the closed direction. The real
- * detector will run openWakeWord configured for "Mastra"; until it lands this
- * keeps the seam honest.
+ * A false negative costs a repeated sentence; a false positive costs audio
+ * leaving the machine. This is the closed direction, and it is what a detector
+ * with no templates loaded degrades to — deaf rather than trigger-happy.
  */
 export const deafWakeWord: WakeWordDetector = {
   heard(): boolean {
@@ -75,10 +51,9 @@ export const deafWakeWord: WakeWordDetector = {
 };
 
 /**
- * A wake-word detector that always hears the name — the test double for orbs
- * that exercise the path past the wake tier. Production mounts the deaf word;
- * tests that need the gate to open on speech mount this one so the wake tier
- * stays transparent.
+ * A wake-word detector that always hears the phrase — the test double for
+ * anything exercising the path past the wake tier. Nothing that ships mounts
+ * it: a gate that always opens is not a gate.
  */
 export const alwaysWakeWord: WakeWordDetector = {
   heard(): boolean {
@@ -90,16 +65,12 @@ export const alwaysWakeWord: WakeWordDetector = {
 export type PocEarChain = {
   vad: VoiceActivityDetector;
   wakeWord: WakeWordDetector;
-  ear: LocalEar;
-  classifier: Classifier;
 };
 
-/** The chain the proof of concept mounts: real detector, deaf wake word, deaf ear. */
+/** A chain that can never open on its own: real detector, deaf wake word. */
 export function pocEarChain(threshold?: number): PocEarChain {
   return {
     vad: createAmplitudeVad(threshold),
     wakeWord: deafWakeWord,
-    ear: deafEar,
-    classifier: createWakeWordClassifier(),
   };
 }

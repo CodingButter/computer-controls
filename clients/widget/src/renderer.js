@@ -10,7 +10,6 @@
 
 import { connectToHub } from "./connection.js";
 import { plugDecision, startEars } from "./ears.js";
-import { createEnrollment } from "./enrollment.js";
 import { openMouth } from "./mouth.js";
 import {
   isOverVisibleShape,
@@ -33,17 +32,6 @@ const menuDashboard = document.getElementById("menu-dashboard");
 const menuDismiss = document.getElementById("menu-dismiss");
 const menuQuit = document.getElementById("menu-quit");
 const scoutLayer = document.getElementById("scouts");
-const enrollmentElement = document.getElementById("enrollment");
-const enrollment = createEnrollment(enrollmentElement);
-
-/*
- * The enrollment surface is opened by the shell — on first launch when no
- * templates are enrolled, or from the tray menu — and claims the pointer while
- * it is open, exactly like the right-click menu. The mousemove and contextmenu
- * handlers below check `enrollment.isOpen()` so they do not fight the overlay's
- * own pointer claim.
- */
-window.widget.onStartEnrollment(() => enrollment.open());
 
 /*
  * Which piece of desk this window is, and therefore what "here" means.
@@ -276,7 +264,7 @@ async function startListening() {
   if (ears) return;
   try {
     ears = await startEars({
-      onOpen: (hearing) => {
+      onOpen: (waking) => {
         mouthOpen = true;
         state = reduce(state, { type: "wake_opened" });
         paint();
@@ -287,7 +275,7 @@ async function startListening() {
             isOpen: () => hubConnected,
           },
           mintToken: () => window.widget.mintToken(),
-          transcript: hearing.transcript,
+          opening: waking.utterance,
           onCaption: (text) => {
             state = reduce(state, { type: "caption", text });
             paint();
@@ -379,9 +367,6 @@ window.addEventListener("mousemove", (event) => {
   // and a mousemove that released clicks would drop the menu through the
   // floor.
   if (menuVisible) return;
-  // The enrollment overlay owns the pointer while it is open, for the same
-  // reason as the menu.
-  if (enrollment.isOpen()) return;
   // A drag locks it for a harder reason. A hand moving faster than the window
   // follows leaves the pointer outside the orb for a frame, and releasing the
   // claim there would hand the rest of the gesture — including the mouseup —
@@ -436,9 +421,6 @@ function hideMenu() {
 
 window.addEventListener("contextmenu", (event) => {
   event.preventDefault();
-  // The enrollment overlay owns the pointer while it is open; a right-click
-  // would open the menu underneath it and steal the claim.
-  if (enrollment.isOpen()) return;
   if (menuVisible) hideMenu();
   else showMenu(event.clientX, event.clientY);
 });

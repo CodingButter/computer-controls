@@ -10,12 +10,19 @@
  * distance of 17.0; the nearest non-wake utterance to any enrolment sits at
  * 16.4, and the median enrolment's nearest negative at 21.8.
  *
- * 18 is where that leaves it: 62% of a person's own unseen takes admitted for
- * one false accept in 1,350. A miss costs a person a second and a repeat. A
- * false accept costs them a machine that starts listening while they are
- * talking to someone else, which is the failure that gets a microphone
- * unplugged for good. The asymmetry is the whole reason the number is not
- * higher.
+ * A miss costs a person a second and a repeat. A false accept costs them a
+ * machine that starts listening while they are talking to someone else, which
+ * is the failure that gets a microphone unplugged for good. The asymmetry is
+ * the whole reason the number is not higher than it is.
+ *
+ * 20 is where the first live evidence put it. Everything above is synthesised
+ * speech; the first person to enrol at a real microphone and then say the
+ * phrase into a real room landed his own utterances between 18 and 19, his own
+ * enrolment's self-agreement at 12.8, and the nearest of the same 135 negatives
+ * at 22.1 — so 18 sat exactly on his voice and refused it about half the time,
+ * while 20 clears his good attempts with two points still standing between the
+ * gate and anything false. Numbers from a room beat numbers from a corpus, and
+ * this one moved because of a person, not a sweep.
  *
  * What the same script says about the factory bank is the reason enrolment is
  * not optional: a stranger's voice against other strangers' templates admits
@@ -23,7 +30,7 @@
  * gets a person to the enrolment page. Their own takes are what makes this
  * work.
  */
-export const DEFAULT_WAKE_THRESHOLD = 18;
+export const DEFAULT_WAKE_THRESHOLD = 20;
 /**
  * The ONE home of the enrolled-template weight. An enrolled template's distance
  * is divided by this before the threshold comparison, so the owner's own voice

@@ -2,10 +2,17 @@
  * The wake gate: the one place audio is allowed off this machine.
  *
  * The property this file exists to hold is narrow and testable. While the gate
- * is closed, microphone audio reaches the voice detector and the local ear and
- * stops there — no frame is handed to the realtime provider, and the provider's
- * socket, though open, is muted. Audio is forwarded only after the cheap ear has
- * said both that it was speech and that it was addressed to us.
+ * is closed, microphone audio reaches the voice detector and the wake word
+ * detector and stops there — no frame is handed to the realtime provider, and
+ * the provider's socket, though open, is muted. Audio is forwarded only after
+ * something local has said both that it was speech and that it was the phrase.
+ *
+ * What decides used to be a transcript. It is a shape now. The gate asks the
+ * fingerprint whether the waveform looks like the phrase, and nothing on this
+ * machine ever writes down what was said in order to decide whether to listen
+ * to it — which is a stronger version of the same promise, and the reason a
+ * Swedish spelling of "hey" can no longer keep somebody locked out of their
+ * own computer.
  *
  * This chain runs wherever the microphone lives. It was written for the hub
  * process (#107); the client migration moved the microphones to the devices,
@@ -19,23 +26,30 @@
  * against opening is nothing at all.
  */
 
-import type {
-  AudioFrame,
-  Classifier,
-  Hearing,
-  LocalEar,
-  VoiceActivityDetector,
-  WakeWordDetector,
-} from "./ear.ts";
-import { DEFAULT_SENTIMENT } from "./ear.ts";
+import type { AudioFrame, VoiceActivityDetector, WakeWordDetector } from "./ear.ts";
+
+/**
+ * What the gate says when it opens.
+ *
+ * The utterance that opened it rides along, because it is usually not just the
+ * phrase: a person says "hey mastra, what's the weather" in one breath, and the
+ * audio carrying the question is the same audio that carried the name. Handing
+ * it to the caller is what lets the question be answered rather than asked for
+ * again. A tap on the orb carries nothing — there was no utterance, and
+ * inventing one would be a guess about a person built out of a gesture.
+ */
+export type Waking = {
+  /** The audio that opened the gate, or null when a person opened it by hand. */
+  utterance: AudioFrame | null;
+};
 
 /**
  * Where the gate is.
  *
  * `idle` is the resting state and the private one. `hearing` means the detector
- * found speech and frames are accumulating locally for the ear. `open` means the
- * ear said yes and audio is being forwarded. There is no state in which audio
- * forwards without having passed through the two below it.
+ * found speech and frames are accumulating locally for the wake word. `open`
+ * means the wake word said yes and audio is being forwarded. There is no state
+ * in which audio forwards without having passed through the two below it.
  */
 export type GateState = "idle" | "hearing" | "open";
 
@@ -59,21 +73,21 @@ export const DEFAULT_UTTERANCE_SILENCE_MS = 600;
 export const MAX_UTTERANCE_MS = 15_000;
 
 /**
- * The least actual speech an utterance needs before it is worth transcribing.
+ * The least actual speech an utterance needs before it is worth matching.
  *
  * Shorter than the shortest word anyone wakes a machine with. An amplitude
  * detector opens on a chair creak or a keyboard click, and the buffer that
- * follows is one loud frame plus the silence that closed it — handing that to
- * the ear wastes a model run at best, and at worst feeds a conv encoder an
- * input below its minimum. Measured against speech frames only, not buffer
- * length: the interior pauses an utterance legitimately carries do not count
- * toward being a word.
+ * follows is one loud frame plus the silence that closed it — too short to
+ * carry the phrase, and cheaper to reject here than to run through a cepstral
+ * transform first. Measured against speech frames only, not buffer length: the
+ * interior pauses an utterance legitimately carries do not count toward being
+ * a word.
  */
 export const MIN_SPEECH_MS = 150;
 
 export type GateEvents = {
-  /** The gate opened; audio may now be forwarded. Carries what was heard. */
-  onOpen(hearing: Hearing): void;
+  /** The gate opened; audio may now be forwarded. Carries what opened it. */
+  onOpen(waking: Waking): void;
   /** The gate dropped back to idle after the quiet period. */
   onIdle(): void;
   /**
@@ -88,8 +102,6 @@ export type GateEvents = {
 export type GateDeps = {
   vad: VoiceActivityDetector;
   wakeWord: WakeWordDetector;
-  ear: LocalEar;
-  classifier: Classifier;
   events: GateEvents;
   quietPeriodMs?: number;
   utteranceSilenceMs?: number;
@@ -142,8 +154,6 @@ export class WakeGate {
 
   readonly #vad: VoiceActivityDetector;
   readonly #wakeWord: WakeWordDetector;
-  readonly #ear: LocalEar;
-  readonly #classifier: Classifier;
   readonly #events: GateEvents;
   readonly #quietPeriodMs: number;
   readonly #hold: () => boolean;
@@ -152,8 +162,6 @@ export class WakeGate {
   constructor(deps: GateDeps) {
     this.#vad = deps.vad;
     this.#wakeWord = deps.wakeWord;
-    this.#ear = deps.ear;
-    this.#classifier = deps.classifier;
     this.#events = deps.events;
     this.#quietPeriodMs = deps.quietPeriodMs ?? DEFAULT_QUIET_PERIOD_MS;
     this.#hold = deps.hold ?? (() => false);
@@ -222,9 +230,9 @@ export class WakeGate {
         this.#resetBuffer();
         this.#state = "idle";
         // A blip is not a word. An utterance whose actual speech content is
-        // shorter than the shortest word never reaches the ear — below this
-        // floor the buffer is mostly the silence that closed it, and a small
-        // conv encoder handed near-nothing has crashed on it before.
+        // shorter than the shortest word is never matched — below this floor
+        // the buffer is mostly the silence that closed it, and there is no
+        // phrase in it to find.
         if (speechMs < MIN_SPEECH_MS) return this.#hearing;
         this.#hearing = this.#hearing.then(() => this.#consider(utterance));
       }
@@ -233,32 +241,29 @@ export class WakeGate {
   }
 
   /**
-   * Ask the wake word and the cheap ear about a buffered utterance, and open only
-   * on a yes from both.
+   * Ask the wake word about a buffered utterance, and open only on a yes.
    *
-   * The wake word is checked first because it is cheaper than the ear: speech
-   * without the name never reaches transcription. A transcription failure is a
-   * closed gate. The alternative — opening when the ear could not answer — would
-   * turn every crash in a small local model into audio on the network, which
-   * inverts the point of having the model.
+   * This used to be two questions: does the waveform look like the phrase, and
+   * then, does a transcript of it read as addressed to us. The second one is
+   * gone. It cost a 26MB model that crashed on short inputs, it turned every
+   * failure of that model into a closed gate, and it decided by spelling —
+   * which is how "hey mastra" became "he mastered" and locked out the person
+   * who owns the machine. The shape answers the only question the gate ever
+   * needed answered, and it answers it without writing anything down.
+   *
+   * Still async: it is called from a serialised chain so two utterances can
+   * never be considered at once, and a future matcher that runs somewhere
+   * other than this thread should not have to change this file's shape.
    */
   async #consider(utterance: AudioFrame): Promise<void> {
     if (!this.#wakeWord.heard(utterance)) return;
 
-    let transcript: string;
-    try {
-      transcript = await this.#ear.transcribe(utterance);
-    } catch {
-      return;
-    }
-    if (!transcript.trim()) return;
-
-    const hearing = this.#classifier.classify(transcript);
-    if (!hearing.addressed) return;
-
     this.#state = "open";
     this.#openedSilenceMs = 0;
-    this.#events.onOpen(hearing);
+    // The utterance goes out as the opening audio rather than as a transcript
+    // of itself. Nothing read it; it is simply the first thing the provider
+    // hears, which is also what the person intended it to be.
+    this.#events.onOpen({ utterance });
   }
 
   /** Drop the gate back to idle. The human tapping the orb lands here too. */
@@ -282,15 +287,9 @@ export class WakeGate {
     this.#resetBuffer();
     this.#openedSilenceMs = 0;
     this.#state = "open";
-    this.#events.onOpen({
-      addressed: true,
-      intent: "bare-wake",
-      transcript: "",
-      // A tap is a gesture, not an utterance. There is nothing to read a mood
-      // from, and inventing one from the act of reaching for the orb would be
-      // a guess about a person built out of nothing they said.
-      sentiment: DEFAULT_SENTIMENT,
-    });
+    // A tap is a gesture, not an utterance: there is nothing to send ahead of
+    // what the person is about to say.
+    this.#events.onOpen({ utterance: null });
   }
 
   #discard(): void {
@@ -307,8 +306,4 @@ export class WakeGate {
     this.#silenceMs = 0;
   }
 
-  /** The languages the installed ear may hear, surfaced for health and the UI. */
-  get languages(): readonly string[] {
-    return this.#ear.languages;
-  }
 }

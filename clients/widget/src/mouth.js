@@ -67,21 +67,22 @@ export function bytesFromFrame(frame) {
  *
  * Order matters and is the same order the orb page settled on: the lane's
  * voice_open first, because it is what plugs other ears and must be said
- * before any audio can flow; then the token; then the dial. The wake
- * utterance's transcript is sent as the first turn, so the person who said
- * "Mastra, what's the weather" is answered rather than asked to repeat
- * themselves — the audio that carried the question was spent deciding to
- * open, which is the privacy design working as intended.
+ * before any audio can flow; then the token; then the dial. The utterance
+ * that opened the gate is sent as the first audio, so the person who said
+ * "hey mastra, what's the weather" is answered rather than asked to repeat
+ * themselves. Nothing on this machine transcribed it: the gate decided by
+ * shape, and the words are first read by the provider that was going to hear
+ * them anyway.
  *
  * @param {{
  *   lane: { send: (frame: object) => void, isOpen: () => boolean },
  *   mintToken: () => Promise<{ token?: string, model?: string, error?: string }>,
- *   transcript: string,
+ *   opening: { samples: Int16Array, sampleRate: number } | null,
  *   onCaption?: Function, onState?: Function, onReason?: Function,
  * }} deps
  * @returns {Promise<{ forward: (frame: object) => void, deliver: (frame: object) => void, close: () => Promise<void> }>}
  */
-export async function openMouth({ lane, mintToken, transcript, onCaption, onState, onReason }) {
+export async function openMouth({ lane, mintToken, opening, onCaption, onState, onReason }) {
   if (!lane.isOpen()) {
     throw new Error("The hub's event lane is down, so the mouth stayed shut.");
   }
@@ -223,8 +224,11 @@ export async function openMouth({ lane, mintToken, transcript, onCaption, onStat
     );
     closers.push(() => session.close());
 
-    // The question that opened the gate, answered instead of repeated.
-    if (transcript) void session.sendText(transcript);
+    // The audio that opened the gate goes out ahead of everything else, because
+    // it is usually the question as well as the name: "hey mastra, what's the
+    // weather" is one breath. Nothing on this machine read it — it is sent as
+    // the sound it was, and the provider is the first thing that hears words.
+    if (opening) session.sendAudio(bytesFromFrame(opening));
 
     session.unmute();
     onState?.("listening");

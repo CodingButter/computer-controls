@@ -66,7 +66,7 @@ describe("the mouth's refusals, before any audio machinery exists", () => {
           minted += 1;
           return { token: "t" };
         },
-        transcript: "mastra, hello",
+        opening: null,
       }),
     ).rejects.toThrow("The hub's event lane is down, so the mouth stayed shut.");
     expect(sent).toEqual([]);
@@ -79,7 +79,7 @@ describe("the mouth's refusals, before any audio machinery exists", () => {
       openMouth({
         lane: { send: (frame: object) => sent.push(frame), isOpen: () => true },
         mintToken: async () => ({ error: "No Google account is connected, so the orb has no voice." }),
-        transcript: "mastra, hello",
+        opening: null,
       }),
     ).rejects.toThrow("No Google account is connected, so the orb has no voice.");
     // voice_open was said before the mint — that is the design's order — so

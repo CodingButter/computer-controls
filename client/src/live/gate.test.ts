@@ -1,17 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  createWakeWordClassifier,
-  type AudioFrame,
-  type LocalEar,
-  type VoiceActivityDetector,
-  type WakeWordDetector,
-} from "./ear.ts";
+import type { AudioFrame, VoiceActivityDetector, WakeWordDetector } from "./ear.ts";
 import { WakeGate } from "./gate.ts";
 
 const SAMPLE_RATE = 16_000;
 
-/** A 100ms frame. Content is irrelevant — the fake detector decides, not the bytes. */
+/** A 100ms frame. Content is irrelevant — the fake detectors decide, not the bytes. */
 function frame(): AudioFrame {
   return { samples: new Int16Array(SAMPLE_RATE / 10), sampleRate: SAMPLE_RATE };
 }
@@ -33,20 +27,20 @@ function controllableVad(): VoiceActivityDetector & { speaking: boolean } {
   };
 }
 
-function earHearing(transcript: string, languages: readonly string[] = ["en"]): LocalEar {
-  return { languages, transcribe: vi.fn(async () => transcript) };
-}
-
 /**
- * A wake-word detector the test drives directly.
+ * A wake-word detector the test drives directly, counting the utterances it was
+ * asked about.
  *
- * Defaults to hearing the name, so existing open-path tests pass without each
- * caller wiring it; a test that wants speech-without-the-name flips wakeHeard.
+ * The real one compares cepstral shapes; what the gate needs from it is a
+ * yes or a no, and how often it was consulted is the thing several of these
+ * tests are actually about.
  */
-function controllableWakeWord(): WakeWordDetector & { wakeHeard: boolean } {
+function controllableWakeWord(): WakeWordDetector & { wakeHeard: boolean; asked: AudioFrame[] } {
   return {
     wakeHeard: true,
-    heard(this: { wakeHeard: boolean }) {
+    asked: [] as AudioFrame[],
+    heard(this: { wakeHeard: boolean; asked: AudioFrame[] }, utterance: AudioFrame) {
+      this.asked.push(utterance);
       return this.wakeHeard;
     },
     reset: vi.fn(),
@@ -54,8 +48,11 @@ function controllableWakeWord(): WakeWordDetector & { wakeHeard: boolean } {
 }
 
 function build(
-  ear: LocalEar,
-  options: { quietPeriodMs?: number; wakeWord?: WakeWordDetector; hold?: () => boolean } = {},
+  options: {
+    quietPeriodMs?: number;
+    wakeWord?: WakeWordDetector & { wakeHeard: boolean; asked: AudioFrame[] };
+    hold?: () => boolean;
+  } = {},
 ) {
   const vad = controllableVad();
   const wakeWord = options.wakeWord ?? controllableWakeWord();
@@ -63,8 +60,6 @@ function build(
   const gate = new WakeGate({
     vad,
     wakeWord,
-    ear,
-    classifier: createWakeWordClassifier(),
     events,
     ...(options.quietPeriodMs === undefined ? {} : { quietPeriodMs: options.quietPeriodMs }),
     ...(options.hold === undefined ? {} : { hold: options.hold }),
@@ -72,7 +67,7 @@ function build(
   return { gate, events, vad, wakeWord };
 }
 
-/** Speech frames, then the silence that ends an utterance and triggers the ear. */
+/** Speech frames, then the silence that ends an utterance and triggers the match. */
 async function say(
   gate: WakeGate,
   vad: { speaking: boolean },
@@ -86,87 +81,96 @@ async function say(
 }
 
 describe("test_idle_mode_sends_no_audio_off_the_machine", () => {
-  it("forwards nothing when what was said was not addressed to us", async () => {
-    const ear = earHearing("what a nice afternoon it is");
-    const { gate, events, vad } = build(ear);
+  it("forwards nothing when what was said was not the phrase", async () => {
+    const wakeWord = controllableWakeWord();
+    wakeWord.wakeHeard = false;
+    const { gate, events, vad } = build({ wakeWord });
 
     await say(gate, vad);
 
-    expect(ear.transcribe).toHaveBeenCalledTimes(1);
+    expect(wakeWord.asked).toHaveLength(1);
     expect(events.onForward).not.toHaveBeenCalled();
     expect(events.onOpen).not.toHaveBeenCalled();
     expect(gate.state).toBe("idle");
   });
 
-  it("never troubles the ear when the room is simply silent", async () => {
-    const ear = earHearing("hey mastra open the browser");
-    const { gate, events, vad } = build(ear);
+  it("never troubles the matcher when the room is simply silent", async () => {
+    const { gate, events, vad, wakeWord } = build();
 
     vad.speaking = false;
     for (let i = 0; i < 50; i += 1) await gate.push(frame());
 
     expect(events.onForward).not.toHaveBeenCalled();
     // Silence does not reach tier 1, which is the whole reason tier 0 exists.
-    expect(ear.transcribe).not.toHaveBeenCalled();
+    expect(wakeWord.asked).toHaveLength(0);
   });
 
-  it("keeps the gate shut when the local ear fails, rather than opening blind", async () => {
-    const ear: LocalEar = {
-      languages: ["en"],
-      transcribe: vi.fn(async () => {
-        throw new Error("model failed to load");
-      }),
-    };
-    const { gate, events, vad } = build(ear);
-
-    await say(gate, vad);
-
-    expect(ear.transcribe).toHaveBeenCalled();
-    expect(events.onForward).not.toHaveBeenCalled();
-    expect(gate.state).toBe("idle");
-  });
-
-  it("drops an endlessly talking room instead of buffering it or transcribing it", async () => {
-    const ear = earHearing("hey mastra open the browser");
-    const { gate, events, vad } = build(ear);
+  it("drops an endlessly talking room instead of buffering it or matching it", async () => {
+    const { gate, events, vad, wakeWord } = build();
 
     // 200 frames of unbroken speech is 20s — past the ceiling, and never ended
-    // by a silence, so the buffer is discarded rather than handed to the ear.
+    // by a silence, so the buffer is discarded rather than matched.
     vad.speaking = true;
     for (let i = 0; i < 200; i += 1) await gate.push(frame());
 
-    expect(ear.transcribe).not.toHaveBeenCalled();
+    expect(wakeWord.asked).toHaveLength(0);
     expect(events.onForward).not.toHaveBeenCalled();
     expect(gate.isOpen).toBe(false);
   });
 
-  it("holds the property across many unaddressed utterances in a row", async () => {
-    const ear = earHearing("so then I told him it was fine");
-    const { gate, events, vad } = build(ear);
+  it("holds the property across many utterances in a row that were not the phrase", async () => {
+    const wakeWord = controllableWakeWord();
+    wakeWord.wakeHeard = false;
+    const { gate, events, vad } = build({ wakeWord });
 
     for (let i = 0; i < 5; i += 1) await say(gate, vad);
 
-    expect(ear.transcribe).toHaveBeenCalledTimes(5);
+    expect(wakeWord.asked).toHaveLength(5);
     expect(events.onForward).not.toHaveBeenCalled();
+  });
+
+  it("never asks about a blip too short to be a word", async () => {
+    const { gate, events, vad, wakeWord } = build();
+
+    // One 100ms frame of "speech" — a chair creak — then the silence that ends
+    // it. Under the floor, so the matcher is never run on it at all.
+    await say(gate, vad, 1, 8);
+
+    expect(wakeWord.asked).toHaveLength(0);
+    expect(events.onOpen).not.toHaveBeenCalled();
   });
 });
 
-describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
-  it("opens when the ear hears the assistant addressed", async () => {
-    const ear = earHearing("hey mastra open the browser");
-    const { gate, events, vad } = build(ear);
+describe("test_the_wake_gate_opens_only_when_the_shape_says_so", () => {
+  it("opens when the utterance matches the phrase, and hands that audio on", async () => {
+    const { gate, events, vad, wakeWord } = build();
 
     await say(gate, vad);
 
-    expect(ear.transcribe).toHaveBeenCalledTimes(1);
-    expect(events.onOpen).toHaveBeenCalledWith(
-      expect.objectContaining({ addressed: true, intent: "command" }),
-    );
+    expect(wakeWord.asked).toHaveLength(1);
+    // The utterance rides out with the opening, because it is usually the
+    // question as well as the name. Nothing wrote down what it said.
+    const [waking] = events.onOpen.mock.calls[0] ?? [];
+    expect(waking.utterance).toBe(wakeWord.asked[0]);
     expect(gate.isOpen).toBe(true);
   });
 
-  it("forwards audio only after the ear said yes, never before", async () => {
-    const ear = earHearing("hey mastra what time is it");
+  it("hands the matcher the whole utterance, pauses and all", async () => {
+    const { gate, vad, wakeWord } = build();
+
+    await say(gate, vad, 12, 8);
+
+    // Buffered frames, not just the loud ones: a phrase with the gaps cut out
+    // is a waveform nobody said, and the shape would not survive it. Twelve
+    // frames of speech plus the six of silence that ended the utterance —
+    // the trailing silence is part of what was buffered, not trimmed off.
+    const [utterance] = wakeWord.asked;
+    expect(utterance).toBeDefined();
+    expect(utterance!.sampleRate).toBe(SAMPLE_RATE);
+    expect(utterance!.samples.length).toBe((SAMPLE_RATE / 10) * 18);
+  });
+
+  it("forwards audio only after the gate opened, never before", async () => {
     const vad = controllableVad();
     // Ordering, not counting, is the property: once the gate is open, silence
     // frames forward too, so the honest assertion is that nothing was forwarded
@@ -175,8 +179,6 @@ describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
     const gate = new WakeGate({
       vad,
       wakeWord: controllableWakeWord(),
-      ear,
-      classifier: createWakeWordClassifier(),
       events: {
         onOpen: () => log.push("open"),
         onIdle: () => {},
@@ -193,29 +195,8 @@ describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
     expect(log.indexOf("forward")).toBeGreaterThan(log.indexOf("open"));
   });
 
-  it("stays shut for speech that was near us rather than to us", async () => {
-    const ear = earHearing("nice weather we are having");
-    const { gate, events, vad } = build(ear);
-
-    await say(gate, vad);
-
-    expect(ear.transcribe).toHaveBeenCalledTimes(1);
-    expect(events.onOpen).not.toHaveBeenCalled();
-  });
-
-  it("classifies a bare wake word apart from a request", async () => {
-    const ear = earHearing("hey mastra");
-    const { gate, events, vad } = build(ear);
-
-    await say(gate, vad);
-
-    expect(events.onOpen).toHaveBeenCalledWith(expect.objectContaining({ intent: "bare-wake" }));
-    expect(gate.isOpen).toBe(true);
-  });
-
   it("drops back to idle after the quiet period and stops forwarding", async () => {
-    const ear = earHearing("hey mastra open the browser");
-    const { gate, events, vad } = build(ear, { quietPeriodMs: 300 });
+    const { gate, events, vad } = build({ quietPeriodMs: 300 });
 
     await say(gate, vad);
     expect(gate.isOpen).toBe(true);
@@ -233,9 +214,8 @@ describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
   });
 
   it("stays open through the quiet period while held — a listener is not gone", async () => {
-    const ear = earHearing("hey mastra open the browser");
     let mouthSpeaking = true;
-    const { gate, events, vad } = build(ear, {
+    const { gate, events, vad } = build({
       quietPeriodMs: 300,
       hold: () => mouthSpeaking,
     });
@@ -265,104 +245,59 @@ describe("test_the_wake_gate_opens_only_when_the_cheap_ear_says_so", () => {
   });
 
   it("does not re-decide mid-sentence once it has opened", async () => {
-    const ear = earHearing("hey mastra open the browser");
-    const { gate, events, vad } = build(ear);
+    const { gate, events, vad, wakeWord } = build();
 
     await say(gate, vad);
     const forwardsSoFar = events.onForward.mock.calls.length;
-    ear.transcribe = vi.fn();
+    const asksSoFar = wakeWord.asked.length;
 
     vad.speaking = true;
     for (let i = 0; i < 20; i += 1) await gate.push(frame());
 
-    // Every one of those 20 frames went straight out, and the ear was not
+    // Every one of those 20 frames went straight out, and the matcher was not
     // consulted again — a gate that re-decided would cut a person off.
     expect(events.onForward).toHaveBeenCalledTimes(forwardsSoFar + 20);
-    expect(ear.transcribe).not.toHaveBeenCalled();
-  });
-
-  it("carries the licensed languages of whatever ear is installed", () => {
-    const { gate } = build(earHearing("", ["en"]));
-    expect(gate.languages).toEqual(["en"]);
+    expect(wakeWord.asked).toHaveLength(asksSoFar);
   });
 });
 
-describe("test_speech_that_is_not_the_name_stays_home", () => {
-  it("never reaches the ear when speech does not contain the wake word", async () => {
-    const ear = earHearing("what a nice afternoon it is");
-    const wakeWord = controllableWakeWord();
-    wakeWord.wakeHeard = false;
-    const { gate, events, vad } = build(ear, { wakeWord });
+describe("test_a_closed_gate_needs_no_second_opinion", () => {
+  it("opens on the shape alone, with no transcription anywhere in the path", async () => {
+    const { gate, events, vad } = build();
 
     await say(gate, vad);
 
-    // The wake word was checked but answered no, so the ear was never consulted
-    // and nothing left the machine.
-    expect(ear.transcribe).not.toHaveBeenCalled();
-    expect(events.onForward).not.toHaveBeenCalled();
-    expect(events.onOpen).not.toHaveBeenCalled();
+    // Nothing here reads words. The failure this replaces was a small local
+    // model rendering "hey mastra" as "he mastered" and refusing its owner;
+    // there is no spelling left in the decision to get wrong.
+    expect(gate.isOpen).toBe(true);
+    const [waking] = events.onOpen.mock.calls[0] ?? [];
+    expect(Object.keys(waking)).toEqual(["utterance"]);
+  });
+
+  it("closes and resets the matcher, so the next phrase is judged fresh", async () => {
+    const { gate, vad, wakeWord } = build();
+
+    await say(gate, vad);
+    expect(gate.isOpen).toBe(true);
+
+    gate.close();
+
     expect(gate.state).toBe("idle");
-  });
-});
-
-describe("test_the_name_opens_the_gate", () => {
-  it("opens the gate when the name is heard and the speech is addressed to us", async () => {
-    const ear = earHearing("hey mastra what time is it");
-    const { gate, events, vad } = build(ear);
-
-    await say(gate, vad);
-
-    expect(events.onOpen).toHaveBeenCalledWith(
-      expect.objectContaining({ addressed: true, intent: "question" }),
-    );
-    expect(gate.isOpen).toBe(true);
-
-    // Frames forward while the gate is open.
-    const forwardsBefore = events.onForward.mock.calls.length;
-    vad.speaking = true;
-    await gate.push(frame());
-    expect(events.onForward.mock.calls.length).toBeGreaterThan(forwardsBefore);
-  });
-});
-
-describe("test_talking_about_mastra_is_not_talking_to_mastra", () => {
-  it("stays closed for talk about Mastra, opens for talk to Mastra", async () => {
-    const transcripts = ["i was showing caleb how mastra works", "so anyway, hey mastra, what time is it"];
-    let call = 0;
-    const ear: LocalEar = {
-      languages: ["en"],
-      transcribe: vi.fn(async () => transcripts[call++] ?? ""),
-    };
-    const { gate, events, vad } = build(ear);
-
-    // First utterance: talking ABOUT Mastra. The bare name is mentioned, but the
-    // wake is the phrase "hey mastra" — nobody says that about the product, only
-    // to it — so the classifier does not count a mention as addressed.
-    await say(gate, vad);
-    expect(ear.transcribe).toHaveBeenCalledTimes(1);
-    expect(events.onOpen).not.toHaveBeenCalled();
-    expect(gate.isOpen).toBe(false);
-
-    // Second utterance: talking TO Mastra. The phrase appears mid-sentence and
-    // still counts: utterance boundaries come from an amplitude detector, not
-    // from grammar, so the phrase is honored wherever it lands.
-    await say(gate, vad);
-    expect(events.onOpen).toHaveBeenCalledWith(
-      expect.objectContaining({ addressed: true, intent: "question" }),
-    );
-    expect(gate.isOpen).toBe(true);
+    expect(wakeWord.reset).toHaveBeenCalled();
   });
 });
 
 describe("test_a_tap_still_opens_the_gate_by_hand", () => {
   it("opens by hand when a person taps the orb, which is not idle by definition", () => {
-    const { gate, events } = build(earHearing(""));
+    const { gate, events, wakeWord } = build();
 
     gate.openByHand();
 
     expect(gate.isOpen).toBe(true);
-    expect(events.onOpen).toHaveBeenCalledWith(
-      expect.objectContaining({ addressed: true, transcript: "" }),
-    );
+    expect(wakeWord.asked).toHaveLength(0);
+    // Nothing to send ahead: a tap is a gesture, and the person has not
+    // spoken yet.
+    expect(events.onOpen).toHaveBeenCalledWith({ utterance: null });
   });
 });

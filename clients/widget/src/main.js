@@ -29,7 +29,6 @@ import { readPlacement, writePlacement } from "./placement-store.js";
 import { readTrayState, writeTrayState } from "./tray-state.js";
 import { createTray } from "./tray.js";
 import { dashboardUrl } from "./dashboard.js";
-import { readWakeTemplates, writeWakeTemplates } from "./wake-templates.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -39,8 +38,6 @@ const placementFile = () => path.join(app.getPath("userData"), "placement.json")
 /** Where the tray's choices are written down, beside the placement. */
 const trayStateFile = () => path.join(app.getPath("userData"), "tray-state.json");
 
-/** Where the enrolled wake-word templates live, beside the tray state. */
-const wakeTemplatesFile = () => path.join(app.getPath("userData"), "wake-templates.json");
 
 /** The hub's port, read from the environment exactly as the bridge reads it. */
 const hubPort = () => Number(process.env.COMCON_CLIENT_PORT ?? 4111);
@@ -254,15 +251,18 @@ app.whenReady().then(() => {
     toggleAutoHide: () => applyTrayState({ ...trayState, autoHide: !trayState.autoHide }),
     toggleDisabled: () => applyTrayState({ ...trayState, disabled: !trayState.disabled }),
     openDashboard,
-    tuneWakeWord: () => {
-      // The tray asked, so the page does the recording — it is the one document
-      // with a microphone. A disabled widget has no ears, so the enrollment
-      // surface is only reachable while enabled.
-      if (!window.isDestroyed() && !trayState.disabled) {
-        window.webContents.send("widget:start-enrollment");
-      }
-    },
     quit: () => app.quit(),
+  });
+
+  /*
+   * The page has no devtools a person can open — it is a click-through window
+   * with no chrome and no keyboard — so whatever it says about itself is said
+   * into a room with nobody in it. Forwarding its console to the shell's own
+   * output is the only way a widget that quietly failed to start its ears can
+   * be told apart from one that started them and heard nothing.
+   */
+  window.webContents.on("console-message", (event) => {
+    console.log(`[page] ${event.message}`);
   });
 
   // The renderer hears the current choices once it is ready to hear anything.
@@ -271,12 +271,6 @@ app.whenReady().then(() => {
       autoHide: trayState.autoHide,
       disabled: trayState.disabled,
     });
-    // First launch after install: if no wake-word templates have been enrolled
-    // yet, invite the user to tune the fingerprint to their own voice. A
-    // disabled widget never gets the prompt — it has no microphone.
-    if (!trayState.disabled && !readWakeTemplates(wakeTemplatesFile()).enrolled) {
-      window.webContents.send("widget:start-enrollment");
-    }
   });
 
   // The renderer knows what shape it painted; the shell owns the window. While
@@ -347,13 +341,26 @@ app.whenReady().then(() => {
   ipcMain.on("widget:open-dashboard", openDashboard);
 
   /*
-   * Enrolled templates come from the page and land on disk here. The page owns
-   * the recording and the scoring; the main process owns the filesystem, and
-   * the bridge is deliberately fire-and-forget — the page already has the
-   * templates in memory for this session, so it does not wait on the write.
+   * The voice print comes from the hub, over the same loopback address the
+   * token mint uses and for the same reason: this process holds no copy of
+   * anything a person enrolled. Training happens on the dashboard, where there
+   * is a keyboard and a form; the widget is a click-through orb that asks what
+   * shapes to listen for and gets an answer.
+   *
+   * A refusal is not an error here. A hub that cannot be reached leaves the
+   * widget with no templates, and a detector with no templates is deaf — which
+   * is the closed direction, and the only safe one.
    */
-  ipcMain.on("widget:write-wake-templates", (_event, state) => {
-    writeWakeTemplates(wakeTemplatesFile(), state);
+  ipcMain.handle("widget:wake-templates", async () => {
+    if (trayState.disabled) return { templates: [] };
+    try {
+      const response = await fetch(`http://127.0.0.1:${hubPort()}/api/wake/templates`);
+      if (!response.ok) return { templates: [] };
+      const body = await response.json().catch(() => ({}));
+      return { templates: Array.isArray(body.templates) ? body.templates : [] };
+    } catch {
+      return { templates: [] };
+    }
   });
 
   /*

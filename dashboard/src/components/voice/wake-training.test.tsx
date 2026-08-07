@@ -1,3 +1,4 @@
+import { TARGET_TAKES } from "@hub/wake/enrollment";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 
@@ -54,24 +55,27 @@ const stored = (count: number): WakeTemplatesView => ({
   })),
 });
 
-test("the page asks for the phrase and offers exactly three takes", () => {
+test("the page asks for the phrase and offers one row per take it wants", () => {
   const html = view();
   expect(html).toContain(ENROLL_PHRASE);
-  expect(html.match(/data-testid="take-row"/g)).toHaveLength(3);
+  expect(html.match(/data-testid="take-row"/g)).toHaveLength(TARGET_TAKES);
 });
 
-test("save is out of reach until all three takes exist", () => {
+test("save is out of reach until every take exists", () => {
+  const full = Array.from({ length: TARGET_TAKES }, () => tone(1));
+
   // With a take missing, every take button is reachable and the only disabled
   // control on the page is Save.
-  const short = view({ takes: takesOf(tone(1), tone(1)) });
+  const short = view({ takes: takesOf(...full.slice(1)) });
   expect(short.match(/disabled=""/g)).toHaveLength(1);
 
-  // With three recorded, nothing on the page is out of reach.
-  const complete = view({ takes: takesOf(tone(1), tone(1), tone(1)) });
+  // With the set complete, nothing on the page is out of reach.
+  const complete = view({ takes: takesOf(...full) });
   expect(complete.match(/disabled=""/g)).toBeNull();
 
-  // And with none recorded, takes two and three are out of reach as well.
-  expect(view().match(/disabled=""/g)).toHaveLength(3);
+  // And with none recorded, every take after the first is out of reach too,
+  // alongside Save: an enrolment is walked through in order.
+  expect(view().match(/disabled=""/g)).toHaveLength(TARGET_TAKES);
 });
 
 test("a take is scored against the takes recorded before it, so the first shows none", () => {

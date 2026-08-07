@@ -1,26 +1,26 @@
 /**
- * The widget's ears: the hub's own wake chain, running where the microphone
+ * The widget's ears: the hub's own wake gate, running where the microphone
  * now lives.
  *
  * The chain is the vendored live module's, unchanged: an amplitude VAD on
- * every frame, utterances buffered locally, the local transcriber asked only
- * about complete utterances, and the classifier's WAKE_WORDS text match as
- * the wake decision. The gate's property survives the move intact — no frame
- * leaves this machine until the gate opens — because the gate is the same
- * code, and the only thing downstream of its onForward callback is the mouth.
+ * every frame, utterances buffered locally, and a fingerprint matcher asked
+ * only about complete utterances. The gate's property survives the move
+ * intact — no frame leaves this machine until the gate opens — because the
+ * gate is the same code, and the only thing downstream of its onForward
+ * callback is the mouth.
  *
- * Two deliberate substitutions, both named:
+ * There used to be a transcriber in here, in a worker, and a text match
+ * against a list of spellings of "hey mastra". It is gone. It cost eighty
+ * megabytes, several hundred milliseconds per utterance, and it locked the
+ * owner of this machine out of it by rendering his wake phrase as "he
+ * mastered" — a failure no list of spellings can be made long enough to fix.
+ * The phrase is a shape now: cepstral frames, compared by subsequence DTW
+ * against the templates the hub holds.
  *
- * - The Tier 0.5 wake-word detector is `alwaysWakeWord`, not openWakeWord.
- *   The plan ships the wake path at the fidelity the hub had — VAD, local
- *   transcription, WAKE_WORDS text match, classifier — with the one upgrade
- *   that the transcriber is now real. Every utterance reaches the local
- *   model; the classifier's text match is what decides "addressed". The cost
- *   is local CPU on speech that was never for us; the property that matters
- *   — nothing on the network without the name — is the classifier's.
- *
- * - The ear is a worker, because transcription is hundreds of milliseconds
- *   of arithmetic and this page is busy being a face.
+ * The templates come from the hub because the hub is where they are trained.
+ * The widget is a click-through orb with no keyboard; it cannot show a person
+ * a form. It asks what to listen for, and a widget that gets no answer holds
+ * no templates and hears nothing — deaf rather than trigger-happy.
  *
  * The plug is the arbitration Jamie named: when another client opens a voice
  * session, this widget stops listening; when that session closes, it resumes.
@@ -29,93 +29,55 @@
  */
 
 import { WakeGate } from "./vendor/live/gate.js";
-import { alwaysWakeWord, createAmplitudeVad } from "./vendor/live/ear-poc.js";
-import { createWakeWordClassifier } from "./vendor/live/ear.js";
+import { createAmplitudeVad, deafWakeWord } from "./vendor/live/ear-poc.js";
+import { createFingerprintDetector } from "./vendor/live/fingerprint.js";
 
 /** The capture rate: the protocol's, the model's, and the context's, at once. */
 export const CAPTURE_RATE = 16_000;
 
 /**
- * Wrap the transcription worker in the LocalEar seam from live/ear.ts.
+ * Assemble the gate the way the hub assembles it, around this matcher.
  *
- * English only — the licence boundary rides the declaration, exactly as the
- * seam intends. A worker that failed to boot rejects every transcription,
- * and the gate treats a failed transcription as a closed gate: a dead model
- * can never become audio on the network.
- *
- * @param {{ postMessage: Function, addEventListener: Function }} worker
- */
-export function createWorkerEar(worker) {
-  let seq = 0;
-  const pending = new Map();
-  let dead = null;
-
-  worker.addEventListener("message", (event) => {
-    const message = event.data ?? {};
-    if (message.kind === "dead") {
-      dead = String(message.error ?? "The ear's model failed to load.");
-      for (const waiter of pending.values()) waiter.reject(new Error(dead));
-      pending.clear();
-      return;
-    }
-    if (message.kind !== "transcript" && message.kind !== "transcript-failed") return;
-    const waiter = pending.get(message.id);
-    if (!waiter) return;
-    pending.delete(message.id);
-    if (message.kind === "transcript") waiter.resolve(String(message.text ?? ""));
-    else waiter.reject(new Error(String(message.error ?? "Transcription failed.")));
-  });
-
-  return {
-    languages: ["en"],
-    /** @param {{ samples: Int16Array, sampleRate: number }} utterance */
-    transcribe(utterance) {
-      if (dead) return Promise.reject(new Error(dead));
-      const id = `t${++seq}`;
-      console.log(
-        `[ear-debug] utterance ${id}: ${utterance.samples.length} samples (${(utterance.samples.length / utterance.sampleRate).toFixed(2)}s)`,
-      );
-      return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
-        // Sliced first so the transfer donates a copy's buffer, never the
-        // gate's own: the utterance the gate handed over is still its to keep.
-        const samples = utterance.samples.slice();
-        worker.postMessage({ id, samples: samples.buffer }, [samples.buffer]);
-      }).then(
-        (text) => {
-          console.log(`[ear-debug] ${id} transcript: ${JSON.stringify(text)}`);
-          return text;
-        },
-        (error) => {
-          console.log(`[ear-debug] ${id} FAILED: ${error?.message ?? error}`);
-          throw error;
-        },
-      );
-    },
-  };
-}
-
-/**
- * Assemble the gate the way the hub assembled it, around this ear.
+ * The default when no wake word is supplied is the deaf one, not a permissive
+ * one. Assembling a chain is not the same as knowing what to listen for, and a
+ * gate that opened on anything while its templates were still in flight would
+ * be a microphone with an excuse.
  *
  * @param {{
- *   ear: { languages: string[], transcribe: Function },
  *   events: { onOpen: Function, onIdle: Function, onForward: Function },
  *   vad?: { isSpeech: Function, reset: Function },
  *   wakeWord?: { heard: Function, reset: Function },
  *   quietPeriodMs?: number,
+ *   hold?: () => boolean,
  * }} deps
  */
-export function createEarChain({ ear, events, vad, wakeWord, quietPeriodMs, hold }) {
+export function createEarChain({ events, vad, wakeWord, quietPeriodMs, hold }) {
   return new WakeGate({
     vad: vad ?? createAmplitudeVad(),
-    wakeWord: wakeWord ?? alwaysWakeWord,
-    ear,
-    classifier: createWakeWordClassifier(),
+    wakeWord: wakeWord ?? deafWakeWord,
     events,
     quietPeriodMs,
     hold,
   });
+}
+
+/**
+ * Ask the shell for the hub's templates and build the matcher around them.
+ *
+ * Every failure lands in the same place: no templates. A hub that is down, a
+ * person who has not enrolled, a body that arrived malformed — all of them
+ * produce a detector that never fires, because the alternative to a deaf
+ * widget is not a helpful one, it is one that opens on the dog.
+ *
+ * @returns {Promise<{ heard: Function, reset: Function }>}
+ */
+export async function loadWakeWord() {
+  const bridge = globalThis.widget;
+  if (!bridge?.wakeTemplates) return deafWakeWord;
+  const answer = await bridge.wakeTemplates().catch(() => null);
+  const templates = Array.isArray(answer?.templates) ? answer.templates : [];
+  console.log(`[wake] ${templates.length} template(s) from the hub`);
+  return createFingerprintDetector(templates);
 }
 
 /**
@@ -159,9 +121,8 @@ export async function startEars({ onOpen, onIdle, onForward, quietPeriodMs, hold
     audio: { echoCancellation: true, noiseSuppression: true },
   });
 
-  const worker = new Worker(new URL("./ear-worker.js", import.meta.url), { type: "module" });
   const gate = createEarChain({
-    ear: createWorkerEar(worker),
+    wakeWord: await loadWakeWord(),
     events: { onOpen, onIdle, onForward },
     quietPeriodMs,
     hold,
@@ -202,65 +163,8 @@ export async function startEars({ onOpen, onIdle, onForward, quietPeriodMs, hold
     },
     stop() {
       node.port.onmessage = null;
-      worker.terminate();
       stream.getTracks().forEach((track) => track.stop());
       void capture.close();
     },
   };
-}
-
-/**
- * Record a single wake-word take and return the raw PCM16 samples.
- *
- * The enrollment surface cannot use a media recorder API — it is banned by the
- * boundaries suite everywhere — so this function opens the same capture graph
- * `startEars` uses: `getUserMedia`, an `AudioContext` at the capture rate, the
- * `pcm16-capture` worklet, and a `createMediaStreamSource` node. The chunks the
- * worklet emits are collected until `maxMs` elapses, then the stream and context
- * are torn down and the concatenated samples are handed back. The scoring and
- * template assembly happen in `wake-score.js`, which is pure and runs anywhere.
- *
- * Browser-only, like `startEars`; everything decidable without a microphone
- * lives in the exports above and below this function.
- *
- * @param {{ maxMs?: number }} [options]
- * @returns {Promise<Int16Array>}
- */
-export async function enrollTake({ maxMs = 2500 } = {}) {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true },
-  });
-
-  const capture = new AudioContext({ sampleRate: CAPTURE_RATE });
-  await capture.audioWorklet.addModule(new URL("./vendor/orb-capture-worklet.js", import.meta.url));
-  const source = capture.createMediaStreamSource(stream);
-  const node = new AudioWorkletNode(capture, "pcm16-capture");
-
-  const chunks = [];
-  node.port.onmessage = (event) => {
-    chunks.push(new Int16Array(event.data));
-  };
-  source.connect(node);
-  // The same silent gain that keeps the live worklet alive without echoing the
-  // mic back into the room.
-  const silent = capture.createGain();
-  silent.gain.value = 0;
-  node.connect(silent);
-  silent.connect(capture.destination);
-
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      node.port.onmessage = null;
-      stream.getTracks().forEach((track) => track.stop());
-      void capture.close();
-      const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-      const samples = new Int16Array(total);
-      let offset = 0;
-      for (const chunk of chunks) {
-        samples.set(chunk, offset);
-        offset += chunk.length;
-      }
-      resolve(samples);
-    }, maxMs);
-  });
 }
