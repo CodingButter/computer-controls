@@ -34,6 +34,26 @@ running program on a user's desktop. When that step has not been taken the scrip
 exits 4, writes the artifact anyway, and marks the run partial. A partial run
 reported as a pass would be a lie with a filename.
 
+### Parked: the-face-can-be-photographed
+
+`scripts/prove-face-photographable.py` settles two things about the widget, and the
+order it settles them in is the point. The face's window is transparent and covers a
+whole display, so before anything is said about the feature the script puts a
+fullscreen `#FF00DC` window behind the orb and checks that colour appears nowhere in
+what `GET /api/orb/capture` returns. If it does appear, the route is a screen grab with
+a feature's name on it and must not ship in that form — in a project whose widget suite
+exists mostly to refuse screen capture. Only then does it ask whether the orb was
+actually rendered, and whether demo mode put the window in `_NET_CLIENT_LIST` where a
+recorder and this project's own `captureWindow` can find it.
+
+The artifact is not deposited yet, for the reason the two proofs below are not: this
+branch was written in a headless environment, and the script exits 4 rather than
+inventing an answer where there is no display server to ask. Until it runs, the lane
+stands on `clients/widget/src/boundaries.test.ts`, `clients/widget/src/end-to-end.test.ts`
+and `client/src/orb/capture.test.ts` — which prove the plumbing, the refusals and the
+window-mode diff, and prove nothing whatsoever about what Chromium's compositor puts in
+a photograph of a transparent window.
+
 ### Parked: which-condition-makes-a-browser-readable
 
 `scripts/prove-browser-visibility-live.py` asks a real desktop which condition

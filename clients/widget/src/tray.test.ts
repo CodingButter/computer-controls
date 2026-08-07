@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 
 import { menuTemplateFor, trayIconFile, trayTooltip } from "./tray.js";
 import { DEFAULT_TRAY_STATE } from "./tray-state.js";
+import type { TrayState } from "./tray-state.js";
 
 /**
  * The tray, checked the way this suite checks shells: pure functions by
@@ -26,6 +27,7 @@ const noop = () => {};
 const actions = {
   toggleAutoHide: noop,
   toggleDisabled: noop,
+  toggleDemo: noop,
   openDashboard: noop,
   quit: noop,
 };
@@ -35,18 +37,35 @@ describe("the menu says what it does", () => {
     const labels = menuTemplateFor(DEFAULT_TRAY_STATE, actions)
       .map((item) => item.label)
       .filter(Boolean);
-    expect(labels).toEqual(["Auto-hide", "Disable widget", "Open the dashboard", "Quit Mastra CC"]);
+    expect(labels).toEqual([
+      "Auto-hide",
+      "Disable widget",
+      "Demo mode (restarts the face)",
+      "Open the dashboard",
+      "Quit Mastra CC",
+    ]);
   });
 
   test("the auto-hide checkbox is the stored boolean", () => {
-    const checkbox = (state: { autoHide: boolean; disabled: boolean }) =>
+    const checkbox = (state: TrayState) =>
       menuTemplateFor(state, actions).find((item) => item.label === "Auto-hide");
-    expect(checkbox({ autoHide: true, disabled: false })?.checked).toBe(true);
-    expect(checkbox({ autoHide: false, disabled: false })?.checked).toBe(false);
+    expect(checkbox({ ...DEFAULT_TRAY_STATE, autoHide: true })?.checked).toBe(true);
+    expect(checkbox({ ...DEFAULT_TRAY_STATE, autoHide: false })?.checked).toBe(false);
+  });
+
+  test("the demo checkbox is the stored boolean, and says what it costs", () => {
+    // Checkbox rather than a direction-naming label, because unlike disable
+    // this one is a mode somebody can forget they are in — and the label
+    // carries the restart so nobody clicks it expecting nothing to happen.
+    const checkbox = (state: TrayState) =>
+      menuTemplateFor(state, actions).find((item) => item.label?.startsWith("Demo mode"));
+    expect(checkbox({ ...DEFAULT_TRAY_STATE, demo: true })?.checked).toBe(true);
+    expect(checkbox({ ...DEFAULT_TRAY_STATE, demo: false })?.checked).toBe(false);
+    expect(checkbox(DEFAULT_TRAY_STATE)?.label).toContain("restarts");
   });
 
   test("the disable entry names the direction it moves", () => {
-    const template = menuTemplateFor({ autoHide: true, disabled: true }, actions);
+    const template = menuTemplateFor({ ...DEFAULT_TRAY_STATE, disabled: true }, actions);
     const labels = template.map((item) => item.label);
     expect(labels).toContain("Enable widget");
     expect(labels).not.toContain("Disable widget");
@@ -57,13 +76,14 @@ describe("the menu says what it does", () => {
     const spying = {
       toggleAutoHide: () => fired.push("autoHide"),
       toggleDisabled: () => fired.push("disabled"),
+      toggleDemo: () => fired.push("demo"),
       openDashboard: () => fired.push("dashboard"),
       quit: () => fired.push("quit"),
     };
     for (const item of menuTemplateFor(DEFAULT_TRAY_STATE, spying)) {
       (item as { click?: () => void }).click?.();
     }
-    expect(fired).toEqual(["autoHide", "disabled", "dashboard", "quit"]);
+    expect(fired).toEqual(["autoHide", "disabled", "demo", "dashboard", "quit"]);
   });
 });
 
@@ -97,8 +117,10 @@ describe("where the power lives", () => {
   test("quit lives in main, behind the menu and the face's own gesture", () => {
     expect(main).toContain("quit: () => app.quit()");
     expect(main).toContain('ipcMain.on("widget:quit", () => app.quit())');
-    // And nowhere else: two doors, both of them semantic closes.
-    expect(main.match(/app\.quit\(\)/g)).toHaveLength(2);
+    // And nowhere else: two doors that end the program, plus the demo
+    // toggle's relaunch, which is the only quit that comes back.
+    expect(main.match(/app\.quit\(\)/g)).toHaveLength(3);
+    expect(main).toMatch(/app\.relaunch\(\);\s*\n\s*app\.quit\(\);/);
   });
 
   test("a closed window no longer closes the application", () => {
@@ -137,7 +159,7 @@ describe("the renderer is told, never asked", () => {
   });
 
   test("a widget disabled last run starts hidden, not visible-for-a-frame", () => {
-    expect(main).toContain("createWindow({ startHidden: trayState.disabled })");
+    expect(main).toContain("startHidden: trayState.disabled,");
     expect(main).toMatch(/if \(!startHidden\) window\.showInactive\(\)/);
   });
 

@@ -234,6 +234,12 @@ const hub = connectToHub({
     if (!connected && mouth) closeMouth();
   },
   onEvent: (event) => {
+    // Somebody asked what the face looks like. Handled here rather than in the
+    // state machine because it changes nothing about what is drawn: `reduce`
+    // is total over the vocabulary and stays ignorant of this word, so a hub
+    // that learns a new one still meets a widget that ignores it rather than
+    // one that throws inside a socket handler.
+    if (event.type === "capture_request") window.widget.capture?.(event.id);
     state = reduce(state, event);
     paint();
     rewindFade();

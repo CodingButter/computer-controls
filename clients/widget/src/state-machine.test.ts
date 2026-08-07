@@ -7,6 +7,7 @@ import {
   AUTO_HIDE_MS,
   INITIAL_STATE,
   OFFERED_GESTURES,
+  SHELL_EVENTS,
   UNDERSTOOD_EVENTS,
   applyGesture,
   fade,
@@ -208,8 +209,15 @@ test("the widget's vocabulary is exactly the hub's", () => {
   // keeps that copy from quietly becoming a disagreement: the lists are
   // compared against the hub's own, so a word added on one side and not the
   // other fails here rather than in front of a user.
-  expect([...UNDERSTOOD_EVENTS].sort()).toEqual([...STATE_EVENT_TYPES].sort());
+  //
+  // Two lists on this side, one on the hub's: a word is either something this
+  // face draws or something this shell answers, and adding one to neither list
+  // fails here.
+  expect([...UNDERSTOOD_EVENTS, ...SHELL_EVENTS].sort()).toEqual([...STATE_EVENT_TYPES].sort());
   expect([...OFFERED_GESTURES].sort()).toEqual([...GESTURE_TYPES].sort());
+  // A word cannot be both, which is what keeps the split from becoming a place
+  // to hide a word that nothing handles.
+  for (const word of SHELL_EVENTS) expect(UNDERSTOOD_EVENTS).not.toContain(word);
 });
 
 test("every word the hub can say has a case in the reducer", () => {
@@ -237,11 +245,18 @@ test("every word the hub can say has a case in the reducer", () => {
   const woken = reduce(INITIAL_STATE, { type: "wake_opened" });
   const busy = reduce(woken, { type: "touching", ...spoken.touching });
 
-  for (const type of STATE_EVENT_TYPES) {
+  for (const type of UNDERSTOOD_EVENTS) {
     expect(spoken[type], `no sample for "${type}"`).toBeDefined();
     const next = reduce(busy, { type, ...spoken[type] });
     expect(next, `no case for "${type}"`).not.toBe(busy);
   }
+
+  // The other half of totality: a word the shell answers must leave the drawing
+  // exactly as it was — the same object back, not merely an equal one. Being
+  // photographed is not an event in the conversation, and a face that repainted
+  // when asked for a picture would be answering with something the hub never
+  // said.
+  for (const type of SHELL_EVENTS) expect(reduce(busy, { type })).toBe(busy);
 });
 
 describe("the mouth-era words", () => {

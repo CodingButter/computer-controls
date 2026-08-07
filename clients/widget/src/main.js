@@ -21,9 +21,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
  */
 
 import {
+  captureRect,
+  demoRequested,
   dragPlacement,
   readDragRequest,
   stageFor,
+  windowOptionsFor,
 } from "./window-shape.js";
 import { readPlacement, writePlacement } from "./placement-store.js";
 import { readTrayState, writeTrayState } from "./tray-state.js";
@@ -72,7 +75,7 @@ function openingStage() {
   return stageFor(display, stored ?? process.env.COMCON_WIDGET_PLACEMENT ?? "corner");
 }
 
-function createWindow({ startHidden = false } = {}) {
+function createWindow({ startHidden = false, demo = false } = {}) {
   const stage = openingStage();
 
   const window = new BrowserWindow({
@@ -84,27 +87,11 @@ function createWindow({ startHidden = false } = {}) {
     height: stage.height,
     x: stage.x,
     y: stage.y,
-    // Frameless and transparent: the widget is an orb on the desk, not an
-    // application window with a title bar and a close button.
-    frame: false,
-    transparent: true,
-    backgroundColor: "#00000000",
-    hasShadow: false,
-    // On top of the work, because being spoken to should not require finding
-    // a window, and out of the taskbar and switcher for the same reason.
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    resizable: false,
-    // Dragging the orb moves the orb, not the window: the window is the desk
-    // the orb is drawn on and it stays where the desk is.
-    movable: false,
-    minimizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    // Never steals what the user was typing into. A face that took focus when
-    // it appeared would interrupt the very work it is meant to sit beside.
-    focusable: false,
-    show: false,
+    // The manners, which differ between the ordinary face and a demonstrable
+    // one in exactly three places. They live in window-shape.js so the
+    // difference between the two modes is a value a test can diff rather than
+    // two branches of an object literal nobody can compare.
+    ...windowOptionsFor({ demo }),
     webPreferences: {
       preload: path.join(here, "preload.js"),
       // The page gets no Node and no shared origin with anything. It is a
@@ -205,7 +192,10 @@ app.whenReady().then(() => {
 
   guardPermissions(() => trayState.disabled);
 
-  const { window, stage } = createWindow({ startHidden: trayState.disabled });
+  const { window, stage } = createWindow({
+    startHidden: trayState.disabled,
+    demo: demoRequested(trayState, process.argv),
+  });
 
   // The one page this process opens, shared by the tray menu and the face's
   // own context menu. The address is built here, in the main process, from a
@@ -249,6 +239,16 @@ app.whenReady().then(() => {
   const trayControls = createTray(trayState, {
     toggleAutoHide: () => applyTrayState({ ...trayState, autoHide: !trayState.autoHide }),
     toggleDisabled: () => applyTrayState({ ...trayState, disabled: !trayState.disabled }),
+    // Whether a window is managed by the window manager is decided when the
+    // window is created, so this choice is written down and the app is started
+    // again. Recreating the window in place would mean tearing down the page,
+    // the lane and the ears mid-sentence to rebuild them differently; a
+    // relaunch does the same thing once, visibly, and the menu label says so.
+    toggleDemo: () => {
+      applyTrayState({ ...trayState, demo: !trayState.demo });
+      app.relaunch();
+      app.quit();
+    },
     openDashboard,
     quit: () => app.quit(),
   });
@@ -355,6 +355,49 @@ app.whenReady().then(() => {
       return { error: "The hub could not be reached, so no token was minted." };
     }
   });
+
+  /*
+   * The face photographs itself, and only itself.
+   *
+   * The hub asks over the lane, the page relays the id here, and the shell
+   * takes the picture with `capturePage` — a main-process call that addresses
+   * this window's own `webContents` and cannot be pointed at another window or
+   * at the desktop. That is the whole reason the capture lives on this side of
+   * the bridge: the page keeps every power it had and gains none, because all
+   * it can do is ask its own shell to photograph the shell's own window.
+   *
+   * The rectangle is the orb's box, not the window. The window is the whole
+   * display and mostly transparent, so a full-window capture would be a
+   * picture of whatever the compositor has behind it — which is the thing this
+   * product refuses to be able to do.
+   *
+   * The answer goes back over loopback HTTP, because main is the widget's only
+   * HTTP client and because the lane carries intent, never content. Nothing is
+   * logged and nothing is written to disk: the picture exists for the length of
+   * one request, in memory, and a screenshot of somebody's desk corner sitting
+   * in a log would be exactly the leak the design is built to avoid.
+   */
+  const photographFace = async (id) => {
+    if (typeof id !== "string" || id.length === 0) return;
+    if (window.isDestroyed()) return;
+    // A disabled widget is hidden, so there is nothing to photograph — and a
+    // hidden window would answer with a stale or empty frame, which is worse
+    // than not answering. The hub says "no face answered" and that is true.
+    if (trayState.disabled) return;
+    try {
+      const image = await window.webContents.capturePage(captureRect(stage, orb));
+      await fetch(`http://127.0.0.1:${hubPort()}/api/orb/capture/${encodeURIComponent(id)}`, {
+        method: "POST",
+        headers: { "content-type": "image/png" },
+        body: image.toPNG(),
+      });
+    } catch {
+      // A capture that failed and a hub that could not be reached come to the
+      // same thing from the asker's side: no face answered. Saying so twice
+      // would be a second, less accurate story about the same silence.
+    }
+  };
+  ipcMain.on("widget:capture", (_event, id) => void photographFace(id));
 
   // A face the user asked to leave leaves. The process closes its own windows
   // and exits — never a kill from outside, always a semantic close.

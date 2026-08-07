@@ -35,6 +35,93 @@ const MARGIN = 24;
 export const GRANTED_PERMISSIONS = Object.freeze(["media"]);
 
 /**
+ * Ask for a demonstrable window for this run without changing what is stored.
+ *
+ * A flag rather than an environment variable, and one door rather than two:
+ * the tray remembers the choice, the flag makes it for a single launch, and
+ * anybody scripting a recording gets the mode without leaving it on for the
+ * person whose desk this is.
+ */
+export const DEMO_ARGUMENT = "--comcon-demo";
+
+/**
+ * @param {{ demo?: boolean }} stored — the tray's remembered choice.
+ * @param {string[]} argv
+ * @returns {boolean}
+ */
+export function demoRequested(stored, argv) {
+  return argv.includes(DEMO_ARGUMENT) || Boolean(stored?.demo);
+}
+
+/**
+ * What kind of window the shell opens: the ordinary face, or a demonstrable one.
+ *
+ * The ordinary window is unfocusable, and on X11 that is not a preference — a
+ * window that declares itself unfocusable is created override-redirect, which
+ * means the window manager does not manage it at all. It never appears in
+ * `_NET_CLIENT_LIST`, so nothing that enumerates windows can see it: not the
+ * switcher, not a screen recorder, not OBS's window source, and not this
+ * project's own window-scoped capture. The face is on the screen and absent
+ * from every list of things on the screen.
+ *
+ * That is the right trade for a face that lives beside somebody's work all day.
+ * It is the wrong trade for the twenty minutes somebody spends recording a
+ * demonstration of it, and "record your whole desktop instead" is not an answer
+ * when the desktop has the rest of a person's life on it.
+ *
+ * So there are two modes and exactly three options between them:
+ *
+ *   focusable   — the one that decides override-redirect, and the whole point
+ *   skipTaskbar — a window worth recording is a window worth alt-tabbing to
+ *   title       — an untitled window is unaddressable in a window picker
+ *
+ * Nothing else moves, and a test asserts that by diffing the two results. In
+ * particular demo mode does not touch the permission handlers, the navigation
+ * rules, or the click-through: a demo of the face is a demo of the face, not a
+ * looser version of the program.
+ *
+ * The cost is stated rather than hidden: a focusable full-display transparent
+ * window can be alt-tabbed to, and while it is focused a click can land on it
+ * instead of on the work behind it. That is why demo mode is off by default and
+ * why the tray calls it what it is.
+ *
+ * @param {{ demo?: boolean }} [mode]
+ */
+export function windowOptionsFor({ demo = false } = {}) {
+  return {
+    // Frameless and transparent: the widget is an orb on the desk, not an
+    // application window with a title bar and a close button.
+    frame: false,
+    transparent: true,
+    backgroundColor: "#00000000",
+    hasShadow: false,
+    // On top of the work, because being spoken to should not require finding
+    // a window.
+    alwaysOnTop: true,
+    // Out of the taskbar and the switcher for the same reason — except while
+    // demonstrating, when being findable is the entire request.
+    skipTaskbar: !demo,
+    resizable: false,
+    // Dragging the orb moves the orb, not the window: the window is the desk
+    // the orb is drawn on and it stays where the desk is.
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    // Ordinarily never steals what the user was typing into: a face that took
+    // focus when it appeared would interrupt the very work it is meant to sit
+    // beside. In demo mode it is focusable, which is what makes the window
+    // manager manage it and therefore what makes it recordable.
+    focusable: demo,
+    // A name, so a person choosing this window out of a list has something to
+    // choose. Only in demo mode, because the ordinary window is not in any
+    // list to be chosen from.
+    title: demo ? "Mastra CC" : "",
+    show: false,
+  };
+}
+
+/**
  * Where the orb sits when it has not been dragged.
  *
  * The user chooses corner or centre; corner is the default because a face that
@@ -216,6 +303,35 @@ export function readDragRequest(request) {
   if (typeof dx !== "number" || typeof dy !== "number") return null;
   if (!Number.isFinite(dx) || !Number.isFinite(dy)) return null;
   return { phase, dx, dy, snap: snap === true };
+}
+
+/**
+ * The part of the window a photograph of the face may contain.
+ *
+ * The window is the whole display now, so "photograph the widget's own window"
+ * is no longer a narrow enough claim to be honest: most of that window is
+ * transparent, and a picture of it is a picture of the desk behind it unless
+ * the rectangle is stated. So the rectangle is stated — the orb's own box, in
+ * the window's coordinates, and nothing outside it is ever asked for.
+ *
+ * The result is clamped into the window, because a face dragged to the very
+ * edge of the desk has part of its box past the end of the stage, and a
+ * capture rectangle that runs off the window is a rectangle the platform is
+ * free to interpret.
+ *
+ * @param {{ x: number, y: number, width: number, height: number }} stage the window, screen coordinates
+ * @param {{ x: number, y: number }} orb the orb's top-left, screen coordinates
+ * @returns {{ x: number, y: number, width: number, height: number }} in window coordinates
+ */
+export function captureRect(stage, orb) {
+  const width = Math.min(WIDTH, stage.width);
+  const height = Math.min(HEIGHT, stage.height);
+  return {
+    x: Math.min(Math.max(Math.round(orb.x - stage.x), 0), stage.width - width),
+    y: Math.min(Math.max(Math.round(orb.y - stage.y), 0), stage.height - height),
+    width,
+    height,
+  };
 }
 
 /**

@@ -26,7 +26,8 @@ export type StateEvent =
   | { type: "progress"; id: string; text: string }
   | { type: "answer"; id: string; text: string }
   | { type: "voice_opened" }
-  | { type: "voice_closed" };
+  | { type: "voice_closed" }
+  | { type: "capture_request"; id: string };
 
 /*
  * `progress` and `answer` are the hub replying to an `ask` — the id is the
@@ -56,6 +57,22 @@ export type StateEvent =
  * An operation whose element has no reported geometry produces no word at all.
  * Guessing a position would make the face a progress bar that lies, and silence
  * is the honest degradation.
+ */
+
+/*
+ * `capture_request` is the hub asking a face to photograph itself.
+ *
+ * It carries an id and nothing else — no rectangle, no filename, no
+ * destination. A word that named where the picture should go would be a word
+ * that could point a face at a path; a word that named a region would be a
+ * word that could point a face at somebody else's pixels. What travels is the
+ * correlation id the answer comes back under, and the answer does not come
+ * back on this lane at all: the face POSTs the image to the hub over loopback
+ * HTTP, because this lane carries intent and never content.
+ *
+ * A face that cannot photograph itself — the SSE orb page, a skin, anything
+ * without a shell — ignores it, which is what every face already does with a
+ * word it does not know.
  */
 
 /** What a person does to a face. Intent, never content. */
@@ -102,6 +119,7 @@ export const STATE_EVENT_TYPES = [
   "answer",
   "voice_opened",
   "voice_closed",
+  "capture_request",
 ] as const satisfies readonly StateEventType[];
 
 export const GESTURE_TYPES = [
@@ -134,6 +152,7 @@ const STATE_EVENT_KEYS: Record<StateEventType, readonly string[]> = {
   answer: ["type", "id", "text"],
   voice_opened: ["type"],
   voice_closed: ["type"],
+  capture_request: ["type", "id"],
 };
 
 const GESTURE_KEYS: Record<GestureType, readonly string[]> = {
@@ -182,7 +201,9 @@ export function isStateEvent(value: unknown): value is StateEvent {
   if (!(STATE_EVENT_TYPES as readonly string[]).includes(type)) return false;
   if (!hasExactKeys(value, STATE_EVENT_KEYS[type as StateEventType])) return false;
   if (type === "caption") return typeof value.text === "string";
-  if (type === "released") return typeof value.id === "string" && value.id !== "";
+  if (type === "released" || type === "capture_request") {
+    return typeof value.id === "string" && value.id !== "";
+  }
   if (type === "progress" || type === "answer") {
     return isNonEmptyString(value.id) && isNonEmptyString(value.text);
   }
