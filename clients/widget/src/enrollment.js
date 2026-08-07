@@ -35,7 +35,11 @@ export function createEnrollment(root) {
   const skipBtn = root.querySelector("[data-enroll-skip]");
 
   let takes = [];
-  let open = false;
+  // Named apart from the open() function below: a `let` and a function
+  // declaration of the same name in one scope is a SyntaxError, and the module
+  // never parses. The unit tests import the factory through a stub and never
+  // evaluated this file in a browser, so only launching it caught this.
+  let opened = false;
 
   if (phraseEl) phraseEl.textContent = ENROLL_PHRASE;
 
@@ -78,7 +82,7 @@ export function createEnrollment(root) {
   }
 
   async function recordTake(slot) {
-    if (!open) return;
+    if (!opened) return;
     setButtonsDisabled(true);
     saveBtn.disabled = true;
 
@@ -104,7 +108,7 @@ export function createEnrollment(root) {
     buildTakeSlots();
     saveBtn.disabled = true;
     root.classList.remove("hidden");
-    open = true;
+    opened = true;
     // Claim the pointer the same way the right-click menu does: the window is
     // click-through except over shapes it drew, so the overlay must say "I am
     // here" or its buttons fall through the floor.
@@ -112,7 +116,7 @@ export function createEnrollment(root) {
   }
 
   function close() {
-    open = false;
+    opened = false;
     root.classList.add("hidden");
     window.widget.setPointerOverShape(false);
   }
@@ -133,5 +137,5 @@ export function createEnrollment(root) {
   saveBtn.addEventListener("click", save);
   skipBtn.addEventListener("click", close);
 
-  return { open, close, isOpen: () => open };
+  return { open, close, isOpen: () => opened };
 }
