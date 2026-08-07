@@ -29,7 +29,7 @@ describe("parseHealth", () => {
     expect(health.tools).toHaveLength(3);
     expect(health.desktopScope).toBe("observe");
     expect(health.plugins.admitted).toEqual(["desktop-control", "memorease"]);
-    expect(health.plugins.refused).toEqual(["plan"]);
+    expect(health.plugins.refused).toEqual([{ name: "plan" }]);
     expect(health.model?.pack).toBe("computer-controls-anthropic");
     expect(health.model?.tiers.heavy).toBe("anthropic/claude-opus-4-6");
     expect(health.voice).toEqual({ enabled: true });
@@ -45,6 +45,20 @@ describe("parseHealth", () => {
       enabled: false,
       reason: "no realtime voice provider on this machine yet",
     });
+  });
+
+  it("reads a refusal that came with a reason, and drops one with no name", () => {
+    const health = parseHealth({
+      ...LIVE_HEALTH,
+      plugins: {
+        admitted: ["desktop-control"],
+        refused: ["plan", { name: "handsy", reason: "not on the allowlist" }, { reason: "orphan" }],
+      },
+    });
+    expect(health.plugins.refused).toEqual([
+      { name: "plan" },
+      { name: "handsy", reason: "not on the allowlist" },
+    ]);
   });
 
   it("tolerates absent optional sections without inventing them", () => {
