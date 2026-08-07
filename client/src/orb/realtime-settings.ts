@@ -25,6 +25,8 @@ import path from "node:path";
 
 import { Hono } from "hono";
 
+import { REALTIME_PROVIDER_IDS, parseRealtimeProviderId } from "./providers.ts";
+
 export const REALTIME_SETTINGS_PATH = "/api/orb/realtime-settings";
 
 /** Provenance tag so the UI can say where a catalog entry came from. */
@@ -70,6 +72,7 @@ export const REALTIME_VOICES: readonly CatalogEntry[] = Object.freeze([
 export type RealtimeSettings = {
   realtimeModel?: string;
   realtimeVoice?: string;
+  realtimeProvider?: string;
 };
 
 /**
@@ -79,14 +82,17 @@ export type RealtimeSettings = {
 export type RealtimeSettingsView = {
   model: string | undefined;
   voice: string | undefined;
+  provider: string | undefined;
   models: readonly CatalogEntry[];
   voices: readonly CatalogEntry[];
+  providers: readonly string[];
   warnings: string[];
 };
 
 /** Keys this module owns in the shared settings file. */
 const MODEL_KEY = "realtimeModel";
 const VOICE_KEY = "realtimeVoice";
+const PROVIDER_KEY = "realtimeProvider";
 
 /** Read only the two keys this module owns from the shared settings file. */
 export async function readRealtimeSettings(settingsPath: string): Promise<RealtimeSettings> {
@@ -94,9 +100,11 @@ export async function readRealtimeSettings(settingsPath: string): Promise<Realti
     const raw = JSON.parse(await readFile(settingsPath, "utf8")) as Record<string, unknown>;
     const model = typeof raw[MODEL_KEY] === "string" ? (raw[MODEL_KEY] as string) : undefined;
     const voice = typeof raw[VOICE_KEY] === "string" ? (raw[VOICE_KEY] as string) : undefined;
+    const provider = typeof raw[PROVIDER_KEY] === "string" ? (raw[PROVIDER_KEY] as string) : undefined;
     return {
       ...(model !== undefined ? { realtimeModel: model } : {}),
       ...(voice !== undefined ? { realtimeVoice: voice } : {}),
+      ...(provider !== undefined ? { realtimeProvider: provider } : {}),
     };
   } catch {
     // No file yet, or corrupt JSON — nothing has been chosen.
@@ -110,7 +118,7 @@ export async function readRealtimeSettings(settingsPath: string): Promise<Realti
  */
 export async function writeRealtimeSettings(
   settingsPath: string,
-  patch: { model?: string; voice?: string },
+  patch: { model?: string; voice?: string; provider?: string },
 ): Promise<void> {
   // Read-modify-write: never truncate the file's other keys. The code-sdk owns
   // this file too, and stamping over its keys would silently change behaviour.
@@ -128,6 +136,10 @@ export async function writeRealtimeSettings(
   if (patch.voice !== undefined) {
     if (patch.voice === "") delete existing[VOICE_KEY];
     else existing[VOICE_KEY] = patch.voice;
+  }
+  if (patch.provider !== undefined) {
+    if (patch.provider === "") delete existing[PROVIDER_KEY];
+    else existing[PROVIDER_KEY] = patch.provider;
   }
 
   await mkdir(path.dirname(settingsPath), { recursive: true });
@@ -152,11 +164,19 @@ async function viewOf(settingsPath: string): Promise<RealtimeSettingsView> {
   if (!isKnown(settings.realtimeVoice, REALTIME_VOICES)) {
     warnings.push(warningFor("voice", settings.realtimeVoice!));
   }
+  // A provider the registry does not recognise is saved — not silently
+  // discarded — but warned, the same way an unknown model is. A typo does not
+  // turn the orb off; it gets a sentence that names it.
+  if (settings.realtimeProvider !== undefined && parseRealtimeProviderId(settings.realtimeProvider) === undefined) {
+    warnings.push(warningFor("provider", settings.realtimeProvider));
+  }
   return {
     model: settings.realtimeModel,
     voice: settings.realtimeVoice,
+    provider: settings.realtimeProvider,
     models: REALTIME_MODELS,
     voices: REALTIME_VOICES,
+    providers: [...REALTIME_PROVIDER_IDS],
     warnings,
   };
 }
@@ -173,12 +193,15 @@ export function buildRealtimeSettingsApp(settingsPath: string): Hono {
 
   app.put(REALTIME_SETTINGS_PATH, async (c) => {
     const body = await c.req.json().catch(() => undefined);
-    const patch = body as { model?: unknown; voice?: unknown } | undefined;
+    const patch = body as { model?: unknown; voice?: unknown; provider?: unknown } | undefined;
 
-    // At least one field must be present; both, when present, must be strings.
+    // At least one field must be present; all, when present, must be strings.
     // An empty string is the explicit "clear this" signal.
-    if (patch === undefined || (patch.model === undefined && patch.voice === undefined)) {
-      return c.json({ error: "Expected { model?, voice? } with at least one field." }, 400);
+    if (
+      patch === undefined ||
+      (patch.model === undefined && patch.voice === undefined && patch.provider === undefined)
+    ) {
+      return c.json({ error: "Expected { model?, voice?, provider? } with at least one field." }, 400);
     }
     if (patch.model !== undefined && typeof patch.model !== "string") {
       return c.json({ error: "model must be a string (or empty to clear)." }, 400);
@@ -186,10 +209,14 @@ export function buildRealtimeSettingsApp(settingsPath: string): Hono {
     if (patch.voice !== undefined && typeof patch.voice !== "string") {
       return c.json({ error: "voice must be a string (or empty to clear)." }, 400);
     }
+    if (patch.provider !== undefined && typeof patch.provider !== "string") {
+      return c.json({ error: "provider must be a string (or empty to clear)." }, 400);
+    }
 
     await writeRealtimeSettings(settingsPath, {
       ...(patch.model !== undefined ? { model: patch.model } : {}),
       ...(patch.voice !== undefined ? { voice: patch.voice } : {}),
+      ...(patch.provider !== undefined ? { provider: patch.provider } : {}),
     });
 
     // Answer with what was actually stored, so the UI never shows a value the

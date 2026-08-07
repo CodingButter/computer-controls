@@ -76,7 +76,7 @@ export const RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 15_000];
 /** Injectable so tests redial instantly instead of waiting out the backoff. */
 export type RetryWait = (attempt: number) => Promise<void>;
 
-const defaultRetryWait: RetryWait = (attempt) =>
+export const defaultRetryWait: RetryWait = (attempt) =>
   new Promise((resolve) => {
     const delay = RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)];
     unrefTimer(setTimeout(resolve, delay));
@@ -88,7 +88,7 @@ const defaultRetryWait: RetryWait = (attempt) =>
  * `unknown` because this module compiles for both worlds and neither lib
  * admits the other's timer shape.
  */
-function unrefTimer(timer: unknown): void {
+export function unrefTimer(timer: unknown): void {
   if (typeof timer === "object" && timer !== null && "unref" in timer) {
     (timer as { unref(): void }).unref();
   }
