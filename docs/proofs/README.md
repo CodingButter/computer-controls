@@ -90,6 +90,51 @@ the service telling edits apart), then select **part** of it and delete — clea
 the field reports `cleared`, which is a different claim and fails the table on
 purpose.
 
+### Parked: what-one-semantic-task-costs
+
+The README claims that operating a desktop by meaning is cheaper than driving it
+by screenshots and coordinates, and until now nothing here had measured it.
+`scripts/prove-token-cost.py` measures the canonical task — open the text
+editor's preferences, turn on line numbers — driven through the plugin, in
+tokens, model round trips and wall time, and writes
+`what-one-semantic-task-costs.md`. Not deposited yet: it needs a live desktop
+session, and this branch was cut from a headless environment, the same reason the
+two proofs above are parked. Its arithmetic did not wait for a desktop —
+`service/tests/test_token_cost_proof.py` holds the sums, the exclusions and the
+banner to what they may claim.
+
+The comparison leg is refused rather than deferred, and the artifact says so in
+the build's own words. Screenshot-and-coordinate control needs an OCR engine and
+a general raw-input driver; this build reports both as unavailable by design, not
+by omission, and a comparison run would mean building the thing the project
+exists to avoid. So the artifact carries the measured semantic numbers alone,
+quotes the refusals verbatim, and computes no ratio. Its verdict says the
+comparison was not run, because a half-measured comparison reported as a pass
+would be a lie with a filename — the same reason the permissions proof stops at
+its fifth step.
+
+Two measurement details are the reason this needed a script rather than a
+reading. Tokens are summed from the `usage_update` events of `--output jsonl`,
+never read from the `--output json` block: that block reports the *last model
+step*, not the run, because the runner assigns its usage field on each update
+instead of accumulating — an understatement that happens to flatter this
+project's claim, so the artifact prints both figures side by side. And success is
+read from `gsettings` out of band, because this task's outcome is invisible to
+the accessibility tree: the GTK4 gutter is drawn, not composed of accessible
+widgets, so the lane being measured cannot confirm its own work here (see
+`docs/07-open-questions.md`). Runs that did not turn the setting on, reached for
+the shell, or reported no usage at all are printed with their numbers and
+excluded from the median — billing a failed run as the task's price would
+understate it, and zero tokens is unmeasured, never free.
+
+Exit codes: `0` both legs ran, `1` no run completed the task through the semantic
+lane, `3` the machine is misconfigured (no runner on `PATH`, or no plugin
+registry — it is git-ignored, so a fresh clone must recreate it from the root
+README's snippet), and `4` partial: either the desktop was unreachable or the
+comparison was not run. A `4` with no desktop writes nothing at all, deliberately
+— an artifact whose every cell is a dash would sit here looking like a finding
+about the claim when all it records is that a machine had no screen.
+
 ### which-credential-the-voice-lane-accepts
 
 The voice lane can be handed either kind of OpenAI credential: a token minted by
