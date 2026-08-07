@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import type { AppAccess, PermissionRow, PermissionsView } from "@/lib/hub";
@@ -226,12 +227,33 @@ function DetailPanel(props: {
   );
 }
 
+/**
+ * How long ago the census on screen was read, in the audit page's words.
+ *
+ * The stamp is relative rather than a wall clock because the honest claim is
+ * about the age of the answer, not the hour it arrived — and a formatted time
+ * would drag the viewer's locale into a string the tests have to assert.
+ */
+function freshness(updatedAt: number, now: number): string {
+  const seconds = Math.max(0, Math.round((now - updatedAt) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.round(minutes / 60)}h ago`;
+}
+
 export function PermissionsPanel(props: {
   view: PermissionsView;
   /** Fired with the row's exact name — the ceiling matches substrings, so fragments are never sent. */
   onChoose: (app: string, access: Exclude<AppAccess, "custom">) => void;
+  /** When the view on screen was read. Omitted by callers that have no clock. */
+  updatedAt?: number;
+  /** Injected by tests so the stamp is deterministic; the page passes its own tick. */
+  now?: number;
+  /** Ask for a census now, rather than waiting out the poll. */
+  onRefresh?: () => void;
 }) {
-  const { view, onChoose } = props;
+  const { view, onChoose, updatedAt, now, onRefresh } = props;
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<string | undefined>(undefined);
 
@@ -250,15 +272,27 @@ export function PermissionsPanel(props: {
 
       <div className="flex items-center justify-between gap-4">
         <ModeControl mode={view.mode} />
-        <Input
-          variant="pill"
-          type="search"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-          placeholder="Search applications…"
-          aria-label="Search applications"
-          className="w-64"
-        />
+        <div className="flex items-center gap-3">
+          {updatedAt !== undefined ? (
+            <span className="text-xs text-muted">
+              Updated {freshness(updatedAt, now ?? updatedAt)}
+            </span>
+          ) : null}
+          {onRefresh ? (
+            <Button variant="outline" size="sm" onClick={onRefresh}>
+              Refresh
+            </Button>
+          ) : null}
+          <Input
+            variant="pill"
+            type="search"
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+            placeholder="Search applications…"
+            aria-label="Search applications"
+            className="w-64"
+          />
+        </div>
       </div>
 
       <div className="rounded-lg border border-accent/40 bg-accent/10 px-4 py-2.5 text-sm text-foreground">
