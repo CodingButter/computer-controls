@@ -13,14 +13,14 @@
  * it likes, but the handle is a random identifier it never saw, so the sentence
  * it writes has nothing to land on.
  *
- * What this store does NOT enforce, stated plainly because the difference
- * matters: that the yes arrived as a fresh top-level turn from the person rather
- * than in the same turn from the model holding the handle. The model is told to
- * wait, and nothing here makes it. What bounds that gap is the change set, not
- * the mechanism — the widening verbs here pick a voice provider and open a
- * sign-in the person must complete themselves. Before anything that widens what
- * an agent may do to the desktop is added to this gate, the turn boundary has to
- * become a check rather than an instruction (#154).
+ * The handle alone would still not be enough, because the model that has to say
+ * the sentence out loud is also the model holding the handle: nothing in a
+ * random identifier stops it from calling confirm in the same breath it staged
+ * the change, having asked nobody. So a staged change also remembers the turn it
+ * was asked for in, and a yes arriving in that same turn is refused. A person's
+ * answer is a new turn by definition — they had to speak again to give it — so
+ * the turn boundary is the one thing about a yes the model cannot produce on its
+ * own. It is a check here rather than an instruction in a prompt (#154).
  *
  * Staged changes are single use and they expire. Both bound the window in which
  * a yes meant for one change could land on another, which is the failure mode
@@ -44,6 +44,12 @@ export interface StagedChange {
   target: string;
   /** The exact sentence a person is answering. */
   echo: string;
+  /**
+   * The turn this change was asked for in. Not who asked — what is being
+   * checked is that the yes came from somewhere else in the conversation than
+   * the request did, and a turn is the smallest unit that is true of.
+   */
+  turn: string;
   expiresAt: number;
 }
 
@@ -60,8 +66,13 @@ export interface ConfirmationRequest {
  * A handle that was already spent and a handle that never existed are the same
  * answer, the same way a stranger's sign-in session and a session that never
  * existed are: telling them apart would only be useful to somebody guessing.
+ *
+ * `same-turn` is deliberately not one of those. It is the only refusal a caller
+ * learns something from, and what it learns is about its own behaviour rather
+ * than about a handle it was guessing at — the caller already held the token, so
+ * saying why costs nothing and saves the model from retrying blindly.
  */
-export type ConfirmRefusal = "unknown" | "expired";
+export type ConfirmRefusal = "unknown" | "expired" | "same-turn";
 
 export class ConfirmationError extends Error {
   readonly refusal: ConfirmRefusal;
@@ -101,13 +112,14 @@ export class ConfirmationStore {
    * describe a change as something milder than it is, and the person would be
    * answering a question about a different change than the one that lands.
    */
-  stage(change: SettingsChange, target: string): ConfirmationRequest {
+  stage(change: SettingsChange, target: string, turn: string): ConfirmationRequest {
     this.sweep();
     const staged: StagedChange = {
       token: randomUUID(),
       change,
       target,
       echo: `You want me to ${describeChange(change, target)} — yes?`,
+      turn,
       expiresAt: this.now() + this.ttlMs,
     };
     this.pending.set(staged.token, staged);
@@ -128,8 +140,14 @@ export class ConfirmationStore {
    * retried into existence, and a spent one is gone whether or not the change
    * that followed it succeeded. A caller who wants to make the change twice has
    * to ask twice and be confirmed twice.
+   *
+   * `turn` is the turn the yes arrived in, and it has to be a different one from
+   * the turn that asked. A caller that tries anyway loses the staged change
+   * along with the attempt — it is removed before this is checked, like every
+   * other refusal — because a caller confirming its own request never heard an
+   * answer, so there is nothing left for a later yes to be a yes to.
    */
-  commit(token: string): StagedChange {
+  commit(token: string, turn: string): StagedChange {
     const staged = this.pending.get(token);
     if (!staged) {
       throw new ConfirmationError(
@@ -138,6 +156,17 @@ export class ConfirmationStore {
       );
     }
     this.pending.delete(token);
+
+    if (turn === staged.turn) {
+      throw new ConfirmationError(
+        "same-turn",
+        "That confirmation arrived in the same turn that asked for the change, so nobody has answered yet. " +
+          `Say the sentence, wait for the person's own answer, and ask again if they want me to ${describeChange(
+            staged.change,
+            staged.target,
+          )}.`,
+      );
+    }
 
     if (this.now() > staged.expiresAt) {
       throw new ConfirmationError(

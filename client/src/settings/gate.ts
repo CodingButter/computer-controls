@@ -14,6 +14,7 @@
  * state the machine is safe in.
  */
 
+import { HUB_TURNS, type TurnScope } from "../turn.ts";
 import type { ProviderId } from "../auth/providers.ts";
 import type { LoginSessionView } from "../auth/service.ts";
 import type { ProviderConnection } from "../auth/credentials.ts";
@@ -50,17 +51,26 @@ export interface SettingsGateOptions {
   settings: SettingsService;
   audit: SettingsAudit;
   confirmations?: ConfirmationStore;
+  /**
+   * Where the gate learns which turn it is being asked in. The hub's own scope
+   * unless a test supplies another, and the same scope the chat entry point
+   * opens turns on — a gate reading a scope nobody writes has no turns to tell
+   * apart, which is why it refuses to work outside one at all.
+   */
+  turns?: TurnScope;
 }
 
 export class SettingsGate {
   private readonly settings: SettingsService;
   private readonly audit: SettingsAudit;
   private readonly confirmations: ConfirmationStore;
+  private readonly turns: TurnScope;
 
   constructor(options: SettingsGateOptions) {
     this.settings = options.settings;
     this.audit = options.audit;
     this.confirmations = options.confirmations ?? new ConfirmationStore();
+    this.turns = options.turns ?? HUB_TURNS;
   }
 
   /** Reads pass straight through: knowing what the settings are changes nothing. */
@@ -112,13 +122,16 @@ export class SettingsGate {
    * carried its own description of what it was confirming would let the sentence
    * a person heard and the change that lands drift apart, which is the only
    * thing this whole mechanism exists to prevent.
+   *
+   * The turn is read here rather than taken as an argument for the same reason:
+   * a caller that could name its own turn could name the one it was not in.
    */
   async confirm(
     token: string,
     ownerId: string,
     surface: SettingsSurface,
   ): Promise<AppliedResult<VoiceSettingView[] | LoginSessionView>> {
-    const staged = this.confirmations.commit(token);
+    const staged = this.confirmations.commit(token, this.currentTurn());
 
     const applied = await this.apply(staged.change, staged.target, ownerId);
 
@@ -147,8 +160,30 @@ export class SettingsGate {
     if (SETTINGS_CHANGE_DIRECTION[change] !== "widen") {
       throw new SettingsError(500, "Only a widening change is staged for confirmation.");
     }
-    const request: ConfirmationRequest = this.confirmations.stage(change, target);
+    const request: ConfirmationRequest = this.confirmations.stage(change, target, this.currentTurn());
     return { status: "needs-confirmation", token: request.token, echo: request.echo };
+  }
+
+  /**
+   * The turn this call is part of, or a refusal.
+   *
+   * Refusing is the whole point of reading it here. If a widening change could
+   * be staged with no turn recorded, a yes could not be told apart from the
+   * request that produced it, and the check would quietly pass for exactly the
+   * caller it exists to catch. A gate that is wired wrong has to stop working
+   * rather than stop checking, so both halves — asking and confirming — insist
+   * on a turn, and anything that wants to use this gate from somewhere other
+   * than a conversation has to say what its turn is first.
+   */
+  private currentTurn(): string {
+    const turn = this.turns.current();
+    if (!turn) {
+      throw new SettingsError(
+        500,
+        "A settings change has to happen inside a turn, and this one did not. Nothing was changed.",
+      );
+    }
+    return turn;
   }
 
   private assertVoiceProviderIsPickable(provider: VoiceProviderId): void {

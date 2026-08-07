@@ -9,6 +9,7 @@ import { createAgentTurn } from "./chat.ts";
 import type { HubController, HubSession } from "./chat.ts";
 import { resolveClientConfig } from "./config.ts";
 import { prepareHub } from "./hub.ts";
+import { HUB_TURNS } from "./turn.ts";
 
 /**
  * A chat turn, end to end, minus the model.
@@ -192,6 +193,37 @@ test("the hub thinks with the pack it is handed, and health says which one", asy
   expect(second.model.pack).toBe("picked-again");
   expect(second.model.thinking).toBe("anthropic/claude-haiku-4-5");
 }, 120_000);
+
+test("each turn has an identity of its own, and the work it starts can read it", async () => {
+  // What the settings gate compares against. The identity is not passed to
+  // anything — a tool running several awaits deep inside the run reads it
+  // ambiently, which is the only way it could, since tools are built at boot
+  // and the runtime decides what arguments they get.
+  const seen: (string | undefined)[] = [];
+  const turn = createAgentTurn({
+    controller: hubController,
+    getSession: hubSession,
+    model: "whichever",
+    run: (() => ({
+      result: (async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        seen.push(HUB_TURNS.current());
+        return { status: "completed", text: "ok", threadId: "t" };
+      })(),
+    })) as never,
+  });
+
+  await turn({ message: "use OpenAI for the voice" });
+  await turn({ message: "yes" });
+
+  expect(seen[0]).toBeTruthy();
+  expect(seen[1]).toBeTruthy();
+  // Two messages from the person are two turns. Everything the confirmation
+  // gate refuses hangs on these two values being different.
+  expect(seen[0]).not.toBe(seen[1]);
+  // And nothing outside a turn has one to borrow.
+  expect(HUB_TURNS.current()).toBeUndefined();
+});
 
 test("an empty message is refused before it reaches the agent", async () => {
   const before = received.length;
