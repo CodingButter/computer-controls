@@ -59,6 +59,25 @@ SUBMISSION_ENV = "DESKTOP_SKILL_SUBMISSION"
 CAP = 3
 
 
+def screen(skill: Skill) -> Verdict:
+    """Every screen, run against both the structure and the published text.
+
+    The rendered pair is what a reviewer and every consuming machine will
+    actually read, so it is what the content screen reads. Screening the
+    dataclass and publishing the document would be screening one thing and
+    shipping another.
+
+    This is a function rather than a method because there is more than one
+    destination a skill can be offered to — a proposal this machine opens
+    itself, and a person pressing publish against the project's service — and
+    the rule at the top of this file is about the *gate*, not about the
+    forge. Two callers of one screening function is one gate; two callers each
+    assembling their own screens is how the second one ends up missing the
+    screen that was added last.
+    """
+    return validate(skill, rendered=render(skill) + "\n" + render_review(skill))
+
+
 class Refused(RuntimeError):
     """The gate said no. Carries the screens, never what they matched on."""
 
@@ -173,14 +192,8 @@ class Curator:
         self.enabled = enabled
 
     def screen(self, skill: Skill) -> Verdict:
-        """Every screen, run against both the structure and the published text.
-
-        The rendered pair is what a reviewer and every consuming machine will
-        actually read, so it is what the content screen reads. Screening the
-        dataclass and publishing the document would be screening one thing and
-        shipping another.
-        """
-        return validate(skill, rendered=render(skill) + "\n" + render_review(skill))
+        """The gate, as this curator asks it. See `screen` above."""
+        return screen(skill)
 
     def submit(self, skill: Skill) -> Submission:
         """Screen a skill and, if it passes and this machine publishes, propose it.

@@ -9,13 +9,14 @@ not a real route proves the package can hold a shape somebody made up.
 
 from __future__ import annotations
 
+import urllib.request
 from pathlib import Path
 
 import pytest
 
 from episode_recorder import Author
 
-from skill_commons import Skill, Step, Verification
+from skill_commons import Receipt, Skill, Step, Verification, render, render_review
 from skill_commons.registry import SkillRegistry, write_pair
 
 
@@ -130,3 +131,115 @@ def _flag(argv: tuple[str, ...], flag: str) -> str:
 @pytest.fixture
 def forge() -> FakeForge:
     return FakeForge()
+
+
+class FakeService:
+    """The publishing service (#160), before there is one.
+
+    It records the pair it was handed rather than a summary of it, because the
+    thing every publish test wants to ask is whether the bytes that arrived are
+    the bytes the person read.
+    """
+
+    def __init__(self) -> None:
+        self.proposals: list[dict[str, str]] = []
+        self.next_number = 300
+        self.refuse_with: str = ""
+
+    def propose(self, *, skill: str, document: str, review: str) -> Receipt:
+        self.proposals.append(
+            {"skill": skill, "document": document, "review": review}
+        )
+        if self.refuse_with:
+            return Receipt(skill=skill, accepted=False, reason=self.refuse_with)
+        number = self.next_number
+        self.next_number += 1
+        return Receipt(
+            skill=skill,
+            accepted=True,
+            where=f"https://github.com/owner/repo/pull/{number}",
+        )
+
+    @property
+    def last(self) -> dict[str, str]:
+        assert self.proposals, "nothing was offered to the service"
+        return self.proposals[-1]
+
+
+class FakePublished:
+    """The published set, answered from memory instead of over the wire.
+
+    Built from real skills so that what a fetch reads back is what a merge
+    would actually have left in the repository — the same rendered pair, not a
+    fixture shaped like one.
+    """
+
+    where = "owner/repo@main"
+
+    def __init__(self, *skills: Skill) -> None:
+        self.holds = {
+            skill.name: (render(skill), render_review(skill)) for skill in skills
+        }
+        self.reads: list[str] = []
+
+    def names(self) -> tuple[str, ...]:
+        return tuple(sorted(self.holds))
+
+    def read(self, name: str) -> tuple[str, str]:
+        self.reads.append(name)
+        return self.holds[name]
+
+
+class FakeTransport:
+    """Scripted answers, and every request that was made to get them.
+
+    `answers` is keyed by whatever part of the URL is worth naming, so a test
+    can say what the listing says and what each file says without writing the
+    whole address twice.
+    """
+
+    def __init__(
+        self, status: int = 200, body: str = "{}", answers: dict | None = None
+    ) -> None:
+        self.status = status
+        self.body = body
+        self.answers = answers or {}
+        self.requests: list[urllib.request.Request] = []
+        self.raise_with: OSError | None = None
+
+    def __call__(self, request, timeout):
+        self.requests.append(request)
+        if self.raise_with:
+            raise self.raise_with
+        for fragment, answered in self.answers.items():
+            if fragment in request.full_url:
+                return answered if isinstance(answered, tuple) else (200, answered)
+        return self.status, self.body
+
+    def asked_for(self, fragment: str) -> urllib.request.Request:
+        matched = [one for one in self.requests if fragment in one.full_url]
+        assert matched, f"nothing was asked for containing {fragment!r}"
+        return matched[-1]
+
+    @property
+    def last(self) -> urllib.request.Request:
+        assert self.requests, "no request was made"
+        return self.requests[-1]
+
+
+@pytest.fixture
+def service() -> FakeService:
+    return FakeService()
+
+
+@pytest.fixture
+def published() -> FakePublished:
+    return FakePublished(a_route(), another_route())
+
+
+@pytest.fixture
+def here(tmp_path: Path) -> Path:
+    """An empty commons on the machine doing the fetching."""
+    root = tmp_path / "fetched"
+    root.mkdir()
+    return root

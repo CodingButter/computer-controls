@@ -10,9 +10,17 @@ somewhere a person can point at, leaves a record saying which screen said no,
 and does not appear on the far end. A gate nobody can show refusing is a gate
 nobody should trust.
 
-What is faked here is the forge and nothing else. The screens, the renderer, the
-header writer, the folder layout and the registry are the real ones, because a
-test that mocked any of them would be proving that the mock agrees with itself.
+The trip is proved twice, because there are two people who can take it. A
+maintainer's machine reaches the commons through the forge, with a checkout and
+a token. Everybody else presses publish, sends two rendered documents to the
+project's service, and fetches back what was merged — no account, no git. Both
+end at the same place: a folder on a second machine holding a route that says it
+is advisory.
+
+What is faked here is the forge, the service, and nothing else. The screens, the
+renderer, the header writer, the folder layout and the registry are the real
+ones, because a test that mocked any of them would be proving that the mock
+agrees with itself.
 """
 
 from __future__ import annotations
@@ -22,7 +30,7 @@ from pathlib import Path
 import pytest
 
 
-from skill_commons import NotPublishable, Step, Verification, render
+from skill_commons import Fetcher, NotPublishable, Publisher, Step, Verification, render
 from skill_commons.curation import Curator, Ledger, refusals_in
 from skill_commons.forge import GitHubForge
 from skill_commons.registry import SkillRegistry, write_pair
@@ -84,6 +92,78 @@ def test_a_route_one_machine_derived_is_one_another_machine_can_be_handed(
     assert "`setAttention`" in handed.instructions
     # And the thing every consuming agent has to be told, on the route itself.
     assert "advisory" in handed.instructions
+
+
+def test_a_person_can_do_the_same_trip_with_a_button_and_no_account(
+    service, tmp_path: Path
+):
+    """The same journey, taken by somebody who has never used `git`.
+
+    The path above is the machine's: a curator with publishing switched on, a
+    checkout, and a forge that runs `gh`. This one is the person's. They read
+    the rendered skill and its review in full, press publish once, and the
+    bytes go to the project's service — no account, no token, no checkout. A
+    person merges, as before, and a second person on a second machine fetches
+    what came out, gets the route and the review, and can put it back.
+    """
+    derived = a_route()
+    publisher = Publisher(service)
+
+    shown = publisher.preview(derived)
+    receipt = publisher.publish(shown)
+
+    assert receipt.accepted
+    assert service.last["document"] == shown.document
+
+    # The merge: a human read both halves and said yes. What lands in the
+    # repository is what the service was given, which is what was on screen.
+    merged = tmp_path / "commons"
+    merged.mkdir()
+    (merged / derived.name).mkdir()
+    (merged / derived.name / "SKILL.md").write_text(service.last["document"])
+    (merged / derived.name / "REVIEW.md").write_text(service.last["review"])
+
+    # The far end, fetching rather than checking out.
+    here = tmp_path / "fetched"
+    here.mkdir()
+    fetcher = Fetcher(here, _PublishedFolder(merged))
+
+    assert fetcher.available() == (derived.name,)
+    got = fetcher.fetch(derived.name)
+
+    handed = SkillRegistry(here).get(derived.name)
+    assert handed is not None
+    assert "`Private channels`" in handed.instructions
+    assert "advisory" in handed.instructions
+    assert (got.path / "REVIEW.md").read_text() == shown.review
+
+    # And it can leave again, taking nothing else with it.
+    fetcher.remove(derived.name)
+    assert SkillRegistry(here).list() == ()
+
+
+class _PublishedFolder:
+    """The merged commons, read as the published set.
+
+    A folder rather than a fake: the point of this file is that as few things
+    as possible are pretend, and after a merge the published set *is* a
+    directory of pairs.
+    """
+
+    where = "owner/repo@main"
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    def names(self) -> tuple[str, ...]:
+        return tuple(sorted(one.name for one in self.root.iterdir()))
+
+    def read(self, name: str) -> tuple[str, str]:
+        folder = self.root / name
+        return (
+            (folder / "SKILL.md").read_text(),
+            (folder / "REVIEW.md").read_text(),
+        )
 
 
 def test_the_agent_on_the_far_end_finds_it_by_asking_for_the_task(

@@ -102,14 +102,39 @@ whose machine it was.
 ```
 skills/
   <app>-<task>/
-    SKILL.md     the route
-    REVIEW.md    the case for it
+    SKILL.md      the route
+    REVIEW.md     the case for it
+    FETCHED.json  present only if this machine downloaded it
 ```
 
 A folder whose `SKILL.md` claims a different name than the folder is refused at
 load. An agent told it is using one skill while following another has been
 handed a route it did not ask for, and that is the shape a poisoned submission
 takes.
+
+## The two verbs a person has
+
+**Publish one skill.** You are shown the rendered `SKILL.md` and its `REVIEW.md`
+in full — not a summary, because a summary is an argument and an argument for a
+poisoned skill is exactly what this gate exists to stop — and then one button
+sends those same bytes. It goes to the project's own service, not to GitHub from
+your machine: publishing needs no account, no token and no `git` here, because
+the credential lives on the service and the screens run again there where a
+modified client cannot skip them. Afterwards you are told it was proposed, and
+where.
+
+**Fetch the ones other people published.** This folder is already the place the
+runtime reads, so a fetched skill is just a merged pair landing in it, with no
+more authority than one this machine worked out. It arrives with its review, so
+you can read why the collective took it. It is checked on arrival the same way
+it was checked before it was published — nothing is trusted for having been
+downloaded.
+
+Fetching is opt-in and it is revocable. A downloaded skill carries a
+`FETCHED.json` beside its pair, naming where it came from and when, which is
+what lets you list what came from the commons and take it back out again.
+Removing refuses any folder without that marker, so taking the commons off a
+machine cannot cost it the routes it derived itself.
 
 ## For end users
 
