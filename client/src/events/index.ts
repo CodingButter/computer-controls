@@ -6,7 +6,7 @@ export {
   MalformedDeviceCredentials,
   createDeviceCredentialStore,
 } from "./device-credentials.ts";
-export type { DeviceCredential, DeviceCredentialStore } from "./device-credentials.ts";
+export type { DeviceCredential, DeviceCredentialStore, PairedDevice } from "./device-credentials.ts";
 export { ScriptedEventSource } from "./source.ts";
 export type { EventSource } from "./source.ts";
 export { combineEventSources, createTouchLane, harvestGeometry, targetOf } from "./touch-lane.ts";

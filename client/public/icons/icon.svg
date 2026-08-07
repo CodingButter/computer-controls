@@ -1,0 +1,19 @@
+<!--
+  The home-screen icon, in the dashboard's palette (dashboard/src/theme.ts).
+
+  Everything that matters sits inside a circle of radius 205 around the centre,
+  which is the safe area a maskable icon is allowed to assume: Android crops
+  this square to whatever shape the launcher uses, and art that fills the square
+  loses its corners. The ground is drawn to the edge on purpose — that is the
+  part meant to be cropped.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#101b2d"/>
+  <rect x="144" y="150" width="224" height="150" rx="16" fill="#0a1626" stroke="#0de6f9" stroke-width="10"/>
+  <rect x="176" y="186" width="160" height="12" rx="6" fill="#0de6f9"/>
+  <rect x="176" y="218" width="112" height="10" rx="5" fill="#8ba3bb"/>
+  <rect x="176" y="246" width="136" height="10" rx="5" fill="#8ba3bb"/>
+  <rect x="236" y="316" width="40" height="60" rx="20" fill="#0de6f9"/>
+  <path d="M212 352a44 44 0 0 0 88 0" fill="none" stroke="#0de6f9" stroke-width="10" stroke-linecap="round"/>
+  <rect x="248" y="396" width="16" height="24" rx="6" fill="#0de6f9"/>
+</svg>

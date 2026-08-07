@@ -82,6 +82,64 @@ test("the orb and its vendored module still serve from the hub's own root", asyn
   }
 });
 
+test("the pieces a phone needs to install the hub are served, and typed so a browser reads them", async () => {
+  const app = appWithDashboard();
+
+  const manifest = await app.request("/manifest.webmanifest");
+  expect(manifest.status).toBe(200);
+  // Served as JSON — or worse, as a byte stream — some browsers ignore the
+  // manifest entirely and the install prompt never appears, which reads as a
+  // broken manifest rather than a wrong content type.
+  expect(manifest.headers.get("content-type")).toContain("application/manifest+json");
+
+  const parsed = JSON.parse(await manifest.text());
+  expect(parsed.start_url).toBe("/");
+  // Standalone display is the difference between an installed app and a
+  // bookmark that opens the browser.
+  expect(parsed.display).toBe("standalone");
+
+  // Both sizes must exist and be maskable: an icon that is merely "any" gets
+  // letterboxed inside the launcher's shape on Android.
+  const icons = parsed.icons as { src: string; sizes: string; purpose: string }[];
+  for (const size of ["192x192", "512x512"]) {
+    const icon = icons.find((candidate) => candidate.sizes === size);
+    expect(icon, `an icon at ${size} is required for install`).toBeDefined();
+    expect(icon?.purpose).toContain("maskable");
+
+    const served = await app.request(icon!.src);
+    expect(served.status, `${icon!.src} is named by the manifest and must exist`).toBe(200);
+    expect(served.headers.get("content-type")).toContain("image/png");
+  }
+
+  const worker = await app.request("/sw.js");
+  expect(worker.status).toBe(200);
+  expect(worker.headers.get("content-type")).toContain("javascript");
+});
+
+test("the service worker leaves every live answer alone", async () => {
+  const app = appWithDashboard();
+  const source = await (await app.request("/sw.js")).text();
+
+  // The worker must decline to answer anything under /api or the event socket.
+  // A cached device list says a phone is connected after it went away, and a
+  // cached grant shows a permission that has since been revoked: stale answers
+  // here are false statements about what an agent may do, not stale pixels.
+  const live = /const LIVE = \[([^\]]*)\]/.exec(source);
+  expect(live, "the worker must name the paths it refuses to cache").not.toBeNull();
+  expect(live![1]).toContain("/api/");
+  expect(live![1]).toContain("/events");
+
+  // And it must decline by not answering, so the request goes to the network
+  // untouched, rather than by answering with a network fetch of its own.
+  expect(source).toMatch(/if \(isLive\(url\.pathname\)\) return;/);
+
+  // Nothing about the desktop may be named in the precache list.
+  const shell = /const SHELL = \[([^\]]*)\]/.exec(source);
+  expect(shell).not.toBeNull();
+  expect(shell![1]).not.toContain("/api");
+  expect(shell![1]).not.toContain("/events");
+});
+
 test("an unbuilt dashboard is refused with the build command, never a blank 404", async () => {
   const app = buildApp({
     chat: async () => ({ text: "", status: "ok" }),

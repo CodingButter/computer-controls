@@ -64,7 +64,7 @@ disconnect cleanup all key off the connection, so agents sharing one become one 
 places at once.
 
 - [#31](https://github.com/CodingButter/computer-controls/issues/31) — the reshape: a core, an agent layer, and many clients
-- [#35](https://github.com/CodingButter/computer-controls/issues/35) — the first client, and it is not this plugin
+- [#35](https://github.com/CodingButter/computer-controls/issues/35) — the first client, and it is not this plugin *(the phone pairs and installs; see `docs/11-the-phone.md`)*
 - [#36](https://github.com/CodingButter/computer-controls/issues/36) — a stranger connects: installer, hosted client, account
 
 ## Known limits

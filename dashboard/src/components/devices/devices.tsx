@@ -4,6 +4,7 @@ import { CircleDot as CircleDotIcon, Monitor as MonitorIcon, Smartphone as Smart
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PairPanel } from "@/components/devices/pair-panel";
 import type { DeviceView, DevicesView } from "@/lib/hub";
 import { cn } from "@/lib/utils";
 
@@ -34,30 +35,41 @@ function DeviceMark(props: { kind: string; connected: boolean }) {
   );
 }
 
-function DeviceRow(props: { device: DeviceView }) {
+function DeviceRow(props: { device: DeviceView; onRevoke?: (id: string) => void }) {
   const { device } = props;
+  // A control appears only where the hub said there is something to revoke and
+  // gave a handle to revoke it with. The page never decides removability.
+  const revocable = device.removable && typeof device.id === "string";
   return (
     <li
       data-testid="device-row"
       className="flex items-start gap-3 rounded-xl border border-border bg-well/40 p-3"
     >
       <DeviceMark kind={device.kind} connected={device.connected} />
-      <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-foreground">{device.name}</span>
           <Badge variant={device.connected ? "success" : "muted"}>
             {device.connected ? "Connected" : "Not connected"}
           </Badge>
-          {device.removable ? <Badge variant="warning">Removable</Badge> : null}
         </div>
         {/* The hub's sentence, verbatim. It knows why; the page does not. */}
         <p className="text-sm text-muted">{device.detail}</p>
       </div>
+      {revocable && props.onRevoke ? (
+        <button
+          type="button"
+          onClick={() => props.onRevoke?.(device.id!)}
+          className="shrink-0 self-center rounded-lg border border-border px-2 py-1 text-xs text-muted transition hover:border-danger hover:text-danger"
+        >
+          Remove
+        </button>
+      ) : null}
     </li>
   );
 }
 
-export function DevicesPanel(props: { view: DevicesView }) {
+export function DevicesPanel(props: { view: DevicesView; onRevoke?: (id: string) => void }) {
   const { devices, pairing } = props.view;
   const connected = devices.filter((device) => device.connected).length;
 
@@ -83,7 +95,11 @@ export function DevicesPanel(props: { view: DevicesView }) {
           ) : (
             <ul className="flex flex-col gap-2">
               {devices.map((device) => (
-                <DeviceRow key={`${device.kind}:${device.name}`} device={device} />
+                <DeviceRow
+                  key={device.id ?? `${device.kind}:${device.name}`}
+                  device={device}
+                  onRevoke={props.onRevoke}
+                />
               ))}
             </ul>
           )}
@@ -96,7 +112,7 @@ export function DevicesPanel(props: { view: DevicesView }) {
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {pairing.enabled ? (
-            <p className="text-sm text-muted">This hub can pair another device.</p>
+            <PairPanel />
           ) : (
             <>
               {/* Off with a reason rather than a button that fails when pressed. */}

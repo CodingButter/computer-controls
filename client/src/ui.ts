@@ -9,6 +9,10 @@ const CONTENT_TYPES: Record<string, string> = {
   ".png": "image/png",
   ".ico": "image/x-icon",
   ".json": "application/json; charset=utf-8",
+  // A manifest served as JSON is ignored by some browsers and the install
+  // prompt never appears, which looks like a bug in the manifest rather than
+  // in the type it was served under.
+  ".webmanifest": "application/manifest+json; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
   ".woff2": "font/woff2",
 };

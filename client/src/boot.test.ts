@@ -203,7 +203,14 @@ test("the devices route answers through the booted hub, and counts a real face",
   expect(before.devices[0]!.kind).toBe("hub");
   expect(before.devices[0]!.connected).toBe(true);
   expect(before.devices.find((d) => d.kind === "widget")!.connected).toBe(false);
-  expect(before.pairing.enabled).toBe(false);
+  // Pairing is on because this process wired a credential store, and the page
+  // reads that off the same answer. A hub that said "enabled" here while the
+  // mint was not actually mounted would draw a button that fails when pressed,
+  // so the claim is checked against the route rather than trusted.
+  expect(before.pairing.enabled).toBe(true);
+  // No phone has paired, so the list is the machine and the widget and nothing
+  // invented alongside them.
+  expect(before.devices.filter((d) => d.kind === "paired")).toHaveLength(0);
 
   const face = new WebSocket(`${baseUrl.replace("http://", "ws://")}${EVENTS_PATH}`);
   try {
@@ -217,6 +224,61 @@ test("the devices route answers through the booted hub, and counts a real face",
   } finally {
     face.close();
   }
+});
+
+test("a phone pairs through the booted hub, and the ceremony's two routes share one store", async () => {
+  // The claim only the running process can make. Every part of this ceremony has
+  // its own unit test against a hand-built app, and all of them would pass with
+  // the mint wired to a different credential store than the events door checks —
+  // which would be a hub that pairs phones and then refuses them.
+  const minted = (await fetch(`${baseUrl}/api/pairing/ticket`, { method: "POST" }).then((r) =>
+    r.json(),
+  )) as { code: string; expiresAt: number };
+  expect(typeof minted.code).toBe("string");
+  expect(minted.expiresAt).toBeGreaterThan(Date.now());
+
+  const paired = (await fetch(`${baseUrl}/api/pairing/redeem`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code: minted.code, label: "A test phone" }),
+  }).then((r) => r.json())) as { id: string; secret: string; label: string };
+  expect(paired.label).toBe("A test phone");
+
+  try {
+    // The paired phone now appears on the list, named by what it called itself.
+    const listed = (await fetch(`${baseUrl}/api/devices`).then((r) => r.json())) as DevicesView;
+    const row = listed.devices.find((d) => d.kind === "paired");
+    expect(row?.name).toBe("A test phone");
+    expect(row?.removable).toBe(true);
+    // The list route must never carry the secret back out, whatever else it says.
+    expect(JSON.stringify(listed)).not.toContain(paired.secret);
+
+    // What this test cannot show: that the credential opens the door. Every
+    // connection reaching this hub is loopback, and loopback is admitted on the
+    // kernel's word before any credential is read — so a socket opened here
+    // with this secret would succeed even if the secret were wrong. The door's
+    // treatment of a remote peer holding a credential is proven in
+    // socket.test.ts against a fabricated peer address, which is the only place
+    // that distinction can be drawn.
+    //
+    // The same code cannot pair a second phone: it was spent by the first.
+    const second = await fetch(`${baseUrl}/api/pairing/redeem`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: minted.code, label: "A thief's phone" }),
+    });
+    expect(second.status).toBe(403);
+  } finally {
+    // Revocation is the other half, and it runs through the booted process too
+    // so the next test in this file sees the hub it expects.
+    const removed = (await fetch(`${baseUrl}/api/pairing/devices/${paired.id}`, {
+      method: "DELETE",
+    }).then((r) => r.json())) as { revoked: boolean };
+    expect(removed.revoked).toBe(true);
+  }
+
+  const after = (await fetch(`${baseUrl}/api/devices`).then((r) => r.json())) as DevicesView;
+  expect(after.devices.filter((d) => d.kind === "paired")).toHaveLength(0);
 });
 
 test("test_desktop_tools_are_minted_at_observe_scope", async () => {

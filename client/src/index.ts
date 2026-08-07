@@ -24,6 +24,7 @@ import { resolveModelPack } from "./model-pack.ts";
 import { buildModelPacksApp } from "./model-packs/routes.ts";
 import { ModelPacksService } from "./model-packs/service.ts";
 import { FilePackStore } from "./model-packs/store.ts";
+import { buildPairingApp, createTicketMint } from "./pairing/index.ts";
 import { auditFile, configFile } from "./paths.ts";
 import { wrapTurnWithPermissionAwareness } from "./permissions/aware-turn.ts";
 import { findDaemonSocket, readCensus } from "./permissions/daemon.ts";
@@ -207,6 +208,16 @@ const orb = await mountOrb({
 });
 
 /**
+ * One store, two consumers: the `/events` door that checks credentials and the
+ * pairing routes that mint and revoke them. Built here rather than inside
+ * either, because two stores over one file would be two answers to "is this
+ * device paired" — and the door's answer is the one that matters.
+ */
+const deviceCredentials = createDeviceCredentialStore(
+  path.join(hubDir, DEVICE_CREDENTIALS_FILE),
+);
+
+/**
  * The device list reads the live socket rather than a snapshot.
  *
  * The socket cannot exist yet — it attaches to a server that has not been
@@ -215,7 +226,15 @@ const orb = await mountOrb({
  * evaluating, and the answer is whatever is attached at that moment, which is
  * the only answer worth giving about who is connected.
  */
-const devices = buildDevicesApp({ faces: () => eventSocket.faceCount });
+const devices = buildDevicesApp({
+  faces: () => eventSocket.faceCount,
+  paired: () => deviceCredentials.list(),
+});
+
+const pairing = buildPairingApp({
+  tickets: createTicketMint(),
+  credentials: deviceCredentials,
+});
 
 const app = buildApp({
   chat,
@@ -228,6 +247,7 @@ const app = buildApp({
   permissions: buildPermissionsApp(permissionRegistry, config.platform.icons, cureNow),
   audit: buildAuditApp(auditFile(config.platform.paths)),
   devices,
+  pairing,
   /**
    * The platform's own config directory, so it edits the file the daemon
    * actually reads. The hub runs as the user and rewrites the user's own file;
@@ -305,9 +325,8 @@ export const eventSource = combineEventSources(faces.source, touchLane);
 export const eventSocket = attachEventSocket(server, eventSource, {
   brain: createHubBrain({ turn: chat }),
   observer: faces.observer,
-  // The store is empty until QR pairing (#35) mints into it; loopback still
-  // walks in. Wired now so the door checks the same file pairing will write.
-  credentials: createDeviceCredentialStore(
-    path.join(config.root, config.configDir, DEVICE_CREDENTIALS_FILE),
-  ),
+  // The same store the pairing routes mint into, so a phone that finished the
+  // QR ceremony is admitted by the object that granted it rather than by a
+  // second reader of the same file.
+  credentials: deviceCredentials,
 });

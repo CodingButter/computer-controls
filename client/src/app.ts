@@ -70,6 +70,12 @@ export type AppDeps = {
    */
   devices?: Hono;
   /**
+   * The QR pairing ceremony: issue a ticket here, redeem it from the phone,
+   * revoke a device from here. Optional like the rest, and its absence is what
+   * makes the Devices page report pairing as off rather than draw a dead button.
+   */
+  pairing?: Hono;
+  /**
    * The read and write door onto the user's desktop configuration, which the
    * Settings page's three depths are lenses over. Optional like the rest so a
    * test that is not about settings can boot without one; the entry module
@@ -143,6 +149,7 @@ export function buildApp(deps: AppDeps): Hono {
   if (deps.permissions) app.route("/", deps.permissions);
   if (deps.audit) app.route("/", deps.audit);
   if (deps.devices) app.route("/", deps.devices);
+  if (deps.pairing) app.route("/", deps.pairing);
   if (deps.desktopConfig) app.route("/", deps.desktopConfig);
   if (deps.autostart) app.route("/", deps.autostart);
   if (deps.modelPacks) app.route("/", deps.modelPacks);
