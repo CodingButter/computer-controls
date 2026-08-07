@@ -14,6 +14,7 @@
 
 import type { AgentControllerEvent } from "@mastra/core/agent-controller";
 import type { AgentTurn } from "../chat.ts";
+import { createProgressGate } from "./progress-gate.ts";
 
 /**
  * The whole dispatch seam: one method, callable with nothing but a request.
@@ -25,26 +26,6 @@ export type HubBrain = {
   ask(request: string, onProgress?: (signal: string) => void): Promise<string>;
 };
 
-/**
- * Map a controller event to an outcome-shaped progress fact — what surface is
- * being touched, not what was found there. Content never appears in a progress
- * signal; it appears only in the final spoken answer.
- */
-function progressFromEvent(event: AgentControllerEvent): string | undefined {
-  switch (event.type) {
-    case "tool_start": {
-      const name = event.toolName.replace(/[_-]/g, " ").trim();
-      return name ? `You are now working on: ${name}.` : undefined;
-    }
-    case "subagent_start": {
-      const task = event.task?.trim();
-      return task ? `You are now: ${task}.` : undefined;
-    }
-    default:
-      return undefined;
-  }
-}
-
 export function createHubBrain(deps: {
   turn: AgentTurn;
   /** Resolved per call so the orb rides the same thread the chat page is on. */
@@ -53,13 +34,17 @@ export function createHubBrain(deps: {
   return {
     async ask(request: string, onProgress?: (signal: string) => void): Promise<string> {
       const threadId = deps.threadId?.();
+      // One gate per ask, deliberately. A quiet window that survived across
+      // turns would swallow the first thing the orb says about the next
+      // request, which is the one signal a person is actually waiting for.
+      const gate = createProgressGate();
       const reply = await deps.turn({
         message: request,
         ...(threadId ? { threadId } : {}),
         ...(onProgress
           ? {
               onEvent: (event: AgentControllerEvent) => {
-                const signal = progressFromEvent(event);
+                const signal = gate.admit(event);
                 if (signal) onProgress(signal);
               },
             }

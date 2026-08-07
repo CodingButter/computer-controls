@@ -93,7 +93,13 @@ describe("the hub process contains no audio code", () => {
     // The whole surviving surface, by name. A resurrected file — under its
     // old name or a new one carrying the old job — has to show up here and
     // answer for itself.
+    //
+    // progress-gate.ts answers: it shares a word with the deleted `orb/gate`
+    // and none of its job. The wake gate decided when the hub was listening;
+    // this one decides which controller events are worth a sentence, and
+    // touches no audio to do it.
     expect(remaining).toEqual([
+      "brain.test.ts",
       "brain.ts",
       "credentials.test.ts",
       "credentials.ts",
@@ -104,6 +110,8 @@ describe("the hub process contains no audio code", () => {
       "orb-mouth.test.ts",
       "orb-page.test.ts",
       "orb-webgl.test.ts",
+      "progress-gate.test.ts",
+      "progress-gate.ts",
       "realtime-settings.test.ts",
       "realtime-settings.ts",
       "routes.test.ts",
