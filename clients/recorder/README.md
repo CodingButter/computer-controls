@@ -27,7 +27,7 @@ Coordinates do not travel; semantics do. A replay of pixel positions would work
 on one machine, on one day, at one resolution, and would teach a reader nothing
 about what the work actually was.
 
-It is also not part of the service. `service/` gained no method for recording,
+It is also not part of the service. `comcon/` gained no method for recording,
 and this package imports nothing from it. Recording is something a client does
 with the answers it already received.
 

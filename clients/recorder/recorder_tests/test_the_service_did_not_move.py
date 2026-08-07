@@ -1,6 +1,6 @@
 """Recording is a client, and this is the file that keeps it one.
 
-The issue's last acceptance criterion is a negative one: `service/` gains no
+The issue's last acceptance criterion is a negative one: `comcon/` gains no
 method for recording. Negatives rot quietly — nothing fails when somebody
 reaches across, it just becomes normal — so the boundary is asserted here
 rather than described in a README.
@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
-SERVICE = REPO / "service" / "desktop_service"
+SERVICE = REPO / "comcon" / "desktop_service"
 RECORDER = REPO / "clients" / "recorder" / "episode_recorder"
 
 

@@ -120,7 +120,7 @@ tokens, model round trips and wall time, and writes
 `what-one-semantic-task-costs.md`. Not deposited yet: it needs a live desktop
 session, and this branch was cut from a headless environment, the same reason the
 two proofs above are parked. Its arithmetic did not wait for a desktop —
-`service/tests/test_token_cost_proof.py` holds the sums, the exclusions and the
+`comcon/tests/test_token_cost_proof.py` holds the sums, the exclusions and the
 banner to what they may claim.
 
 The comparison leg is refused rather than deferred, and the artifact says so in

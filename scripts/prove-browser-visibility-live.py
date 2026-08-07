@@ -42,7 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "service"))
+sys.path.insert(0, str(ROOT / "comcon"))
 
 from desktop_service import server  # noqa: E402
 from desktop_service.backends import atspi, loop, session_env, x11  # noqa: E402

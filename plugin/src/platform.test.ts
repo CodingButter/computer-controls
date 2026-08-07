@@ -66,8 +66,8 @@ test("an operator naming a socket outranks every OS convention", () => {
 });
 
 test("the virtualenv interpreter is where each OS actually puts it", () => {
-  expect(venvPython("/repo/service", "linux")).toBe("/repo/service/.venv/bin/python");
+  expect(venvPython("/repo/comcon", "linux")).toBe("/repo/comcon/.venv/bin/python");
   // The one difference between a working spawn and a confusing "virtualenv is
   // missing" on Windows.
-  expect(venvPython("/repo/service", "win32")).toContain("Scripts");
+  expect(venvPython("/repo/comcon", "win32")).toContain("Scripts");
 });

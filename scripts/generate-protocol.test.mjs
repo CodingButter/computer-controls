@@ -15,7 +15,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const generated = [
   join(root, "plugin", "src", "protocol.generated.ts"),
   join(root, "plugin", "src", "schemas.generated.ts"),
-  join(root, "service", "desktop_service", "protocol_generated.py"),
+  join(root, "comcon", "desktop_service", "protocol_generated.py"),
 ];
 
 const before = generated.map((path) => readFileSync(path, "utf8"));

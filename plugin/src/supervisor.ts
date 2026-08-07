@@ -27,7 +27,7 @@ import { brainFromGrant, type BrainChoice } from "./scope-brain.ts";
 const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(pluginRoot, "..");
 
-export const SERVICE_ROOT = join(repoRoot, "service");
+export const SERVICE_ROOT = join(repoRoot, "comcon");
 export const SERVICE_PYTHON = venvPython(SERVICE_ROOT);
 
 const START_TIMEOUT_MS = 20_000;
@@ -223,7 +223,7 @@ export class DesktopSupervisor {
       throw new DesktopServiceError(
         "BACKEND_UNAVAILABLE",
         `The desktop service virtualenv is missing at ${SERVICE_PYTHON}. ` +
-          "Create it with: python3 -m venv --system-site-packages service/.venv",
+          "Create it with: python3 -m venv --system-site-packages comcon/.venv",
         { pythonPath: SERVICE_PYTHON },
       );
     }

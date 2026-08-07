@@ -386,7 +386,7 @@ function pyLiteral(value, indent) {
 writeFileSync(join(root, "plugin", "src", "protocol.generated.ts"), generateTypeScript());
 writeFileSync(join(root, "plugin", "src", "schemas.generated.ts"), generateZod());
 writeFileSync(
-  join(root, "service", "desktop_service", "protocol_generated.py"),
+  join(root, "comcon", "desktop_service", "protocol_generated.py"),
   generatePython(),
 );
 

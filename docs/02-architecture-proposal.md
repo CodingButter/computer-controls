@@ -63,7 +63,7 @@ The schema is **frozen at v1.0** (`protocol/README.md:1-5`). `schema.json` is
 the single source of truth; both the Python service bindings and the TypeScript
 plugin bindings generate from it, and neither defines a message shape of its
 own. A golden copy lives at `golden/v1.0.schema.json` and
-`service/tests/test_protocol_compat.py` fails the build on any breaking change.
+`comcon/tests/test_protocol_compat.py` fails the build on any breaking change.
 The generator stamps a 16-character digest (`bfa45250563894d0`) into both
 generated files so a client and a daemon can detect a version mismatch at
 handshake time — not assumed, compared (`plugin/src/index.ts:89-106`).

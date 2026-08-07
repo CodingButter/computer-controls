@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "service"))
+sys.path.insert(0, str(ROOT / "comcon"))
 
 from desktop_service import capabilities  # noqa: E402
 from desktop_service.backends import atspi, capture, loop, session_env  # noqa: E402

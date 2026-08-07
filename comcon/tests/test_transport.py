@@ -214,7 +214,7 @@ def test_loop_shutdown_is_prompt():
 def test_concurrent_requests_on_the_glib_thread_do_not_deadlock():
     """Several clients calling the desktop at once must all be answered.
 
-    This is the contract from `service/README.md`: connection threads marshal onto
+    This is the contract from `comcon/README.md`: connection threads marshal onto
     one GLib loop thread. A serialization bug here shows up as a hang, so the test
     joins with a timeout and fails on a thread that never finished.
 

@@ -6,7 +6,7 @@ coordinate guessing.
 
 - `plugin/` — the TypeScript Mastra Code plugin (`codingbutter.desktop-control`)
 - `client/` — the local hub you run on your own machine, and how you sign it in to your model accounts
-- `service/` — the Python desktop service, speaking AT-SPI2 over a Unix-socket JSON-RPC protocol
+- `comcon/` — the Python desktop service (the core), speaking AT-SPI2 over a Unix-socket JSON-RPC protocol
 - `protocol/` — `schema.json`, the single source of truth for that protocol. The TypeScript and
   Python bindings are both generated from it, and neither is edited by hand
 - `scripts/` — the binding generator, its regeneration check, and the scripts that produce proofs
@@ -15,7 +15,7 @@ coordinate guessing.
 If you are picking up an issue, read [CONTRIBUTING.md](CONTRIBUTING.md) first — it is short, and
 it is mostly about how to prove what you did from wherever you happen to be sitting. For depth,
 [`protocol/README.md`](protocol/README.md) has the wire contract and what counts as a breaking
-change, [`service/README.md`](service/README.md) has the threading contract and the `gi`
+change, [`comcon/README.md`](comcon/README.md) has the threading contract and the `gi`
 containment rule, and [`ROADMAP.md`](ROADMAP.md) has where the project is.
 
 ### Documentation set
@@ -45,7 +45,7 @@ sudo apt-get install -y python3-gi gir1.2-atspi-2.0 libx11-6
 ```
 
 These are not optional, and not only for the tests that drive a real desktop.
-`service/desktop_service/backends/atspi.py` imports `gi` at module scope, so without them
+`comcon/desktop_service/backends/atspi.py` imports `gi` at module scope, so without them
 `pytest --no-live` does not fail a few tests — it collects none at all, and every file reports
 `ModuleNotFoundError: No module named 'gi'`.
 
@@ -54,8 +54,8 @@ These are not optional, and not only for the tests that drive a real desktop.
 ```sh
 # service toolchain — --system-site-packages is mandatory. A plain venv cannot see
 # the gi/AT-SPI typelibs, and the failure reads exactly like not having installed them.
-python3 -m venv --system-site-packages service/.venv
-service/.venv/bin/pip install pytest
+python3 -m venv --system-site-packages comcon/.venv
+comcon/.venv/bin/pip install pytest
 
 # plugin toolchain
 pnpm -C plugin install
@@ -94,10 +94,10 @@ itself stays in the tracked `plugin/` directory; the registry entry is a symlink
 ## Running the service
 
 ```sh
-( cd service && .venv/bin/python -m desktop_service --session dev )
+( cd comcon && .venv/bin/python -m desktop_service --session dev )
 ```
 
-The service is imported as a package from `service/`, so this one runs in a subshell — the
+The service is imported as a package from `comcon/`, so this one runs in a subshell — the
 parentheses are what keep the directory change from leaking into whatever you paste next.
 
 It prints `listening <socket path>` once it is ready, and holds the terminal. Add `--daemon` to
@@ -119,16 +119,16 @@ they let go.
 
 ```sh
 # the portable half: protocol, registry, delta engine, consent ceiling. No desktop needed.
-service/.venv/bin/python -m pytest -q --no-live service/tests
+comcon/.venv/bin/python -m pytest -q --no-live comcon/tests
 
 # the half that drives whatever desktop session is actually logged in
-service/.venv/bin/python -m pytest -q --live-only service/tests
+comcon/.venv/bin/python -m pytest -q --live-only comcon/tests
 
 # everything this machine can run unattended
-service/.venv/bin/python -m pytest -q service/tests
+comcon/.venv/bin/python -m pytest -q comcon/tests
 
 # and the handful that need somebody at the keyboard, which nothing else runs
-DESKTOP_HUMAN_PRESENT=1 service/.venv/bin/python -m pytest -q service/tests
+DESKTOP_HUMAN_PRESENT=1 comcon/.venv/bin/python -m pytest -q comcon/tests
 
 # the checked-in bindings still match protocol/schema.json
 node scripts/generate-protocol.test.mjs
