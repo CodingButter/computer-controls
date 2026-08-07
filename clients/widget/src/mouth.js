@@ -78,10 +78,19 @@ export function bytesFromFrame(frame) {
  *   mintToken: () => Promise<{ token?: string, model?: string, error?: string }>,
  *   transcript: string,
  *   onCaption?: Function, onState?: Function, onReason?: Function,
+ *   onDismiss?: Function,
  * }} deps
  * @returns {Promise<{ forward: (frame: object) => void, deliver: (frame: object) => void, close: () => Promise<void> }>}
  */
-export async function openMouth({ lane, mintToken, transcript, onCaption, onState, onReason }) {
+export async function openMouth({
+  lane,
+  mintToken,
+  transcript,
+  onCaption,
+  onState,
+  onReason,
+  onDismiss,
+}) {
   if (!lane.isOpen()) {
     throw new Error("The hub's event lane is down, so the mouth stayed shut.");
   }
@@ -200,6 +209,17 @@ export async function openMouth({ lane, mintToken, transcript, onCaption, onStat
             if (lane.isOpen()) lane.send({ type: "caption", text });
           },
           onFunctionCall: (call) => {
+            // The model decided the user meant to stop. No function result is
+            // sent — the same precedent as the refusal path — and the close
+            // goes through the renderer, which owns the face's state and the
+            // ear chain this mouth is only one half of. A second dismissal
+            // while already closing is a harmless no-op: close() is idempotent
+            // and closeMouth() has already dropped the reference.
+            if (call.name === "stop_listening") {
+              onDismiss?.();
+              void close();
+              return;
+            }
             // The lane is checked BEFORE the acknowledgement: DISPATCH_ACK
             // promises the model a result is coming, and a promise made over
             // a dead lane is an answer the user waits for forever.

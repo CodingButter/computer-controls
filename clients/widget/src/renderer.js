@@ -283,6 +283,11 @@ async function startListening() {
           },
           onState: () => rewindFade(),
           onReason: () => closeMouth(),
+          // The model heard a dismissal. It ends this turn exactly the way
+          // silence does — the mouth shuts, the face goes to rest, and the
+          // wake word stays armed. Stopping the ears would make a dismissal
+          // deafen the widget until it was restarted, which nobody asked for.
+          onDismiss: () => closeMouth(),
         }).then(
           (opened) => {
             // The gate may have gone quiet while the dial was in flight; a

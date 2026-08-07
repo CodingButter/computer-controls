@@ -111,6 +111,22 @@ describe("the disciplines, pinned in the source", () => {
     expect(mouthSource).toContain('apiKey: ""');
   });
 
+  test("a stop_listening call ends the turn instead of becoming an empty ask", () => {
+    // The widget dials the same hub-minted token the orb page does, so its
+    // model has the same two tools. Without a branch, stop_listening would
+    // fall through to the ask path and dispatch a request with no words in
+    // it — and the session the user asked to end would stay open.
+    const handler = mouthSource.slice(mouthSource.indexOf("onFunctionCall: (call)"));
+    const branch = handler.indexOf('call.name === "stop_listening"');
+    expect(branch).toBeGreaterThan(-1);
+    expect(branch).toBeLessThan(handler.indexOf("sendFunctionResult(call.id, DISPATCH_ACK)"));
+    expect(handler.slice(branch, handler.indexOf("onRefusal"))).toContain("onDismiss?.()");
+    // The renderer owns the face's state and the mouth reference, so the
+    // dismissal is routed through it rather than closing the mouth behind
+    // its back and leaving a listening face with no session.
+    expect(rendererSource).toContain("onDismiss: () => closeMouth()");
+  });
+
   test("the lane is checked before the acknowledgement that promises an answer", () => {
     // Code positions, not comment positions: the pin compares the guard
     // statement against the send that makes the promise.
