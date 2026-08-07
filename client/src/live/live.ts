@@ -8,11 +8,12 @@
  * what may actually happen to the machine.
  *
  * That division is enforced by what the session is given rather than by what it
- * is told. The provider is handed exactly one tool declaration, `ask_the_hub`,
- * and there is no path from this file to the desktop tools, the workspace, or
- * memory. A prompt cannot argue its way to a capability that was never minted —
- * the same rule `toolbox.ts` applies to the coding runtime's own hands, applied
- * here to a provider that talks.
+ * is told. The provider is handed exactly two tool declarations — `ask_the_hub`
+ * to delegate action, and `stop_listening` to end the voice session — and there
+ * is no path from this file to the desktop tools, the workspace, or memory. A
+ * prompt cannot argue its way to a capability that was never minted — the same
+ * rule `toolbox.ts` applies to the coding runtime's own hands, applied here to a
+ * provider that talks.
  *
  * `@mastra/voice-google-gemini-live-api` does not exist on npm today; the issue
  * anticipated that and permitted the raw Live API. So the transport is an
@@ -20,7 +21,7 @@
  * implements `RealtimeSession` and nothing above this line changes.
  */
 
-/** The only tool the realtime provider is ever given. */
+/** Delegate an actionable request to the hub's own agent. */
 export const HUB_FUNCTION_NAME = "ask_the_hub";
 
 /**
@@ -45,6 +46,33 @@ export const HUB_FUNCTION_DECLARATION = {
       },
     },
     required: ["request"],
+  },
+} as const;
+
+/**
+ * Close the voice session.
+ *
+ * The model — not an enumerated phrase list — decides when the user meant to
+ * stop: "nevermind," "that's all," "go back to sleep," or anything that reads as
+ * dismissal. Calling this releases the microphone and closes the session through
+ * the same path a tab closing does. Ending the session does not cancel anything
+ * the agent was asked to do; a task in progress keeps going. There is no tool to
+ * open the session — the wake path (the press, the consent gesture) is the only
+ * entrance, by design.
+ */
+export const STOP_LISTENING_NAME = "stop_listening";
+
+export const STOP_LISTENING_DECLARATION = {
+  name: STOP_LISTENING_NAME,
+  description:
+    "Close this listening session. Call this whenever the user means to stop talking — " +
+    "dismissing a request, changing their mind, wrapping up, or any words that signal " +
+    "they want the microphone off. You decide whether the user meant to stop; there is " +
+    "no phrase to match. Ending the listening session does not cancel anything you were " +
+    "asked to do — a task in progress keeps going.",
+  parameters: {
+    type: "object",
+    properties: {},
   },
 } as const;
 
@@ -110,13 +138,13 @@ export type RealtimeConfig = {
    * When present, the session dials with hub-minted single-use ephemeral
    * tokens instead of `apiKey`: called before EVERY dial — including every
    * redial — because a token that opened one session has nothing left to
-   * open another with. The constraints (model, instruction, the one tool)
+   * open another with. The constraints (model, instruction, the tools)
    * ride the token, minted server-side; this side never shapes them.
    */
   mintToken?: () => Promise<string>;
   model: string;
-  /** Always exactly the hub function. Present so the fence is visible at the call site. */
-  tools: readonly [typeof HUB_FUNCTION_DECLARATION];
+  /** Always exactly the two permitted tools. Present so the fence is visible at the call site. */
+  tools: readonly [typeof HUB_FUNCTION_DECLARATION, typeof STOP_LISTENING_DECLARATION];
   /** Speak without waiting to be spoken to, where the provider supports it. */
   proactiveAudio: boolean;
   /** Which prebuilt voice the provider speaks with. Named, never inherited. */
@@ -145,11 +173,15 @@ export const LIVE_VOICE = "Aoede";
 /**
  * The tool set handed to any realtime session this product opens.
  *
- * Exported as a frozen single-element tuple so a test can assert the fence
- * directly rather than by inspecting a call, and so widening it is an edit to a
- * named constant instead of an extra argument somewhere.
+ * Exported as a frozen tuple so a test can assert the fence directly rather than
+ * by inspecting a call, and so widening it is an edit to a named constant
+ * instead of an extra argument somewhere. Two tools and only two: `ask_the_hub`
+ * to delegate action, `stop_listening` to end the session. No path to the
+ * desktop, the workspace, or memory — and no tool to open a session.
  */
-export const REALTIME_TOOLS = Object.freeze([HUB_FUNCTION_DECLARATION] as const);
+export const REALTIME_TOOLS = Object.freeze(
+  [HUB_FUNCTION_DECLARATION, STOP_LISTENING_DECLARATION] as const,
+);
 
 /**
  * Build the config for a realtime session.

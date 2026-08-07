@@ -132,7 +132,7 @@ describe("dialing with a hub-minted token", () => {
     expect(sockets[0].url).toBe(`${LIVE_ENDPOINT}?key=k`);
     const setup = JSON.parse(sockets[0].sent[0]).setup;
     expect(setup.systemInstruction.parts[0].text).toContain("ask_the_hub");
-    expect(setup.tools[0].functionDeclarations).toHaveLength(1);
+    expect(setup.tools[0].functionDeclarations).toHaveLength(2);
   });
 
   it("surfaces a first-dial mint failure instead of opening anything", async () => {

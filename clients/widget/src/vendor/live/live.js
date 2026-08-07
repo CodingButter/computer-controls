@@ -8,18 +8,19 @@
  * what may actually happen to the machine.
  *
  * That division is enforced by what the session is given rather than by what it
- * is told. The provider is handed exactly one tool declaration, `ask_the_hub`,
- * and there is no path from this file to the desktop tools, the workspace, or
- * memory. A prompt cannot argue its way to a capability that was never minted —
- * the same rule `toolbox.ts` applies to the coding runtime's own hands, applied
- * here to a provider that talks.
+ * is told. The provider is handed exactly two tool declarations — `ask_the_hub`
+ * to delegate action, and `stop_listening` to end the voice session — and there
+ * is no path from this file to the desktop tools, the workspace, or memory. A
+ * prompt cannot argue its way to a capability that was never minted — the same
+ * rule `toolbox.ts` applies to the coding runtime's own hands, applied here to a
+ * provider that talks.
  *
  * `@mastra/voice-google-gemini-live-api` does not exist on npm today; the issue
  * anticipated that and permitted the raw Live API. So the transport is an
  * interface, and the hub talks to that interface. When the package ships, it
  * implements `RealtimeSession` and nothing above this line changes.
  */
-/** The only tool the realtime provider is ever given. */
+/** Delegate an actionable request to the hub's own agent. */
 export const HUB_FUNCTION_NAME = "ask_the_hub";
 /**
  * The tool declaration, in the shape the Live API expects.
@@ -44,6 +45,30 @@ export const HUB_FUNCTION_DECLARATION = {
         required: ["request"],
     },
 };
+/**
+ * Close the voice session.
+ *
+ * The model — not an enumerated phrase list — decides when the user meant to
+ * stop: "nevermind," "that's all," "go back to sleep," or anything that reads as
+ * dismissal. Calling this releases the microphone and closes the session through
+ * the same path a tab closing does. Ending the session does not cancel anything
+ * the agent was asked to do; a task in progress keeps going. There is no tool to
+ * open the session — the wake path (the press, the consent gesture) is the only
+ * entrance, by design.
+ */
+export const STOP_LISTENING_NAME = "stop_listening";
+export const STOP_LISTENING_DECLARATION = {
+    name: STOP_LISTENING_NAME,
+    description: "Close this listening session. Call this whenever the user means to stop talking — " +
+        "dismissing a request, changing their mind, wrapping up, or any words that signal " +
+        "they want the microphone off. You decide whether the user meant to stop; there is " +
+        "no phrase to match. Ending the listening session does not cancel anything you were " +
+        "asked to do — a task in progress keeps going.",
+    parameters: {
+        type: "object",
+        properties: {},
+    },
+};
 /** The Live model the orb runs. Pinned here for the same reason the speaker is. */
 export const LIVE_MODEL = "gemini-3.1-flash-live-preview";
 /**
@@ -59,11 +84,13 @@ export const LIVE_VOICE = "Aoede";
 /**
  * The tool set handed to any realtime session this product opens.
  *
- * Exported as a frozen single-element tuple so a test can assert the fence
- * directly rather than by inspecting a call, and so widening it is an edit to a
- * named constant instead of an extra argument somewhere.
+ * Exported as a frozen tuple so a test can assert the fence directly rather than
+ * by inspecting a call, and so widening it is an edit to a named constant
+ * instead of an extra argument somewhere. Two tools and only two: `ask_the_hub`
+ * to delegate action, `stop_listening` to end the session. No path to the
+ * desktop, the workspace, or memory — and no tool to open a session.
  */
-export const REALTIME_TOOLS = Object.freeze([HUB_FUNCTION_DECLARATION]);
+export const REALTIME_TOOLS = Object.freeze([HUB_FUNCTION_DECLARATION, STOP_LISTENING_DECLARATION]);
 /**
  * Build the config for a realtime session.
  *

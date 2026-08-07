@@ -6,7 +6,7 @@
  * the stored Google credential must never reach a device. So the hub trades
  * it, on request, for a v1alpha ephemeral token whose constraints are decided
  * here, server-side, and nowhere else: the configured live model, the orb's
- * system instruction, exactly one tool, single use, and clocks tight enough
+ * system instruction, exactly two tools, single use, and clocks tight enough
  * that a stolen token is stale before it travels.
  *
  * The request body accepts no fields from the caller. Every documented
@@ -26,7 +26,7 @@ import { Hono } from "hono";
 
 import { isRefusal, resolveOrbCredential } from "./credentials.ts";
 import { ORB_SYSTEM_INSTRUCTION } from "../live/session.ts";
-import { HUB_FUNCTION_DECLARATION, LIVE_MODEL, LIVE_VOICE } from "../live/live.ts";
+import { HUB_FUNCTION_DECLARATION, STOP_LISTENING_DECLARATION, LIVE_MODEL, LIVE_VOICE } from "../live/live.ts";
 import { readRealtimeSettings } from "./realtime-settings.ts";
 
 export const TOKEN_MINT_PATH = "/api/orb/token";
@@ -57,7 +57,7 @@ export type TokenMintOptions = {
 
 /**
  * The setup the token is locked to — field-for-field the same
- * BidiGenerateContentSetup frame live-gemini.ts builds for the hub's own
+ * BidiGenerateContentSetup frame session.ts builds for the hub's own
  * dial, so a client holding this token can open exactly the session the hub
  * would have opened and no other. With `bidiGenerateContentSetup` present,
  * the API locks every LiveConnectConfig field to these values; a client's
@@ -73,7 +73,7 @@ function buildSetup(model: string, voice: string) {
       speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
     },
     systemInstruction: { parts: [{ text: ORB_SYSTEM_INSTRUCTION }] },
-    tools: [{ functionDeclarations: [HUB_FUNCTION_DECLARATION] }],
+    tools: [{ functionDeclarations: [HUB_FUNCTION_DECLARATION, STOP_LISTENING_DECLARATION] }],
     inputAudioTranscription: {},
     outputAudioTranscription: {},
   };
