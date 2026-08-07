@@ -122,11 +122,30 @@ Shipped in this wave:
   switches that could ask for clicking without reading. Where the global
   `operationClasses` stops at `observe`, the page cannot offer interaction and
   explains why rather than writing a line the daemon would ignore.
-- **Shortcut curing** (#115): permitted Chromium-family launchers get a
+- **Shortcut curing** (#115, #193): permitted Chromium-family launchers get a
   user-scope `.desktop` override carrying `--force-renderer-accessibility`.
   System files are never edited, unpermitted applications are never cured, and
   the hub restarts nothing — it discloses which applications need a restart and
-  leaves that to the person.
+  leaves that to the person. The pass runs at boot and again the moment a grant
+  is made, because a permission that waits for a restart is a permission the
+  person watched fail to happen.
+  - Menu launchers are cured by *shadowing*: an override with the same basename
+    in the user's applications directory wins by freedesktop's precedence rule,
+    which is why the system copy stays untouched. Autostart entries and desktop
+    icons have no such rule — the session manager reads exactly the file that is
+    there — so those are rewritten in place, atomically, and only ever files
+    that already exist for applications already permitted. The hub never creates
+    a launcher: an autostart entry you do not have is a choice, not a gap.
+  - Applications the daemon launches itself never read any of these files, since
+    GIO runs the desktop entry's own `Exec` line. The launcher backend therefore
+    starts Chromium-family applications through a temporary cured copy of their
+    entry, so an agent-initiated launch is readable for the same reason a
+    hand-clicked one is. That copy also sets `DBusActivatable=false`, because a
+    bus-activated application is started from its service file and would drop
+    the flag — with the consequence that such a launch is the service's child
+    and reports a real pid where a bus activation reports none. Any failure at
+    all falls back to the untouched entry: the flag is worth a launch being
+    readable, never worth a launch not happening.
 
 The arc is recorded in
 `docs/proofs/an-unpermitted-application-is-invisible-until-the-user-says-otherwise.md`.

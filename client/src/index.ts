@@ -145,6 +145,8 @@ const cureNow: (() => Promise<CureReport>) | undefined = config.platform.support
         // is what makes curing idempotent instead of eternally rewriting.
         entries: await scanDesktopEntries([config.applicationsDir, ...applicationDirs()]),
         userApplicationsDir: config.applicationsDir,
+        // Autostart entries and desktop icons, which no override can shadow.
+        inPlaceDirs: config.launcherDirs,
       })
   : undefined;
 

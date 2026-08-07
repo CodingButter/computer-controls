@@ -83,15 +83,20 @@ function basenameOf(token: string): string {
  * the program is the first token after it that is not an assignment — `env
  * FOO=bar discord` really does start Discord.
  */
-export function isChromiumExec(exec: string): boolean {
+export function execProgram(exec: string): string | undefined {
   for (const token of tokenize(exec)) {
     if (token.startsWith("-")) continue;
     if (token.includes("=") && !token.includes("/")) continue;
     const name = basenameOf(token);
     if (WRAPPERS.has(name)) continue;
-    return CHROMIUM_BINARIES.includes(name);
+    return name;
   }
-  return false;
+  return undefined;
+}
+
+export function isChromiumExec(exec: string): boolean {
+  const program = execProgram(exec);
+  return program !== undefined && CHROMIUM_BINARIES.includes(program);
 }
 
 /** Whether the flag is already on this line — the test that makes curing idempotent. */
@@ -152,7 +157,17 @@ export function cureDesktopFile(text: string): {
   return { text: lines.join("\n"), changed, chromium };
 }
 
-export type CuredApp = { name: string; desktopId: string };
+export type CuredApp = {
+  name: string;
+  desktopId: string;
+  /**
+   * Every launcher file this application was cured through. An application
+   * reachable from the menu, an autostart entry and a desktop icon is one
+   * application with three ways in, and all three have to carry the flag —
+   * the one we missed is the launch that arrives unreadable.
+   */
+  launchers: string[];
+};
 
 export type CureReport = {
   /** Launchers rewritten by this run. */
@@ -174,6 +189,20 @@ export type CureDeps = {
   entries: DesktopEntry[];
   /** Where overrides are written. The system directory is never a candidate. */
   userApplicationsDir: string;
+  /**
+   * Directories whose launchers are cured *in place* — autostart entries and
+   * desktop icons.
+   *
+   * These get different treatment from application launchers on purpose. An
+   * application launcher is cured by writing a same-named override into the
+   * user's data directory, because freedesktop's precedence rule makes that
+   * override win. No such rule exists here: the session manager reads exactly
+   * the file in `~/.config/autostart`, and the file manager launches exactly
+   * the icon on the desktop. There is nowhere to shadow them from, so the file
+   * itself is rewritten — and only ever a file that already exists, belonging
+   * to an application the user has already permitted.
+   */
+  inPlaceDirs?: string[];
 };
 
 /**
@@ -181,8 +210,25 @@ export type CureDeps = {
  * to do about it.
  */
 export function cureChromiumApps(deps: CureDeps): CureReport {
-  const report: CureReport = { cured: [], alreadyCured: [], needsRestart: [] };
   const byId = new Map(deps.entries.map((entry) => [entry.id, entry]));
+
+  // One application can own several launchers, so what happened to it is
+  // accumulated before anything is reported: an application cured in two
+  // places is one line in the report, not two.
+  type State = { name: string; desktopId: string; wrote: string[]; found: string[] };
+  const states = new Map<string, State>();
+  // What each permitted application's own launcher starts, learned from the
+  // files this loop already reads, so an autostart entry can be recognised by
+  // what it runs rather than by what it is called.
+  const programs = new Map<string, PermissionRow>();
+  const stateFor = (row: PermissionRow, desktopId: string): State => {
+    let state = states.get(desktopId);
+    if (!state) {
+      state = { name: row.name, desktopId, wrote: [], found: [] };
+      states.set(desktopId, state);
+    }
+    return state;
+  };
 
   for (const row of deps.rows) {
     if (!row.permitted || !row.desktopId) continue;
@@ -201,30 +247,126 @@ export function cureChromiumApps(deps: CureDeps): CureReport {
     // flag to add and no report to make about it.
     if (!cured.chromium) continue;
 
+    const state = stateFor(row, row.desktopId);
+    state.found.push(entry.source);
+
+    const program = execProgram(source.match(/^\s*Exec\s*=\s*(.*)$/m)?.[1] ?? "");
+    if (program) programs.set(program, row);
+
     // The override must carry the same basename as the file it shadows: that
     // equality is the whole of freedesktop's precedence rule.
     const target = path.join(deps.userApplicationsDir, path.basename(entry.source));
-    const record = { name: row.name, desktopId: row.desktopId };
 
-    if (!cured.changed) {
-      // Every Exec line already carries the flag — in the override we wrote
-      // last boot, or in the packaged file itself. Writing again would be
-      // churn in a file the user owns, so this run leaves it alone.
-      report.alreadyCured.push(record);
-      // Still running from before the cure: readable is the proof it took.
-      if (row.running && !row.readable) report.needsRestart.push(row.name);
-      continue;
-    }
+    // Every Exec line already carries the flag — in the override we wrote last
+    // boot, or in the packaged file itself. Writing again would be churn in a
+    // file the user owns, so this run leaves it alone.
+    if (!cured.changed) continue;
 
     try {
       fs.mkdirSync(deps.userApplicationsDir, { recursive: true });
       fs.writeFileSync(target, cured.text, "utf8");
+      state.wrote.push(target);
     } catch {
       continue;
     }
-    report.cured.push(record);
-    if (row.running) report.needsRestart.push(row.name);
+  }
+
+  cureInPlace(deps, programs, stateFor);
+
+  const report: CureReport = { cured: [], alreadyCured: [], needsRestart: [] };
+  const rowsById = new Map(deps.rows.map((row) => [row.desktopId, row]));
+  for (const state of states.values()) {
+    if (state.found.length === 0) continue;
+    const record = { name: state.name, desktopId: state.desktopId, launchers: state.wrote };
+    const row = rowsById.get(state.desktopId);
+    if (state.wrote.length > 0) {
+      report.cured.push(record);
+      if (row?.running) report.needsRestart.push(state.name);
+    } else {
+      report.alreadyCured.push({ ...record, launchers: [] });
+      // Still running from before the cure: readable is the proof it took.
+      if (row?.running && !row.readable) report.needsRestart.push(state.name);
+    }
   }
 
   return report;
+}
+
+/**
+ * Cure the launchers that cannot be shadowed: autostart entries and desktop
+ * icons, rewritten where they sit.
+ *
+ * A file here is only touched when it starts a program that a permitted
+ * application's own launcher starts — matched on the Exec program rather than
+ * the filename, because an autostart entry is routinely named for the feature
+ * ("discord-tray.desktop") rather than the application. The match is
+ * deliberately loose and the permitted set is what bounds it: the worst a
+ * wrong match can do is add an ignored flag to a launcher for a program the
+ * user already granted access to.
+ *
+ * Never creates a file, never creates a directory: an autostart entry the user
+ * does not have is a choice they made, not a gap for the hub to fill.
+ */
+function cureInPlace(
+  deps: CureDeps,
+  programs: Map<string, PermissionRow>,
+  stateFor: (row: PermissionRow, desktopId: string) => { wrote: string[]; found: string[] },
+): void {
+  if (!deps.inPlaceDirs?.length) return;
+  if (programs.size === 0) return;
+
+  const permitted = [...programs.values()];
+
+  for (const dir of deps.inPlaceDirs) {
+    let names: string[];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      continue; // A directory this machine does not have is not an error.
+    }
+
+    for (const name of names) {
+      if (!name.endsWith(".desktop")) continue;
+      const file = path.join(dir, name);
+
+      let source: string;
+      try {
+        source = fs.readFileSync(file, "utf8");
+      } catch {
+        continue;
+      }
+
+      const cured = cureDesktopFile(source);
+      if (!cured.chromium) continue;
+
+      // Which permitted application this launcher belongs to: its own id if the
+      // filename matches one, otherwise whatever program its Exec line starts.
+      const id = name.replace(/\.desktop$/, "");
+      const exec = source.match(/^\s*Exec\s*=\s*(.*)$/m)?.[1];
+      const program = exec ? execProgram(exec) : undefined;
+      const row =
+        permitted.find((candidate) => candidate.desktopId === id || candidate.desktopId === name) ??
+        (program ? programs.get(program) : undefined);
+      if (!row) continue;
+
+      const state = stateFor(row, row.desktopId as string);
+      state.found.push(file);
+      if (!cured.changed) continue;
+
+      try {
+        // Atomic, and in the same directory so the rename cannot cross a
+        // filesystem: the session manager may read this file at any moment,
+        // and it must never see a half-written one. The original's mode is
+        // carried over — a desktop icon is commonly executable, and a cured
+        // copy that lost that bit would stop being launchable.
+        const mode = fs.statSync(file).mode;
+        const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+        fs.writeFileSync(temporary, cured.text, { encoding: "utf8", mode });
+        fs.renameSync(temporary, file);
+        state.wrote.push(file);
+      } catch {
+        continue;
+      }
+    }
+  }
 }
