@@ -1,3 +1,4 @@
+import { once } from "node:events";
 import { createServer, type Server } from "node:http";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { WebSocket } from "ws";
@@ -82,15 +83,44 @@ afterEach(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
+/**
+ * Each client paired to the hub-side socket serving it.
+ *
+ * The pairing is what lets a test wait for the hub to notice a face leaving,
+ * rather than sleeping and hoping. Kept beside the client rather than looked
+ * up on demand because after a close there is nothing left to look up by.
+ */
+const served = new WeakMap<WebSocket, WebSocket>();
+
 /** A face, connected and ready to be spoken to. */
 async function connectFace(target: string = url): Promise<WebSocket> {
+  const before = new Set(socket.faces);
   const client = new WebSocket(target);
   open.push(client);
   await new Promise<void>((resolve, reject) => {
     client.once("open", resolve);
     client.once("error", reject);
   });
+  const hubSide = socket.faces.find((face) => !before.has(face));
+  if (hubSide) served.set(client, hubSide);
   return client;
+}
+
+/**
+ * Ends a face and waits for the hub to notice.
+ *
+ * The module hangs its cleanup off the served socket's close event, so by the
+ * time this resolves the unsubscribe has already run — where a fixed sleep
+ * only guesses that it has. Ordering is guaranteed rather than lucky: the
+ * module registers its close listener when the connection opens, so it runs
+ * ahead of the one attached here.
+ */
+async function shutFace(client: WebSocket, how: "close" | "terminate" = "close") {
+  const hubSide = served.get(client);
+  if (!hubSide) throw new Error("face was never paired to a hub-side socket");
+  const seen = once(hubSide, "close");
+  client[how]();
+  await seen;
 }
 
 /** Everything a face hears, collected as it arrives. */
@@ -246,8 +276,7 @@ describe("the socket", () => {
     await settle();
     expect(source.watcherCount).toBe(1);
 
-    face.close();
-    await settle();
+    await shutFace(face);
     // The ears outlive the face. What must not outlive it is a handler writing
     // into a socket that is gone.
     expect(source.watcherCount).toBe(0);
@@ -371,7 +400,8 @@ describe("the voice set", () => {
     await settle();
     expect(widgetHeard).toEqual([{ type: "voice_opened" }]);
 
-    page.terminate();
+    await shutFace(page, "terminate");
+    // The hub has noticed the death; the widget still has to hear about it.
     await settle();
     expect(widgetHeard).toEqual([{ type: "voice_opened" }, { type: "voice_closed" }]);
   });
@@ -388,7 +418,9 @@ describe("the voice set", () => {
     expect(widgetHeard).toEqual([{ type: "voice_opened" }]);
 
     // One of two owners dies: the set is still occupied, so nothing is said.
-    first.terminate();
+    // Waiting for the hub to notice is what gives this claim teeth — asserting
+    // silence before the death has landed would pass even if it emptied the set.
+    await shutFace(first, "terminate");
     await settle();
     expect(widgetHeard).toHaveLength(1);
 
@@ -468,8 +500,7 @@ describe("the conversation", () => {
 
     mouth.send(JSON.stringify({ type: "ask", id: "call-3", request: "slow thing" }));
     await settle();
-    mouth.terminate();
-    await settle();
+    await shutFace(mouth, "terminate");
     finish("Too late.");
     await settle();
     expect(bystanderHeard).toHaveLength(0);
@@ -713,7 +744,7 @@ describe("what the observer is told", () => {
     await settle();
     expect(observed).toEqual(["voice:1"]);
 
-    face.terminate();
+    await shutFace(face, "terminate");
     await settle();
     expect(observed).toEqual(["voice:1", "voice:0"]);
   });
