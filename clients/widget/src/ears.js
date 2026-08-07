@@ -208,3 +208,59 @@ export async function startEars({ onOpen, onIdle, onForward, quietPeriodMs, hold
     },
   };
 }
+
+/**
+ * Record a single wake-word take and return the raw PCM16 samples.
+ *
+ * The enrollment surface cannot use a media recorder API — it is banned by the
+ * boundaries suite everywhere — so this function opens the same capture graph
+ * `startEars` uses: `getUserMedia`, an `AudioContext` at the capture rate, the
+ * `pcm16-capture` worklet, and a `createMediaStreamSource` node. The chunks the
+ * worklet emits are collected until `maxMs` elapses, then the stream and context
+ * are torn down and the concatenated samples are handed back. The scoring and
+ * template assembly happen in `wake-score.js`, which is pure and runs anywhere.
+ *
+ * Browser-only, like `startEars`; everything decidable without a microphone
+ * lives in the exports above and below this function.
+ *
+ * @param {{ maxMs?: number }} [options]
+ * @returns {Promise<Int16Array>}
+ */
+export async function enrollTake({ maxMs = 2500 } = {}) {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true },
+  });
+
+  const capture = new AudioContext({ sampleRate: CAPTURE_RATE });
+  await capture.audioWorklet.addModule(new URL("./vendor/orb-capture-worklet.js", import.meta.url));
+  const source = capture.createMediaStreamSource(stream);
+  const node = new AudioWorkletNode(capture, "pcm16-capture");
+
+  const chunks = [];
+  node.port.onmessage = (event) => {
+    chunks.push(new Int16Array(event.data));
+  };
+  source.connect(node);
+  // The same silent gain that keeps the live worklet alive without echoing the
+  // mic back into the room.
+  const silent = capture.createGain();
+  silent.gain.value = 0;
+  node.connect(silent);
+  silent.connect(capture.destination);
+
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      node.port.onmessage = null;
+      stream.getTracks().forEach((track) => track.stop());
+      void capture.close();
+      const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+      const samples = new Int16Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        samples.set(chunk, offset);
+        offset += chunk.length;
+      }
+      resolve(samples);
+    }, maxMs);
+  });
+}

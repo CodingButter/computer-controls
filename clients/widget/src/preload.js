@@ -151,6 +151,21 @@ contextBridge.exposeInMainWorld("widget", {
   },
 
   /**
+   * The shell wants the page to enroll the wake word.
+   *
+   * Sent on first launch when no templates are enrolled yet, and again whenever
+   * the tray menu item is chosen. The page owns the recording surface — it is
+   * the one document with a microphone — so the shell's role ends at asking.
+   *
+   * @param {() => void} listener
+   */
+  onStartEnrollment(listener) {
+    ipcRenderer.on("widget:start-enrollment", () => {
+      listener();
+    });
+  },
+
+  /**
    * Show me the dashboard.
    *
    * No URL crosses this seam. The renderer asks for the one page the shell
@@ -160,6 +175,20 @@ contextBridge.exposeInMainWorld("widget", {
    */
   openDashboard() {
     ipcRenderer.send("widget:open-dashboard");
+  },
+
+  /**
+   * Persist enrolled wake-word templates to disk.
+   *
+   * The page owns the recording and the scoring; the shell owns the filesystem.
+   * Fire-and-forget: the page already has the templates in memory for this
+   * session, so it does not wait on the write — and the one invoke the bridge
+   * carries is the token mint, not this.
+   *
+   * @param {{ templates: unknown[], enrolled: boolean }} state
+   */
+  writeWakeTemplates(state) {
+    ipcRenderer.send("widget:write-wake-templates", state);
   },
 
   /**

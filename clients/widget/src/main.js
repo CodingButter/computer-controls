@@ -29,6 +29,7 @@ import { readPlacement, writePlacement } from "./placement-store.js";
 import { readTrayState, writeTrayState } from "./tray-state.js";
 import { createTray } from "./tray.js";
 import { dashboardUrl } from "./dashboard.js";
+import { readWakeTemplates, writeWakeTemplates } from "./wake-templates.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -37,6 +38,9 @@ const placementFile = () => path.join(app.getPath("userData"), "placement.json")
 
 /** Where the tray's choices are written down, beside the placement. */
 const trayStateFile = () => path.join(app.getPath("userData"), "tray-state.json");
+
+/** Where the enrolled wake-word templates live, beside the tray state. */
+const wakeTemplatesFile = () => path.join(app.getPath("userData"), "wake-templates.json");
 
 /** The hub's port, read from the environment exactly as the bridge reads it. */
 const hubPort = () => Number(process.env.COMCON_CLIENT_PORT ?? 4111);
@@ -250,6 +254,14 @@ app.whenReady().then(() => {
     toggleAutoHide: () => applyTrayState({ ...trayState, autoHide: !trayState.autoHide }),
     toggleDisabled: () => applyTrayState({ ...trayState, disabled: !trayState.disabled }),
     openDashboard,
+    tuneWakeWord: () => {
+      // The tray asked, so the page does the recording — it is the one document
+      // with a microphone. A disabled widget has no ears, so the enrollment
+      // surface is only reachable while enabled.
+      if (!window.isDestroyed() && !trayState.disabled) {
+        window.webContents.send("widget:start-enrollment");
+      }
+    },
     quit: () => app.quit(),
   });
 
@@ -259,6 +271,12 @@ app.whenReady().then(() => {
       autoHide: trayState.autoHide,
       disabled: trayState.disabled,
     });
+    // First launch after install: if no wake-word templates have been enrolled
+    // yet, invite the user to tune the fingerprint to their own voice. A
+    // disabled widget never gets the prompt — it has no microphone.
+    if (!trayState.disabled && !readWakeTemplates(wakeTemplatesFile()).enrolled) {
+      window.webContents.send("widget:start-enrollment");
+    }
   });
 
   // The renderer knows what shape it painted; the shell owns the window. While
@@ -327,6 +345,16 @@ app.whenReady().then(() => {
   // that rendered a settings page would have become a second application, and
   // this one is a face.
   ipcMain.on("widget:open-dashboard", openDashboard);
+
+  /*
+   * Enrolled templates come from the page and land on disk here. The page owns
+   * the recording and the scoring; the main process owns the filesystem, and
+   * the bridge is deliberately fire-and-forget — the page already has the
+   * templates in memory for this session, so it does not wait on the write.
+   */
+  ipcMain.on("widget:write-wake-templates", (_event, state) => {
+    writeWakeTemplates(wakeTemplatesFile(), state);
+  });
 
   /*
    * The token mint rides main: the renderer never learns the hub's port twice.

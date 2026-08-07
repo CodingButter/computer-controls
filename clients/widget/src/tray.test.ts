@@ -27,6 +27,7 @@ const actions = {
   toggleAutoHide: noop,
   toggleDisabled: noop,
   openDashboard: noop,
+  tuneWakeWord: noop,
   quit: noop,
 };
 
@@ -35,7 +36,7 @@ describe("the menu says what it does", () => {
     const labels = menuTemplateFor(DEFAULT_TRAY_STATE, actions)
       .map((item) => item.label)
       .filter(Boolean);
-    expect(labels).toEqual(["Auto-hide", "Disable widget", "Open the dashboard", "Quit Mastra CC"]);
+    expect(labels).toEqual(["Auto-hide", "Disable widget", "Open the dashboard", "Tune the wake word to my voice", "Quit Mastra CC"]);
   });
 
   test("the auto-hide checkbox is the stored boolean", () => {
@@ -58,12 +59,13 @@ describe("the menu says what it does", () => {
       toggleAutoHide: () => fired.push("autoHide"),
       toggleDisabled: () => fired.push("disabled"),
       openDashboard: () => fired.push("dashboard"),
+      tuneWakeWord: () => fired.push("tuneWakeWord"),
       quit: () => fired.push("quit"),
     };
     for (const item of menuTemplateFor(DEFAULT_TRAY_STATE, spying)) {
       (item as { click?: () => void }).click?.();
     }
-    expect(fired).toEqual(["autoHide", "disabled", "dashboard", "quit"]);
+    expect(fired).toEqual(["autoHide", "disabled", "dashboard", "tuneWakeWord", "quit"]);
   });
 });
 

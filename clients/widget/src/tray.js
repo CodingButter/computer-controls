@@ -29,6 +29,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
  *   toggleAutoHide: () => void,
  *   toggleDisabled: () => void,
  *   openDashboard: () => void,
+ *   tuneWakeWord: () => void,
  *   quit: () => void,
  * }} TrayActions
  */
@@ -80,6 +81,10 @@ export function menuTemplateFor(state, actions) {
     },
     { type: "separator" },
     { label: "Open the dashboard", click: actions.openDashboard },
+    {
+      label: "Tune the wake word to my voice",
+      click: actions.tuneWakeWord,
+    },
     { type: "separator" },
     { label: "Quit Mastra CC", click: actions.quit },
   ];
