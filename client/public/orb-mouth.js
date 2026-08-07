@@ -259,6 +259,15 @@ export async function openMouth({ onCaption, onState, onReason }) {
             }
           },
           onFunctionCall: (call) => {
+            // The model decided the user meant to stop listening. Close through
+            // the same path a tab closing does — no function result is sent, the
+            // same precedent as the refusal path. close() is idempotent, so a
+            // call that arrives after the session is already closing is a
+            // harmless no-op.
+            if (call.name === "stop_listening") {
+              void close();
+              return;
+            }
             // The lane is checked BEFORE the acknowledgement: DISPATCH_ACK
             // promises the model a result is coming, and a promise made over
             // a dead lane is an answer the user waits for forever.

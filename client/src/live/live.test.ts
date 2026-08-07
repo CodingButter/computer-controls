@@ -6,6 +6,8 @@ import {
   LIVE_MODEL,
   LIVE_VOICE,
   REALTIME_TOOLS,
+  STOP_LISTENING_DECLARATION,
+  STOP_LISTENING_NAME,
   realtimeConfig,
 } from "./live.ts";
 
@@ -35,18 +37,19 @@ const FORBIDDEN = [
 ];
 
 describe("test_the_live_provider_holds_no_desktop_or_memory_tools", () => {
-  it("hands the provider exactly one tool", () => {
+  it("hands the provider exactly two tools: the hub delegation and session close", () => {
     const config = realtimeConfig({ apiKey: "k", events: events() });
 
-    expect(config.tools).toHaveLength(1);
+    expect(config.tools).toHaveLength(2);
     expect(config.tools[0].name).toBe(HUB_FUNCTION_NAME);
+    expect(config.tools[1].name).toBe(STOP_LISTENING_NAME);
   });
 
   it("names nothing that touches the machine or the memory", () => {
     const declared = JSON.stringify(REALTIME_TOOLS).toLowerCase();
     const names = REALTIME_TOOLS.map((tool) => tool.name);
 
-    expect(names).toEqual([HUB_FUNCTION_NAME]);
+    expect(names).toEqual([HUB_FUNCTION_NAME, STOP_LISTENING_NAME]);
     for (const forbidden of FORBIDDEN) {
       expect(names).not.toContain(forbidden);
     }
@@ -61,7 +64,7 @@ describe("test_the_live_provider_holds_no_desktop_or_memory_tools", () => {
     expect(() => {
       (config.tools as unknown as unknown[]).push({ name: "execute_command" });
     }).toThrow();
-    expect(config.tools).toHaveLength(1);
+    expect(config.tools).toHaveLength(2);
   });
 
   it("every session this product opens gets the same fence", () => {
@@ -77,6 +80,10 @@ describe("test_the_live_provider_holds_no_desktop_or_memory_tools", () => {
       request: expect.objectContaining({ type: "string" }),
     });
     expect(HUB_FUNCTION_DECLARATION.parameters.required).toEqual(["request"]);
+  });
+
+  it("stop_listening takes no arguments — closing needs none", () => {
+    expect(STOP_LISTENING_DECLARATION.parameters.properties).toEqual({});
   });
 
   it("pins the Live model rather than inheriting a default that can move", () => {

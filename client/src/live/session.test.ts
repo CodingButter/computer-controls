@@ -6,7 +6,7 @@ import {
   geminiLiveProvider,
   type SocketLike,
 } from "./session.ts";
-import { HUB_FUNCTION_NAME, LIVE_VOICE, realtimeConfig, type RealtimeEvents } from "./live.ts";
+import { HUB_FUNCTION_NAME, LIVE_VOICE, STOP_LISTENING_NAME, realtimeConfig, type RealtimeEvents } from "./live.ts";
 
 // Everything below this import block moved verbatim from live-gemini.test.ts;
 // the one addition (adversarial review, segment 03) is the malformed-base64
@@ -85,14 +85,15 @@ describe("connecting to Gemini Live", () => {
     expect(socket.url).toBe(`${LIVE_ENDPOINT}?key=test-key`);
   });
 
-  it("sends setup as the first frame, with the model, the one tool, and both transcriptions", async () => {
+  it("sends setup as the first frame, with the model, both tools, and both transcriptions", async () => {
     const { socket } = await connected();
     const first = JSON.parse(socket.sent[0]);
     expect(first.setup.model).toMatch(/^models\//);
     expect(first.setup.tools).toHaveLength(1);
     const declarations = first.setup.tools[0].functionDeclarations;
-    expect(declarations).toHaveLength(1);
+    expect(declarations).toHaveLength(2);
     expect(declarations[0].name).toBe(HUB_FUNCTION_NAME);
+    expect(declarations[1].name).toBe(STOP_LISTENING_NAME);
     expect(first.setup.inputAudioTranscription).toEqual({});
     expect(first.setup.outputAudioTranscription).toEqual({});
     expect(first.setup.systemInstruction.parts[0].text).toBe(ORB_SYSTEM_INSTRUCTION);

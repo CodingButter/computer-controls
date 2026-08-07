@@ -169,6 +169,18 @@ describe("what the shipped mouth source promises", () => {
     expect(handler.indexOf("readyState")).toBeLessThan(ack);
   });
 
+  it("closes the session when the model calls stop_listening", () => {
+    // The model decides the user meant to stop — no magic phrase list. The
+    // handler must branch on call.name === "stop_listening" and call close()
+    // WITHOUT sending a function result, the same precedent as onRefusal.
+    const handler = mouth.slice(mouth.indexOf("onFunctionCall"), mouth.indexOf("onRefusal"));
+    expect(handler).toContain('call.name === "stop_listening"');
+    const branch = handler.indexOf('call.name === "stop_listening"');
+    const close = handler.indexOf("void close()");
+    expect(close).toBeGreaterThan(-1);
+    expect(close).toBeGreaterThan(branch);
+  });
+
   it("forgets pending asks on close, so a stale id cannot match late", () => {
     expect(mouth).toContain("pendingAsks.clear()");
   });

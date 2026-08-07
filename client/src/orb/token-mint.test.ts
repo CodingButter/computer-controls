@@ -51,7 +51,7 @@ afterEach(async () => {
 });
 
 describe("the token mint", () => {
-  it("locks the outgoing mint to the configured model, one tool, both transcriptions", async () => {
+  it("locks the outgoing mint to the configured model, both tools, both transcriptions", async () => {
     const settingsPath = path.join(dir, "settings.json");
     await writeFile(settingsPath, JSON.stringify({ realtimeModel: "gemini-2.5-flash-native-audio-latest" }));
     const fetchFn = mintOk();
@@ -84,8 +84,9 @@ describe("the token mint", () => {
     expect(body.uses).toBe(1);
     expect(body.bidiGenerateContentSetup.model).toBe("models/gemini-2.5-flash-native-audio-latest");
     expect(body.bidiGenerateContentSetup.tools).toHaveLength(1);
-    expect(body.bidiGenerateContentSetup.tools[0].functionDeclarations).toHaveLength(1);
+    expect(body.bidiGenerateContentSetup.tools[0].functionDeclarations).toHaveLength(2);
     expect(body.bidiGenerateContentSetup.tools[0].functionDeclarations[0].name).toBe("ask_the_hub");
+    expect(body.bidiGenerateContentSetup.tools[0].functionDeclarations[1].name).toBe("stop_listening");
     expect(body.bidiGenerateContentSetup.inputAudioTranscription).toEqual({});
     expect(body.bidiGenerateContentSetup.outputAudioTranscription).toEqual({});
     expect(body.bidiGenerateContentSetup.systemInstruction.parts[0].text).toContain("ask_the_hub");
