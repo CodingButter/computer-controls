@@ -10,6 +10,7 @@ import {
   UNDERSTOOD_EVENTS,
   applyGesture,
   fade,
+  keep,
   reduce,
 } from "./state-machine.js";
 import { GESTURE_TYPES, STATE_EVENT_TYPES } from "../../../client/src/events/types.ts";
@@ -85,6 +86,55 @@ describe("auto-hide", () => {
     // vanished before the answer was read would make auto-hide a bug.
     expect(AUTO_HIDE_MS).toBeGreaterThanOrEqual(5_000);
     expect(AUTO_HIDE_MS).toBeLessThanOrEqual(60_000);
+  });
+
+  test("puts the face on stage when auto-hide is off", () => {
+    // The half `fade` cannot do. Turning auto-hide off while the face is away
+    // is a request to see it, not merely a promise not to hide it again.
+    expect(keep(fade(resting, true), false).presence).toBe("visible");
+  });
+
+  test("leaves the face alone when auto-hide is on", () => {
+    // Auto-hide on is today's behaviour untouched: hidden at rest, and the
+    // timer still decides. Identity, so a paint can be skipped on this path.
+    const hidden = fade(resting, true);
+    expect(keep(hidden, true)).toBe(hidden);
+  });
+
+  test("does not disturb a face that is already up", () => {
+    expect(keep(resting, false)).toBe(resting);
+  });
+
+  test("brings the face back listening, with the old words gone", () => {
+    // The face returns to the posture it rests in, not to the middle of the
+    // conversation it was in when it left — a stale caption under a fresh
+    // orb would be the widget quoting a turn the user already finished.
+    const restored = keep(fade(resting, true), false);
+
+    expect(restored.presence).toBe("visible");
+    expect(restored.activity).toBe("listening");
+    expect(restored.caption).toBe("");
+  });
+
+  test("shows a face at the first paint when auto-hide is already off", () => {
+    // Launching with the setting persisted off is the same transition as
+    // flipping it, fired once at startup: the widget starts hidden and the
+    // stored setting is the only thing that says otherwise.
+    const launched = keep(INITIAL_STATE, false);
+
+    expect(launched.presence).toBe("visible");
+    expect(launched.activity).toBe("listening");
+    expect(launched.caption).toBe("");
+  });
+
+  test("keeps the face through a timer that keeps firing", () => {
+    // The shell may rewind and fire the timer as often as it likes; with the
+    // setting off the pair settles on a visible face rather than flickering.
+    let state = keep(fade(resting, true), false);
+    state = fade(state, false);
+    state = fade(state, false);
+
+    expect(state.presence).toBe("visible");
   });
 });
 

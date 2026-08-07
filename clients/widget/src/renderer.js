@@ -18,7 +18,7 @@ import {
   scoutRects,
   wasDrag,
 } from "./paint.js";
-import { AUTO_HIDE_MS, INITIAL_STATE, applyGesture, fade, reduce } from "./state-machine.js";
+import { AUTO_HIDE_MS, INITIAL_STATE, applyGesture, fade, keep, reduce } from "./state-machine.js";
 import { mountWebGlOrb, syntheticLevel, hasWebGl } from "./face/orb-webgl.js";
 import { shaderStateFor } from "./face-state.js";
 import { HEIGHT, WIDTH, placeOrb } from "./window-shape.js";
@@ -195,6 +195,7 @@ let fadeTimer = null;
 function rewindFade() {
   clearTimeout(fadeTimer);
   fadeTimer = null;
+  if (!autoHide) return;
   if (state.presence !== "visible") return;
   fadeTimer = setTimeout(() => {
     state = fade(state, autoHide);
@@ -207,7 +208,15 @@ window.widget.onTrayState?.((next) => {
   // Disable is the honest off: the ears die with the pixels, and the tray
   // icon is what says so. Enable brings them back without a restart.
   if (next.disabled) stopEars();
-  else void startListening();
+  else {
+    void startListening();
+    // Auto-hide off is a request to see the face, not just a promise to stop
+    // hiding it. This is the same transition at a flip and at startup — the
+    // shell tells the page the stored setting once the page is loaded, so a
+    // widget launched with the setting already off opens with a face up.
+    state = keep(state, autoHide);
+  }
+  paint();
   rewindFade();
 });
 
