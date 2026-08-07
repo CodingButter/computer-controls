@@ -136,6 +136,31 @@ describe("curing the machine", () => {
     expect(fs.readdirSync(autostart)).toEqual(["discord-tray.desktop"]);
   });
 
+  it("replaces a symlinked desktop icon rather than writing through it", () => {
+    // Desktop icons are routinely symlinks into /usr/share/applications. Writing
+    // to the link would edit the system file through it — root-owned, shared by
+    // every user, and the one thing curing has always promised not to touch.
+    const { systemDir, userDir } = machine();
+    const discord = install(systemDir, "discord", "/usr/share/discord/Discord");
+    const desktop = path.join(path.dirname(systemDir), "Desktop");
+    fs.mkdirSync(desktop, { recursive: true });
+    const packaged = path.join(systemDir, "discord.desktop");
+    const before = fs.readFileSync(packaged, "utf8");
+    const icon = path.join(desktop, "discord-link.desktop");
+    fs.symlinkSync(packaged, icon);
+
+    cureChromiumApps({
+      rows: [row({ name: "Discord", desktopId: "discord" })],
+      entries: [discord],
+      userApplicationsDir: userDir,
+      inPlaceDirs: [desktop],
+    });
+
+    expect(fs.readFileSync(packaged, "utf8")).toEqual(before);
+    expect(fs.lstatSync(icon).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(icon, "utf8")).toContain(ACCESSIBILITY_FLAG);
+  });
+
   it("leaves an unpermitted application's autostart entry byte-identical", () => {
     const { systemDir, userDir } = machine();
     const discord = install(systemDir, "discord", "/usr/share/discord/Discord");
