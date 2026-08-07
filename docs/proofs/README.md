@@ -66,6 +66,30 @@ environment. The row returns here the first time the script runs against a live
 desktop and writes `deletion-is-reported-as-deletion.md`. Until then, the claim
 stands on `tests/test_typing.py` and the code, not on an artifact.
 
+The run itself is a minute of somebody's time and cannot be rehearsed, so the
+script was hardened first against the two ways that minute could be wasted
+(`tests/test_deletion_proof.py` holds its judgement to it). It now subscribes to
+the element it is watching instead of trusting it to stay among the sixteen most
+recently seen — eviction during the wait produces no error, just three quiet
+minutes and a false negative — and it writes the artifact on every path,
+including the timeout, because a run that watched a person edit and never saw a
+deletion is the most valuable thing this script can find and used to be discarded
+at the door.
+
+Its exit codes carry the distinction the verdict depends on: `0` every condition
+met, `1` a genuine negative — edits arrived and none was reported as a deletion,
+which is a finding, and the rule against re-running until it passes applies to it
+— and `4` nothing was observed at all: no window, no reachable text element, or
+nobody typed. A `4` is not evidence against the claim, because an unattended
+window and a broken watch produce the same silence and the run cannot tell them
+apart. Re-run it.
+
+When it runs: a scratch document with nothing in it, so nothing of the operator's
+is at stake; type a throwaway sentence (that insertion is the contrast that shows
+the service telling edits apart), then select **part** of it and delete — clearing
+the field reports `cleared`, which is a different claim and fails the table on
+purpose.
+
 ### which-credential-the-voice-lane-accepts
 
 The voice lane can be handed either kind of OpenAI credential: a token minted by
