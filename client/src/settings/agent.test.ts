@@ -17,6 +17,7 @@ import { AuthStorage } from "@mastra/code-sdk/auth/storage";
 import { MC_TOOLS } from "@mastra/code-sdk/tool-names";
 import { WORKSPACE_TOOLS } from "@mastra/core/workspace";
 
+import { HUB_TURNS } from "../turn.ts";
 import { AuthStorageCredentialStore } from "../auth/credentials.ts";
 import { InMemoryLoginSessionStore } from "../auth/login-sessions.ts";
 import { ProviderLoginService } from "../auth/service.ts";
@@ -125,10 +126,11 @@ describe("the configuration agent's toolbox", () => {
     const tools = createConfigAgentTools({ gate, surface: "conversation" });
 
     // The runtime hands a tool its input and an invocation context; nothing
-    // these tools do reads the second argument, so an empty one is honest.
-    const staged = (await tools.settings_connect_account.execute!(
-      { provider: "anthropic" } as never,
-      {} as never,
+    // these tools do reads the second argument, so an empty one is honest. The
+    // turn is not in that context and never was — it comes from the scope the
+    // hub opened around the whole turn, which is the point of ../turn.ts.
+    const staged = (await HUB_TURNS.run(() =>
+      tools.settings_connect_account.execute!({ provider: "anthropic" } as never, {} as never),
     )) as { status: string; token: string; echo: string };
 
     expect(staged.status).toBe("needs-confirmation");
