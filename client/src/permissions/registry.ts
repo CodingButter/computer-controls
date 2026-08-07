@@ -7,18 +7,19 @@ import {
 } from "./config-file.ts";
 import type { ScanInstalled } from "../platform/index.ts";
 import type { Census } from "./daemon.ts";
+import { deriveRefusal, type PermissionRefusal } from "./refusal.ts";
 
 export { MalformedConfigError };
 
 /**
  * The hub's own reading of the user's permission registry.
  *
- * One source of truth — the config file the daemon's ceiling reads — viewed
- * two ways: merged with the census for the page's checklist, and boiled down
- * to "which installed applications are unpermitted" for the no-permission
- * signal. Both readings re-read the file per ask, because the daemon does the
- * same and two components disagreeing about a file they both read would be a
- * cache, not a design.
+ * One source of truth — the config file the daemon's ceiling reads — asked
+ * two ways: merged with the census for the page's checklist, and asked about
+ * one application and one operation class for the refusal a denied action
+ * owes the person who can lift it. Both readings re-read the file per ask,
+ * because the daemon does the same and two components disagreeing about a
+ * file they both read would be a cache, not a design.
  */
 
 /**
@@ -143,6 +144,52 @@ function writeNamesFor(row: PermissionRow): string[] {
   return id && id.toLowerCase() !== row.name.toLowerCase() ? [row.name, id] : [row.name];
 }
 
+/**
+ * The row that answers to exactly this name — the lookup a WRITE uses.
+ *
+ * The page sends a name it read off a row, and the row it finds decides which
+ * allowlist entries and which class caps get removed. A near-miss here would
+ * not mis-draw a checkbox; it would revoke a different application. So a write
+ * matches identities exactly or finds nothing, and "nothing" is the safe
+ * answer: the caller then writes the name it was given and touches no one
+ * else's permission.
+ */
+function rowNamed(applications: PermissionRow[], app: string): PermissionRow | undefined {
+  const folded = app.toLowerCase();
+  return applications.find((candidate) =>
+    identitiesOf(candidate).some((name) => name.toLowerCase() === folded),
+  );
+}
+
+/**
+ * The row an application name refers to, however it was spelled — the lookup a
+ * REFUSAL uses, and read-only for that reason.
+ *
+ * Exact first. Only when nothing answers exactly does the ceiling's own
+ * substring rule stand in, because a model asking about an application spells
+ * it the way the person did, and the daemon would match "disc" to Discord
+ * whatever this function thinks. Saying "not listed" about an application the
+ * daemon would have matched is the one wrong answer that matters when the
+ * result is a sentence rather than a write.
+ *
+ * Several loose matches resolve to the narrowest of them, the same instinct
+ * the merged view applies to a row's several names: when the answer is
+ * ambiguous, describe the smaller permission rather than promising the larger.
+ */
+function rowMatching(applications: PermissionRow[], app: string): PermissionRow | undefined {
+  const exact = rowNamed(applications, app);
+  if (exact) return exact;
+
+  const loose = applications.filter((candidate) => matches(app, identitiesOf(candidate)));
+  return (
+    loose.find((row) => row.access === "off") ??
+    loose.find((row) => row.access === "custom") ??
+    loose.find((row) => row.access === "view") ??
+    loose.find((row) => row.access === "interact") ??
+    loose[0]
+  );
+}
+
 export function derivePermitted(
   name: string,
   mode: PermissionsMode,
@@ -170,8 +217,11 @@ export const OPERATION_CLASSES = [
   "destructive",
 ] as const;
 
+/** One rung of the ladder above, as a type the callers of a refusal can hold. */
+export type OperationClass = (typeof OPERATION_CLASSES)[number];
+
 /** `security.implied_classes`: these, and everything the highest of them contains. */
-function impliedClasses(classes: string[]): string[] {
+export function impliedClasses(classes: string[]): string[] {
   const held = OPERATION_CLASSES.filter((name) =>
     classes.some((entry) => entry.trim().toLowerCase() === name),
   );
@@ -252,8 +302,12 @@ export function deriveAccess(
 export type PermissionRegistry = {
   view(): Promise<PermissionsView>;
   setAccess(app: string, access: AppAccess): Promise<PermissionsView>;
-  /** Exact names of applications that exist on this machine and are not permitted. */
-  unpermittedApps(): Promise<string[]>;
+  /**
+   * Why this application would refuse an action of this class, or `undefined`
+   * when it would not — the seam a denied tool call asks before it reports a
+   * failure the person on the other end cannot act on.
+   */
+  refusalFor(app: string, demanded: OperationClass): Promise<PermissionRefusal | undefined>;
 };
 
 export function createPermissionRegistry(deps: RegistryDeps): PermissionRegistry {
@@ -356,10 +410,7 @@ export function createPermissionRegistry(deps: RegistryDeps): PermissionRegistry
 
       // The row being toggled, found by any of its names — the page sends the
       // display name, but "Files" and "org.gnome.Nautilus" are one switch.
-      const folded = app.toLowerCase();
-      const row = current.applications.find((candidate) =>
-        identitiesOf(candidate).some((name) => name.toLowerCase() === folded),
-      );
+      const row = rowNamed(current.applications, app);
       const identities = row ? identitiesOf(row) : [app];
 
       let names: string[];
@@ -409,9 +460,23 @@ export function createPermissionRegistry(deps: RegistryDeps): PermissionRegistry
       return await merge();
     },
 
-    async unpermittedApps(): Promise<string[]> {
+    async refusalFor(
+      app: string,
+      demanded: OperationClass,
+    ): Promise<PermissionRefusal | undefined> {
+      // A malformed config or an unreachable census propagates rather than
+      // becoming a refusal: a confident claim about a permission assembled
+      // from a file nobody could read is worse than no answer at all.
       const view = await merge();
-      return view.applications.filter((row) => !row.permitted).map((row) => row.name);
+      const row = rowMatching(view.applications, app);
+      return deriveRefusal({
+        application: row?.name ?? app,
+        demanded,
+        access: row?.access ?? "off",
+        ...(row?.classes ? { classes: row.classes } : {}),
+        ceiling: view.ceiling,
+        listed: row !== undefined,
+      });
     },
   };
 }

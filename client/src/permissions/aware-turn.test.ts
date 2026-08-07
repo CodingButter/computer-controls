@@ -5,6 +5,7 @@ import { buildApp, type ClientStatus } from "../app.ts";
 import type { AgentTurn, ChatRequest } from "../chat.ts";
 import { createHubBrain } from "../orb/brain.ts";
 import { permissionContextPrefix, wrapTurnWithPermissionAwareness } from "./aware-turn.ts";
+import { deriveRefusal } from "./refusal.ts";
 import type { PermissionRegistry, PermissionsView } from "./registry.ts";
 
 function registryWith(unpermitted: string[]): PermissionRegistry {
@@ -12,14 +13,27 @@ function registryWith(unpermitted: string[]): PermissionRegistry {
     view: async (): Promise<PermissionsView> => ({
       mode: "per-application",
       daemon: { reachable: true },
-      ceiling: ["observe"],
-      applications: [],
+      ceiling: ["observe", "edit", "activate"],
+      applications: unpermitted.map((name) => ({
+        name,
+        permitted: false,
+        access: "off",
+        running: true,
+        readable: true,
+      })),
     }),
     setAccess: async () => {
       throw new Error("not under test");
     },
-    unpermittedApps: async () => unpermitted,
+    refusalFor: async () => {
+      throw new Error("not under test");
+    },
   };
+}
+
+/** The prefix this wrapper should build for an application at `off`. */
+function expectedPrefix(app: string): string {
+  return `[context for the assistant: "${app}" is set to "off" on the permissions page, which does not permit observe-class actions. Open the permissions page and switch "${app}" from "off" to "view". Say so if the request concerns it, and point at the permissions page. Never offer to change the setting yourself.]`;
 }
 
 function recordingTurn(): { turn: AgentTurn; seen: ChatRequest[] } {
@@ -39,12 +53,12 @@ test("a request naming an unpermitted application gets the exact prefix", async 
 
   await wrapped({ message: "What did Cookie say on Discord?" });
 
-  expect(seen[0]!.message).toBe(
-    `${permissionContextPrefix("Discord")}\n\nWhat did Cookie say on Discord?`,
-  );
-  expect(permissionContextPrefix("Discord")).toBe(
-    '[context for the assistant: "Discord" is installed but the user has not granted it permission on the Permissions page. If the request concerns it, say so and point there.]',
-  );
+  // The whole point of #184: the context names the application, the level it
+  // is at, and the switch that would change it — not merely "not permitted".
+  expect(seen[0]!.message).toBe(`${expectedPrefix("Discord")}\n\nWhat did Cookie say on Discord?`);
+  expect(seen[0]!.message).toContain("Discord");
+  expect(seen[0]!.message).toContain("permissions page");
+  expect(seen[0]!.message).toContain('to "view"');
 });
 
 test("permitted and unknown applications get no prefix", async () => {
@@ -80,14 +94,14 @@ test("the earliest mention wins, and at a tie the longer name beats its own subs
   );
 
   await wrapped({ message: "use google chrome, not discord" });
-  expect(seen[0]!.message.startsWith(permissionContextPrefix("Google Chrome"))).toBe(true);
+  expect(seen[0]!.message.startsWith(expectedPrefix("Google Chrome"))).toBe(true);
 });
 
 test("a registry that cannot answer never takes the chat lane down", async () => {
   const { turn, seen } = recordingTurn();
   const broken: PermissionRegistry = {
     ...registryWith([]),
-    unpermittedApps: async () => {
+    view: async () => {
       throw new Error("malformed config");
     },
   };
@@ -131,6 +145,20 @@ test("both transports ride the same wrapped turn: the orb's brain and the typed 
 
   expect(seen).toHaveLength(2);
   for (const request of seen) {
-    expect(request.message.startsWith(permissionContextPrefix("Discord"))).toBe(true);
+    expect(request.message.startsWith(expectedPrefix("Discord"))).toBe(true);
   }
+});
+
+test("the prefix is the refusal builder's own sentence, not a second phrasing of it", async () => {
+  // One author for the page's vocabulary: if the builder's sentence changes,
+  // the chat lane changes with it rather than drifting into a stale wording.
+  const refusal = deriveRefusal({
+    application: "Discord",
+    demanded: "observe",
+    access: "off",
+    ceiling: ["observe", "edit", "activate"],
+    listed: true,
+  });
+
+  expect(permissionContextPrefix(refusal!)).toBe(expectedPrefix("Discord"));
 });
