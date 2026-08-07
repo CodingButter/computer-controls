@@ -25,6 +25,7 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
   { label: "Orb", href: "/orb", external: true },
   { label: "Permissions", href: "/permissions", external: false },
   { label: "Audit", href: "/audit", external: false },
+  { label: "Voice", href: "/voice", external: false },
   { label: "Models", href: "/models", external: false },
   { label: "Plugins", href: "/plugins", external: false },
   { label: "Devices", href: "/devices", external: false },

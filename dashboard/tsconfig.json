@@ -10,6 +10,11 @@
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
+    // The hub's own sources spell relative imports with the .ts they actually
+    // have (client/tsconfig turns them into .js on emit). The dashboard reads a
+    // few of those files directly through @hub/*, so it has to accept the same
+    // spelling or the shared module is unreadable here.
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",

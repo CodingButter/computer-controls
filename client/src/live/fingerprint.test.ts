@@ -192,8 +192,15 @@ describe("createFingerprintDetector", () => {
     expect(enrolled.heard(utterance)).toBe(true);
   });
 
-  it("ships a positive default threshold the calibration chose", () => {
-    expect(DEFAULT_WAKE_THRESHOLD).toBeGreaterThan(0);
+  it("ships the threshold the sweep measured, on the scale the distances live on", () => {
+    // Not a range check for its own sake: MFCC distances here run in the tens,
+    // and a threshold accidentally left on a normalised scale — 0.42, say —
+    // would be a gate that never opens for anyone. The bound is the smoke
+    // alarm for that mistake.
+    expect(DEFAULT_WAKE_THRESHOLD).toBeGreaterThan(5);
+    expect(DEFAULT_WAKE_THRESHOLD).toBeLessThan(40);
+    // The owner's own voice clears the bar sooner than a stranger's, never later.
+    expect(ENROLLED_WAKE_WEIGHT).toBeGreaterThan(1);
   });
 
   it("reset is callable and changes nothing — the detector is stateless", () => {

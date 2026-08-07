@@ -95,6 +95,13 @@ export type AppDeps = {
    * this build declared — the routes decide nothing the declaration does not.
    */
   modelPacks?: Hono;
+  /**
+   * The voice print: enrolled from the dashboard, read by every client with a
+   * microphone. Optional like the rest, and a hub booted without one leaves its
+   * clients with an empty template bank — which never matches, so they are deaf
+   * rather than trigger-happy.
+   */
+  wake?: Hono;
 };
 
 /**
@@ -158,6 +165,7 @@ export function buildApp(deps: AppDeps): Hono {
   if (deps.desktopConfig) app.route("/", deps.desktopConfig);
   if (deps.autostart) app.route("/", deps.autostart);
   if (deps.modelPacks) app.route("/", deps.modelPacks);
+  if (deps.wake) app.route("/", deps.wake);
 
   app.get("*", (c) => {
     // The hub's own static root answers first — chat, the orb, the vendored

@@ -1,4 +1,5 @@
 import {
+  AudioLines,
   Bot,
   Boxes,
   LayoutDashboard,
@@ -30,6 +31,7 @@ const ICON_BY_HREF: Record<string, LucideIcon> = {
   "/orb": Bot,
   "/permissions": ShieldCheck,
   "/audit": ScrollText,
+  "/voice": AudioLines,
   "/models": Boxes,
   "/plugins": Puzzle,
   "/devices": MonitorSmartphone,

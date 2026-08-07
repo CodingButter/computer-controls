@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { NAV_ENTRIES, isActive } from "./nav";
 
 /**
- * The left rail: brand, the nine destinations, and who is signed in.
+ * The left rail: brand, the ten destinations, and who is signed in.
  *
  * Pure on purpose — the active path arrives as a prop so the component can be
  * rendered (and tested) without a router. The thin client wrapper in shell.tsx

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { NAV_ENTRIES, isActive } from "./entries.ts";
 
-describe("the hub's nine nav destinations", () => {
+describe("the hub's ten nav destinations", () => {
   it("labels, hrefs, and order match what every face of the hub shows", () => {
     expect(NAV_ENTRIES.map((e) => e.label)).toEqual([
       "Overview",
@@ -10,6 +10,7 @@ describe("the hub's nine nav destinations", () => {
       "Orb",
       "Permissions",
       "Audit",
+      "Voice",
       "Models",
       "Plugins",
       "Devices",

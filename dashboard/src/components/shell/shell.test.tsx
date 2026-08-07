@@ -5,13 +5,14 @@ import { NAV_ENTRIES as HUB_ENTRIES } from "@hub/nav/entries";
 import { NAV_ENTRIES, isActive } from "./nav";
 import { Sidebar } from "./sidebar";
 
-test("the sidebar names all nine destinations", () => {
+test("the sidebar names all ten destinations", () => {
   expect(NAV_ENTRIES.map((entry) => entry.label)).toEqual([
     "Overview",
     "Chat",
     "Orb",
     "Permissions",
     "Audit",
+    "Voice",
     "Models",
     "Plugins",
     "Devices",

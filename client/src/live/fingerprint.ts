@@ -31,24 +31,41 @@ export type WakeTemplate = {
 
 /**
  * The operating threshold: a weighted DTW distance at or below this is the
- * wake phrase. The VALUE is not a guess — it was chosen by the Phase 2
- * calibration sweep (.mastracode/plans/fingerprint-wake.proof/calibration.txt)
- * as the operating point where Jamie's real recording matches on factory-only
- * templates, held-out synthetic voices match at >=90%, and the full negative
- * set (near-misses included) produces zero false accepts in BOTH the
- * factory-only and factory-plus-enrolled configurations.
+ * wake phrase.
+ *
+ * Measured, not guessed, and the measurement is worth stating because it says
+ * what this gate can and cannot do. Every voice in the corpus was enrolled in
+ * turn — three of its takes as the bank, the rest held out — and scored against
+ * the whole negative set (scripts/measure-wake-enrolled.mjs, 10 enrolments, 55
+ * held-out takes, 1,350 negative comparisons). Own-voice takes sit at a median
+ * distance of 17.0; the nearest non-wake utterance to any enrolment sits at
+ * 16.4, and the median enrolment's nearest negative at 21.8.
+ *
+ * 18 is where that leaves it: 62% of a person's own unseen takes admitted for
+ * one false accept in 1,350. A miss costs a person a second and a repeat. A
+ * false accept costs them a machine that starts listening while they are
+ * talking to someone else, which is the failure that gets a microphone
+ * unplugged for good. The asymmetry is the whole reason the number is not
+ * higher.
+ *
+ * What the same script says about the factory bank is the reason enrolment is
+ * not optional: a stranger's voice against other strangers' templates admits
+ * only about a third of true takes before it starts admitting noise. The bank
+ * gets a person to the enrolment page. Their own takes are what makes this
+ * work.
  */
-export const DEFAULT_WAKE_THRESHOLD = 0.42;
+export const DEFAULT_WAKE_THRESHOLD = 18;
 
 /**
- * The ONE home of the enrolled-template weight. An enrolled template's
- * distance is divided by this before the threshold comparison, so the owner's
- * own voice clears the bar sooner than a stranger's. The value rode the same
- * calibration sweep as the threshold (a grid of candidate weights alongside
- * candidate thresholds — the weight trades the owner's recall against false
- * accepts, and both configurations had to pass); the chosen pair is recorded
- * in calibration.txt. The `enrolled: true` marker some stores carry is
- * documentation; THIS constant is the authority.
+ * The ONE home of the enrolled-template weight. An enrolled template's distance
+ * is divided by this before the threshold comparison, so the owner's own voice
+ * clears the bar sooner than a stranger's rendering of the same phrase.
+ *
+ * 1.15 puts an enrolled template's effective bar near a distance of 20.7, which
+ * the same sweep measures at 71% own-voice recall for three false accepts in
+ * 1,350 — the trade a person has explicitly opted into by standing at a
+ * microphone and recording themselves three times. The `enrolled: true` marker
+ * some stores carry is documentation; THIS constant is the authority.
  */
 export const ENROLLED_WAKE_WEIGHT = 1.15;
 

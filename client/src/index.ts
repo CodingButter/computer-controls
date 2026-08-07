@@ -35,6 +35,8 @@ import { applicationDirs, scanDesktopEntries } from "./platform/freedesktop/entr
 import { FileSettingsAudit } from "./settings/audit.ts";
 import { SettingsGate } from "./settings/gate.ts";
 import { FilePreferenceStore } from "./settings/preferences.ts";
+import { buildWakeApp } from "./wake/routes.ts";
+import { FileWakeTemplateStore } from "./wake/templates.ts";
 import { SettingsService } from "./settings/service.ts";
 import {
   createSessionVoice,
@@ -264,6 +266,11 @@ const app = buildApp({
    */
   autostart: buildAutostartApp({ platform: config.platform }),
   modelPacks: buildModelPacksApp(modelPacks),
+  /**
+   * The voice print lives beside the hub's own settings, in the same directory
+   * the preferences do. Enrolment happens on a page; this is only the shelf.
+   */
+  wake: buildWakeApp(new FileWakeTemplateStore(hubDir)),
 });
 
 // Cure at boot, once, and never fatally: a launcher that could not be
