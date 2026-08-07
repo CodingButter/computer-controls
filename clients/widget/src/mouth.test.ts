@@ -123,8 +123,12 @@ describe("the disciplines, pinned in the source", () => {
     expect(handler.slice(branch, handler.indexOf("onRefusal"))).toContain("onDismiss?.()");
     // The renderer owns the face's state and the mouth reference, so the
     // dismissal is routed through it rather than closing the mouth behind
-    // its back and leaving a listening face with no session.
-    expect(rendererSource).toContain("onDismiss: () => closeMouth()");
+    // its back and leaving a listening face with no session. And it puts the
+    // face away: being asked to go is the primary way this widget leaves the
+    // screen, ahead of any timer.
+    const dismissal = rendererSource.slice(rendererSource.indexOf("onDismiss: () =>"));
+    expect(dismissal).toContain("closeMouth()");
+    expect(dismissal.slice(0, 400)).toContain('applyGesture(state, { type: "dismiss" })');
   });
 
   test("the lane is checked before the acknowledgement that promises an answer", () => {

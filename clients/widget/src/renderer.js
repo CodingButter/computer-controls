@@ -197,6 +197,14 @@ function rewindFade() {
   fadeTimer = null;
   if (!autoHide) return;
   if (state.presence !== "visible") return;
+  // A face over work in progress does not leave, however long the work takes.
+  // The timer measures how long a conversation has been resting, and an agent
+  // partway through a task is not a resting conversation — it is the one
+  // moment a person most needs to see that something is still happening, and
+  // the one moment they cannot ask, because the thing they would ask has
+  // hidden itself. Twenty seconds is a pause in a conversation; it is nothing
+  // at all in a task.
+  if (state.activity === "thinking") return;
   fadeTimer = setTimeout(() => {
     state = fade(state, autoHide);
     paint();
@@ -283,11 +291,19 @@ async function startListening() {
           },
           onState: () => rewindFade(),
           onReason: () => closeMouth(),
-          // The model heard a dismissal. It ends this turn exactly the way
-          // silence does — the mouth shuts, the face goes to rest, and the
-          // wake word stays armed. Stopping the ears would make a dismissal
-          // deafen the widget until it was restarted, which nobody asked for.
-          onDismiss: () => closeMouth(),
+          // The model heard a dismissal, and a dismissal is the honest way to
+          // put the face away. "Never mind" hides it now, whatever the
+          // auto-hide setting says, because a person who says that has told
+          // the widget to go, and a timer is a poor substitute for being
+          // asked. The ears stay: being told to stop talking is not being
+          // told to stop listening for your name, and stopping them would
+          // deafen the widget until a restart, which nobody asked for.
+          onDismiss: () => {
+            closeMouth();
+            state = applyGesture(state, { type: "dismiss" });
+            paint();
+            rewindFade();
+          },
         }).then(
           (opened) => {
             // The gate may have gone quiet while the dial was in flight; a
