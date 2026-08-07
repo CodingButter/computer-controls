@@ -192,10 +192,33 @@ describe("what the shipped mouth source promises", () => {
     // Stopping the sources fires `onended`, which drains `playing` and
     // flushes the queue — so without this purge, interrupting the orb is
     // precisely what makes it recite narration for steps already finished.
-    // The clear must come before the sources are stopped.
-    const barge = mouth.slice(mouth.indexOf("const bargeIn = () =>"));
-    expect(barge).toContain("heldWords.length = 0");
-    expect(barge.indexOf("heldWords.length = 0")).toBeLessThan(barge.indexOf("source.stop()"));
+    // The purge must come before the sources are stopped.
+    const barge = mouth.slice(mouth.indexOf("const bargeIn = () =>"), mouth.indexOf("const first ="));
+    expect(barge).toContain("heldWords.splice(i, 1)");
+    expect(barge.indexOf("heldWords.splice(i, 1)")).toBeLessThan(barge.indexOf("source.stop()"));
+  });
+
+  it("never drops a queued answer on barge-in — that is the user's result", () => {
+    // Every meaning queues while audio plays, answers included, and an id is
+    // struck from `pendingAsks` as its answer is queued. A blanket clear here
+    // would therefore lose the result with no redelivery path. The purge must
+    // be predicate-filtered to progress, exactly like the answer purge.
+    const barge = mouth.slice(mouth.indexOf("const bargeIn = () =>"), mouth.indexOf("const first ="));
+    expect(barge).not.toMatch(/heldWords\.length\s*=\s*0/);
+    expect(barge).not.toMatch(/heldWords\s*=\s*\[\]/);
+    expect(barge).toContain('heldWords[i].kind === "progress"');
+  });
+
+  it("keeps the floor for the user until the model answers them", () => {
+    // A barge empties `playing`, which is the very condition that lets a lane
+    // word through — so without this, interrupting the orb hands the next
+    // tool call a clear shot at talking over the person who interrupted.
+    expect(mouth).toContain("userHasFloor = true");
+    const laneHandler = mouth.slice(mouth.indexOf('lane.addEventListener("message"'));
+    expect(laneHandler).toContain('meaning.kind === "progress" && userHasFloor');
+    // Cleared when the model speaks, and never applied to an answer.
+    const speak = mouth.slice(mouth.indexOf("const speak = (bytes)"), mouth.indexOf("const bargeIn"));
+    expect(speak).toContain("userHasFloor = false");
   });
 
   it("is wired into the page the browser actually loads", () => {
