@@ -31,6 +31,9 @@ const commons = path.join(root, "skills");
 const REPO_COMMONS = path.resolve(import.meta.dirname, "..", "..", "skills");
 const SEED = "discord-read-latest-direct-message";
 
+/** A skill of the same shape, arrived by fetch rather than by checkout. */
+const FETCHED = "firefox-open-a-new-tab";
+
 async function workspaceOn(commonsPath?: string): Promise<AnyWorkspace> {
   const requestContext = new RequestContext();
   requestContext.set("controller", {
@@ -45,6 +48,20 @@ beforeAll(() => {
   fs.copyFileSync(
     path.join(REPO_COMMONS, SEED, "SKILL.md"),
     path.join(commons, SEED, "SKILL.md"),
+  );
+
+  // A second skill in the same folder, of the other provenance: one this
+  // machine fetched rather than derived, marker and all.
+  fs.mkdirSync(path.join(commons, FETCHED), { recursive: true });
+  fs.writeFileSync(
+    path.join(commons, FETCHED, "SKILL.md"),
+    fs
+      .readFileSync(path.join(REPO_COMMONS, SEED, "SKILL.md"), "utf8")
+      .replace(`name: "${SEED}"`, `name: "${FETCHED}"`),
+  );
+  fs.writeFileSync(
+    path.join(commons, FETCHED, "FETCHED.json"),
+    JSON.stringify({ version: 1, skill: FETCHED, source: "owner/repo@main" }),
   );
 });
 
@@ -88,6 +105,22 @@ test("test_the_skill_says_it_is_advisory_to_the_agent_that_reads_it", async () =
 
   expect(skill!.instructions).toContain("advisory");
   expect(skill!.instructions).toContain("amend");
+});
+
+test("test_a_fetched_skill_is_handed_over_like_any_other", async () => {
+  // A skill somebody fetched from the commons carries a third file beside the
+  // pair, marking where it came from so it can be taken back off the machine.
+  // That file is the fetching side's business and none of the runtime's: the
+  // route has to arrive exactly as a merged one does, with no more standing and
+  // no less, and the marker must not turn up as a skill of its own.
+  const workspace = await workspaceOn(commons);
+  const names = (await workspace.skills!.list()).map((skill) => skill.name);
+
+  expect(names).toContain(FETCHED);
+  expect(names).not.toContain("FETCHED.json");
+
+  const skill = await workspace.skills!.get(FETCHED);
+  expect(skill!.instructions).toContain("advisory");
 });
 
 test("test_a_hub_with_no_commons_boots_with_fewer_skills_and_not_no_hub", async () => {

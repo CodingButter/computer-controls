@@ -25,6 +25,15 @@ a route is what worked somewhere else, and an agent following one verifies each
 step against the tree in front of it. A landmark that is not there is a skill to
 amend, not a step to retry.
 
+Between the two halves are the two verbs a *person* has: publish one skill, and
+fetch the ones other people published. Publishing shows the rendered pair in
+full before anything leaves, and sends it to the project's own service rather
+than opening a pull request from here, so contributing needs no GitHub account,
+no token and no git on the machine that learned the route. Fetching adds a
+merged skill to the folder the runtime already reads, marks it as having come
+from the commons, and can take it back out again without touching a route this
+machine worked out for itself.
+
 The rule that shapes everything here is that auto-downloading text which shapes
 behaviour is a supply chain. A poisoned skill is a prompt injection with a
 delivery service, so an agent *publishes a candidate* and the registry *admits*
@@ -33,7 +42,9 @@ were generated rather than written.
 """
 
 from . import frontmatter
+from .fetch import ORIGIN_FILE, Fetched, Fetcher, GitHubCommons, NotFetchable, Published
 from .frontmatter import MalformedHeader
+from .publish import HttpService, Preview, Publisher, PublishingService, Receipt
 from .render import ADVISORY, describe, header, render, render_review
 from .skill import (
     AMENDMENTS,
@@ -52,9 +63,20 @@ __all__ = [
     "ADVISORY",
     "AMENDMENTS",
     "BAR",
+    "ORIGIN_FILE",
     "Amendment",
+    "Fetched",
+    "Fetcher",
+    "GitHubCommons",
+    "HttpService",
     "MalformedHeader",
+    "NotFetchable",
     "NotPublishable",
+    "Preview",
+    "Published",
+    "Publisher",
+    "PublishingService",
+    "Receipt",
     "SENSITIVE_APPLICATIONS",
     "Screen",
     "Skill",
