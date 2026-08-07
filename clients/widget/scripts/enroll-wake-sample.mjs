@@ -24,7 +24,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { extractFeatures } from "../src/wake-score.js";
+import { assembleTemplates } from "../src/wake-score.js";
 import { readWakeTemplates, writeWakeTemplates } from "../src/wake-templates.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -84,15 +84,16 @@ export function decodeWav(buffer) {
  * @param {string} wavPath
  * @param {string} dataPath
  * @param {string} phrase
- * @returns {{ template: { phrase: string, createdAt: string, features: number[], sampleRate: number }, total: number }}
+ * @returns {{ template: { id: string, phrase: string, createdAt: string, frames: number[][], sampleRate: number, weight: number }, total: number }}
  */
 export function enrollWav(wavPath, dataPath, phrase) {
   const buffer = readFileSync(resolve(wavPath));
   const { samples, sampleRate } = decodeWav(buffer);
-  const features = Array.from(extractFeatures(samples, sampleRate));
-  const template = { phrase, createdAt: new Date().toISOString(), features, sampleRate };
-
   const state = readWakeTemplates(dataPath);
+  // One take through the same orchestration the UI drives, so a template
+  // enrolled from a WAV is byte-shaped exactly like one recorded live.
+  const [template] = assembleTemplates([samples], { phrase, sampleRate }).templates;
+  template.id = `enrolled-${state.templates.length + 1}`;
   const templates = [...state.templates, template];
   writeWakeTemplates(dataPath, { templates, enrolled: true });
   return { template, total: templates.length };
@@ -120,7 +121,7 @@ function main() {
   }
   const { template, total } = enrollWav(args.wav, args.data, args.phrase);
   process.stdout.write(
-    `enrolled "${template.phrase}" (${template.sampleRate} Hz, ${template.features.length} bins) — ${total} template(s) now stored\n`,
+    `enrolled "${template.phrase}" (${template.sampleRate} Hz, ${template.frames.length} frames) — ${total} template(s) now stored\n`,
   );
   return 0;
 }

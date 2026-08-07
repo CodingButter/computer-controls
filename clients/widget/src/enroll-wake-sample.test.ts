@@ -124,7 +124,7 @@ describe("enrollWav", () => {
     expect(total).toBe(1);
     expect(template.phrase).toBe("hey mastra");
     expect(template.sampleRate).toBe(16000);
-    expect(template.features.length).toBeGreaterThan(0);
+    expect(template.frames.length).toBeGreaterThan(0);
 
     const stored = readWakeTemplates(dataPath());
     expect(stored.templates).toHaveLength(1);

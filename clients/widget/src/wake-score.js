@@ -1,132 +1,98 @@
 /**
- * The scorer seam: how a recorded take becomes a template, and how a take is
- * scored against the enrolled set.
+ * The scorer: how a recorded take becomes a template, and how a take is scored
+ * against the ones already enrolled.
  *
- * This is a stand-in, not the agreed MFCC/DTW matcher. The MFCC/DTW design
- * (the real fingerprint wake-word core) and the factory template corpus are
- * separate work; they replace this module's internals through the same seam —
- * `extractFeatures` and `scoreTake` keep their signatures, and the template
- * shape on disk stays — so the UI and storage do not change when the real
- * matcher lands. What lives here today is enough to make enrollment
- * demonstrable and testable end to end: a length-invariant description of how a
- * take sounds, and an honest similarity score against what is enrolled so far.
+ * This was a stand-in — a 32-bin energy envelope compared by cosine similarity —
+ * left behind the seam `extractFeatures`/`scoreTake`/`assembleTemplates` so the
+ * real matcher could drop in without moving the UI or the storage. This is that
+ * drop-in. The math now comes from the hub's own `fingerprint.js`: MFCC frames
+ * matched by subsequence DTW, the same code the wake gate itself runs, vendored
+ * byte-for-byte like every other live module. Enrollment scores a take with the
+ * identical arithmetic that will later decide whether to open the gate, which is
+ * the only way the number on screen means anything.
  *
- * The module is pure on purpose. No filesystem, no network, no audio API — it
- * takes numbers in and gives numbers out — so it runs identically in the
- * renderer (live per-take scores), in a Node script (the WAV enroll CLI), and in
- * a test (no browser, no microphone).
+ * Two things changed shape and could not be avoided. A take's features are a
+ * SEQUENCE of frames, not one fixed-length vector — a phrase is a shape in
+ * time, and flattening it away was exactly what made the envelope version
+ * useless. And the score is now derived from a DTW distance rather than a
+ * cosine, so it is calibrated against the wake threshold: 1.0 is a perfect
+ * match, 0.5 is a take sitting exactly on the threshold the gate uses, 0 is
+ * twice as far away as the gate would ever accept.
+ *
+ * The module stays pure. No filesystem, no network, no audio API — numbers in,
+ * numbers out — so it runs identically in the renderer (live per-take scores),
+ * in the Node enroll CLI, and in a test with no browser and no microphone.
  */
 
-/**
- * How many windows a take is resolved into. Length-invariant: a 2.0s take and a
- * 2.5s take both produce this many values, so two recordings of the same phrase
- * land in the same shape regardless of exactly how long the person took.
- */
-export const FEATURE_BINS = 32;
+import {
+  DEFAULT_WAKE_THRESHOLD,
+  ENROLLED_WAKE_WEIGHT,
+  mfcc,
+  subsequenceDtw,
+} from "./vendor/live/fingerprint.js";
 
 /** The similarity returned when there is nothing to compare a take against. */
 export const NEUTRAL_SCORE = 0;
 
 /**
- * Turn raw PCM16 samples into a fixed-length, normalised feature vector.
+ * The distance at which a take scores zero.
  *
- * The signal is windowed into `FEATURE_BINS` equal slices; each slice becomes
- * its root-mean-square amplitude; the vector is then min-max normalised so the
- * loudest slice is 1 and the quietest is 0. The result is the energy envelope of
- * the utterance — a coarse but real fingerprint of how this person paced and
- * stressed the phrase, which is enough to tell takes of the same voice apart
- * from silence and from a different sound entirely.
+ * Twice the gate's threshold. It makes the displayed score readable against the
+ * thing that actually matters: a take that would open the gate scores at or
+ * above 0.5, and anything below that is a take the gate would refuse.
+ */
+export const SCORE_FLOOR_DISTANCE = DEFAULT_WAKE_THRESHOLD * 2;
+
+/**
+ * Turn raw PCM16 samples into the frame sequence the matcher compares.
+ *
+ * Delegates to the hub's MFCC so enrollment and the gate cannot drift apart.
+ * The frames come back as plain arrays rather than the typed arrays the matcher
+ * hands out: these end up in a JSON file, and a Float32Array serialises to an
+ * object with numeric keys, which reads back as a template nothing recognises.
  *
  * @param {Int16Array | number[]} samples
- * @param {number} _sampleRate  kept in the signature so the real matcher (which
- *   is sample-rate-sensitive) can drop in unchanged.
- * @returns {Float32Array}
+ * @param {number} sampleRate
+ * @returns {number[][]} one 13-dimensional frame per 10ms hop
  */
-export function extractFeatures(samples, _sampleRate) {
-  const data = samples instanceof Int16Array ? samples : new Int16Array(samples);
-  const bins = Math.max(1, FEATURE_BINS);
-  const features = new Float32Array(bins);
-  const slice = Math.max(1, Math.floor(data.length / bins));
-  for (let i = 0; i < bins; i += 1) {
-    let sum = 0;
-    let count = 0;
-    for (let j = 0; j < slice; j += 1) {
-      const index = i * slice + j;
-      if (index >= data.length) break;
-      const sample = data[index] / 32768;
-      sum += sample * sample;
-      count += 1;
-    }
-    features[i] = count > 0 ? Math.sqrt(sum / count) : 0;
-  }
-  return normalize(features);
+export function extractFeatures(samples, sampleRate) {
+  const data = samples instanceof Int16Array ? samples : Int16Array.from(samples);
+  return mfcc(data, sampleRate).map((frame) => Array.from(frame));
 }
 
 /**
- * @param {Float32Array} vector
- * @returns {Float32Array}
- */
-function normalize(vector) {
-  let min = Infinity;
-  let max = -Infinity;
-  for (const value of vector) {
-    if (value < min) min = value;
-    if (value > max) max = value;
-  }
-  const range = max - min;
-  const out = new Float32Array(vector.length);
-  if (range === 0) return out;
-  for (let i = 0; i < vector.length; i += 1) out[i] = (vector[i] - min) / range;
-  return out;
-}
-
-/**
- * Cosine similarity in [-1, 1], clamped to [0, 1].
+ * Turn a DTW distance into a score in [0, 1], calibrated against the gate.
  *
- * Two identical envelopes score 1; two orthogonal ones score 0. A negative
- * similarity (an inverted envelope) is not meaningful for a wake score and is
- * clamped to the floor.
- *
- * @param {Float32Array | number[]} a
- * @param {Float32Array | number[]} b
+ * @param {number} distance
  * @returns {number}
  */
-export function cosineSimilarity(a, b) {
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-  const len = Math.min(a.length, b.length);
-  if (len === 0) return 0;
-  for (let i = 0; i < len; i += 1) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-  const denom = Math.sqrt(normA) * Math.sqrt(normB);
-  if (denom === 0) return 0;
-  return Math.max(0, dot / denom);
+export function scoreFromDistance(distance) {
+  if (!Number.isFinite(distance)) return 0;
+  const score = 1 - distance / SCORE_FLOOR_DISTANCE;
+  return Math.max(0, Math.min(1, score));
 }
 
 /**
  * Score one take against the enrolled templates, or the neutral baseline when
  * nothing is enrolled yet.
  *
- * The score is the highest similarity the take reaches against any one enrolled
- * template — the best match is the one that counts, because enrollment is
- * asking "does this take sound like the ones I already have?"
+ * The best match is the one that counts: enrollment is asking "does this take
+ * sound like the ones I already have?", and the closest answer is the answer.
  *
- * @param {Float32Array | number[]} takeFeatures
- * @param {{ features: number[] }[]} templates
+ * @param {number[][]} takeFrames
+ * @param {{ frames: number[][] }[]} templates
  * @returns {number}
  */
-export function scoreTake(takeFeatures, templates) {
+export function scoreTake(takeFrames, templates) {
   if (!templates || templates.length === 0) return NEUTRAL_SCORE;
-  let best = 0;
+  if (!takeFrames || takeFrames.length === 0) return 0;
+  let best = Infinity;
   for (const template of templates) {
-    const similarity = cosineSimilarity(takeFeatures, template.features);
-    if (similarity > best) best = similarity;
+    if (!template?.frames?.length) continue;
+    const distance = subsequenceDtw(takeFrames, template.frames);
+    if (distance < best) best = distance;
   }
-  return best;
+  return scoreFromDistance(best);
 }
 
 /**
@@ -138,20 +104,33 @@ export function scoreTake(takeFeatures, templates) {
  * the first, the third against the first two. That mirrors what the user sees
  * live: a score that means "consistency against what you've recorded so far."
  *
+ * Every stored template carries ENROLLED_WAKE_WEIGHT. That constant is the
+ * matcher's, not this module's: it divides an enrolled template's distance at
+ * match time, so the voice that lives with this machine clears the bar sooner
+ * than a stranger's. Writing it in here means the gate reads the weight off the
+ * template instead of guessing where a template came from.
+ *
  * Both the UI and the enroll CLI drive enrollment through this one function, so
  * the orchestration is testable without a browser and without a microphone.
  *
  * @param {Array<Int16Array | number[]>} takes
  * @param {{ phrase: string, sampleRate: number }} meta
- * @returns {{ templates: { phrase: string, createdAt: string, features: number[], sampleRate: number }[], scores: number[] }}
+ * @returns {{ templates: { id: string, phrase: string, createdAt: string, frames: number[][], sampleRate: number, weight: number }[], scores: number[] }}
  */
 export function assembleTemplates(takes, { phrase, sampleRate }) {
   const templates = [];
   const scores = [];
   for (const take of takes) {
-    const features = Array.from(extractFeatures(take, sampleRate));
-    scores.push(scoreTake(features, templates));
-    templates.push({ phrase, createdAt: new Date().toISOString(), features, sampleRate });
+    const frames = extractFeatures(take, sampleRate);
+    scores.push(scoreTake(frames, templates));
+    templates.push({
+      id: `enrolled-${templates.length + 1}`,
+      phrase,
+      createdAt: new Date().toISOString(),
+      frames,
+      sampleRate,
+      weight: ENROLLED_WAKE_WEIGHT,
+    });
   }
   return { templates, scores };
 }

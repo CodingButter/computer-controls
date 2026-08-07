@@ -21,7 +21,7 @@ import path from "node:path";
  * absent-file answer.
  */
 
-/** @typedef {{ phrase: string, createdAt: string, features: number[], sampleRate: number }} WakeTemplate */
+/** @typedef {{ id?: string, phrase: string, createdAt: string, frames: number[][], sampleRate: number, weight?: number }} WakeTemplate */
 /** @typedef {{ templates: WakeTemplate[], enrolled: boolean }} WakeTemplates */
 
 export const DEFAULT_WAKE_TEMPLATES = Object.freeze({ templates: [], enrolled: false });
@@ -61,8 +61,14 @@ function isValidTemplate(entry) {
   return (
     typeof t.phrase === "string" &&
     typeof t.createdAt === "string" &&
-    Array.isArray(t.features) &&
-    t.features.every((f) => typeof f === "number" && Number.isFinite(f)) &&
+    Array.isArray(t.frames) &&
+    t.frames.length > 0 &&
+    t.frames.every(
+      (frame) =>
+        Array.isArray(frame) &&
+        frame.length > 0 &&
+        frame.every((f) => typeof f === "number" && Number.isFinite(f)),
+    ) &&
     typeof t.sampleRate === "number" &&
     Number.isFinite(t.sampleRate)
   );

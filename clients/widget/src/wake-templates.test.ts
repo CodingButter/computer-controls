@@ -26,7 +26,7 @@ import {
 const template = (overrides: Partial<Record<string, unknown>> = {}) => ({
   phrase: "hey mastra",
   createdAt: "2026-08-07T00:00:00.000Z",
-  features: [0.1, 0.2, 0.3],
+  frames: [[0.1, 0.2, 0.3]],
   sampleRate: 16000,
   ...overrides,
 });
@@ -85,7 +85,7 @@ describe("reading it back", () => {
     writeFileSync(
       file(),
       JSON.stringify({
-        templates: [template(), { phrase: 123, createdAt: "x", features: "nope", sampleRate: "no" }],
+        templates: [template(), { phrase: 123, createdAt: "x", frames: "nope", sampleRate: "no" }],
         enrolled: true,
       }),
     );
@@ -94,10 +94,10 @@ describe("reading it back", () => {
     expect(state.templates[0].phrase).toBe("hey mastra");
   });
 
-  test("a template with non-finite features is rejected", () => {
+  test("a template with a non-finite frame value is rejected", () => {
     writeFileSync(
       file(),
-      JSON.stringify({ templates: [template({ features: [0.1, NaN, 0.3] })], enrolled: true }),
+      JSON.stringify({ templates: [template({ frames: [[0.1, NaN, 0.3]] })], enrolled: true }),
     );
     expect(readWakeTemplates(file()).templates).toHaveLength(0);
   });

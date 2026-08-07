@@ -1,147 +1,173 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  FEATURE_BINS,
   NEUTRAL_SCORE,
+  SCORE_FLOOR_DISTANCE,
   assembleTemplates,
-  cosineSimilarity,
   extractFeatures,
+  scoreFromDistance,
   scoreTake,
 } from "./wake-score.js";
+import { ENROLLED_WAKE_WEIGHT } from "./vendor/live/fingerprint.js";
 
 /**
- * The scorer seam, checked without a microphone and without a browser.
+ * The scorer, checked without a microphone and without a browser.
  *
- * The pure module runs anywhere, so these tests are about its contracts: a
- * fixed-length feature vector regardless of input length, a sensible similarity
- * ordering (identical > similar > different), and the enrollment orchestration
- * that the UI and the enroll CLI both drive. When the real MFCC/DTW matcher
- * lands behind these signatures, these tests keep the seam honest.
+ * The module is now a thin adapter over the hub's MFCC/DTW matcher — the same
+ * arithmetic the wake gate runs — so these tests are about the contracts the UI
+ * and the storage depend on: a take resolves to a sequence of frames, a score
+ * says how close a take is to what is already enrolled, and every stored
+ * template carries the weight the matcher will divide its distance by.
  */
 
-/** A synthetic envelope: a rising ramp shaped into PCM16, so it is deterministic. */
+/** A synthetic signal: a rising ramp shaped into PCM16, so it is deterministic. */
 const ramp = (length: number, from = 1000, to = 16000) => {
   const samples = new Int16Array(length);
   for (let i = 0; i < length; i += 1) samples[i] = Math.round(from + ((to - from) * i) / length);
   return samples;
 };
 
-const silence = (length: number) => new Int16Array(length);
+/** A voiced-ish tone: a periodic signal, which is what MFCC is built to describe. */
+const tone = (length: number, hz = 180, amplitude = 8000) => {
+  const samples = new Int16Array(length);
+  for (let i = 0; i < length; i += 1) {
+    samples[i] = Math.round(amplitude * Math.sin((2 * Math.PI * hz * i) / 16000));
+  }
+  return samples;
+};
 
 const noise = (length: number) => {
   const samples = new Int16Array(length);
-  for (let i = 0; i < length; i += 1) samples[i] = Math.round(1000 * Math.sin(i / 9));
+  let seed = 7;
+  for (let i = 0; i < length; i += 1) {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    samples[i] = (seed % 16000) - 8000;
+  }
   return samples;
 };
 
 describe("extractFeatures", () => {
-  test("produces a fixed-length vector regardless of input length", () => {
-    const short = extractFeatures(ramp(8000), 16000);
-    const long = extractFeatures(ramp(40000), 16000);
-    expect(short.length).toBe(FEATURE_BINS);
-    expect(long.length).toBe(FEATURE_BINS);
+  test("resolves a take into a sequence of frames, one per hop", () => {
+    // A phrase is a shape in time. The envelope version flattened that away,
+    // which is exactly what made it useless.
+    const frames = extractFeatures(tone(16000), 16000);
+    expect(frames.length).toBeGreaterThan(50);
+    for (const frame of frames) expect(frame).toHaveLength(13);
   });
 
-  test("is deterministic — the same input twice is the same vector", () => {
-    const a = extractFeatures(ramp(16000), 16000);
-    const b = extractFeatures(ramp(16000), 16000);
-    expect(Array.from(a)).toEqual(Array.from(b));
+  test("a longer take produces more frames", () => {
+    const short = extractFeatures(tone(8000), 16000);
+    const long = extractFeatures(tone(24000), 16000);
+    expect(long.length).toBeGreaterThan(short.length);
   });
 
-  test("a ramp produces a monotonically non-decreasing envelope", () => {
-    // A rising signal, normalised, must rise (or stay flat) across the bins.
-    const features = extractFeatures(ramp(16000), 16000);
-    for (let i = 1; i < features.length; i += 1) expect(features[i]).toBeGreaterThanOrEqual(features[i - 1]);
+  test("is deterministic — the same input twice is the same frames", () => {
+    expect(extractFeatures(tone(16000), 16000)).toEqual(extractFeatures(tone(16000), 16000));
   });
 
-  test("silence produces an all-zero vector", () => {
-    const features = extractFeatures(silence(16000), 16000);
-    expect(Array.from(features).every((v) => v === 0)).toBe(true);
+  test("every value is a finite number the storage can hold", () => {
+    for (const frame of extractFeatures(ramp(16000), 16000)) {
+      for (const value of frame) expect(Number.isFinite(value)).toBe(true);
+    }
   });
 });
 
-describe("cosineSimilarity", () => {
-  test("identical vectors score 1", () => {
-    const v = extractFeatures(ramp(16000), 16000);
-    expect(cosineSimilarity(v, v)).toBeCloseTo(1, 5);
+describe("scoreFromDistance", () => {
+  test("a perfect match scores 1", () => {
+    expect(scoreFromDistance(0)).toBe(1);
   });
 
-  test("a zero vector against anything is 0", () => {
-    expect(cosineSimilarity(new Float32Array(32), extractFeatures(ramp(16000), 16000))).toBe(0);
+  test("a take sitting exactly on the gate's threshold scores a half", () => {
+    // The number on screen is calibrated against the number the gate uses:
+    // 0.5 is the bar, not an arbitrary midpoint.
+    expect(scoreFromDistance(SCORE_FLOOR_DISTANCE / 2)).toBeCloseTo(0.5, 10);
+  });
+
+  test("nothing ever escapes [0, 1]", () => {
+    expect(scoreFromDistance(SCORE_FLOOR_DISTANCE * 10)).toBe(0);
+    expect(scoreFromDistance(Infinity)).toBe(0);
+    expect(scoreFromDistance(-1)).toBe(1);
   });
 });
 
 describe("scoreTake", () => {
   test("no enrolled templates returns the neutral baseline", () => {
-    expect(scoreTake(extractFeatures(ramp(16000), 16000), [])).toBe(NEUTRAL_SCORE);
+    expect(scoreTake(extractFeatures(tone(16000), 16000), [])).toBe(NEUTRAL_SCORE);
   });
 
-  test("identical features against the matching template score 1", () => {
-    const features = extractFeatures(ramp(16000), 16000);
-    const template = { features: Array.from(features) };
-    expect(scoreTake(features, [template])).toBeCloseTo(1, 5);
+  test("a take against its own frames scores 1", () => {
+    const frames = extractFeatures(tone(16000), 16000);
+    expect(scoreTake(frames, [{ frames }])).toBeCloseTo(1, 5);
   });
 
   test("a take scores higher against a matching template than against a different sound", () => {
-    const rampFeatures = extractFeatures(ramp(16000), 16000);
-    const rampTemplate = { features: Array.from(rampFeatures) };
-    const noiseTemplate = { features: Array.from(extractFeatures(noise(16000), 16000)) };
-    // The same ramp take, scored against each.
-    const againstRamp = scoreTake(rampFeatures, [rampTemplate]);
-    const againstNoise = scoreTake(rampFeatures, [noiseTemplate]);
-    expect(againstRamp).toBeGreaterThan(againstNoise);
+    const toneFrames = extractFeatures(tone(16000), 16000);
+    const against = (template: number[][]) => scoreTake(toneFrames, [{ frames: template }]);
+    expect(against(extractFeatures(tone(16000), 16000))).toBeGreaterThan(
+      against(extractFeatures(noise(16000), 16000)),
+    );
   });
 
   test("the best match wins when several templates are enrolled", () => {
-    const rampFeatures = extractFeatures(ramp(16000), 16000);
+    const toneFrames = extractFeatures(tone(16000), 16000);
     const templates = [
-      { features: Array.from(extractFeatures(noise(16000), 16000)) },
-      { features: Array.from(rampFeatures) }, // the match
-      { features: Array.from(extractFeatures(silence(16000), 16000)) },
+      { frames: extractFeatures(noise(16000), 16000) },
+      { frames: toneFrames }, // the match
+      { frames: extractFeatures(ramp(16000), 16000) },
     ];
-    expect(scoreTake(rampFeatures, templates)).toBeCloseTo(1, 5);
+    expect(scoreTake(toneFrames, templates)).toBeCloseTo(1, 5);
+  });
+
+  test("a template with no frames is skipped rather than crashed on", () => {
+    const frames = extractFeatures(tone(16000), 16000);
+    expect(scoreTake(frames, [{ frames: [] }, { frames }])).toBeCloseTo(1, 5);
   });
 });
 
 describe("assembleTemplates", () => {
-  test("three takes yield three templates with correct metadata", () => {
-    const { templates } = assembleTemplates(
-      [ramp(16000), ramp(16000), ramp(16000)],
-      { phrase: "hey mastra", sampleRate: 16000 },
-    );
+  test("three takes yield three templates with the metadata storage validates", () => {
+    const { templates } = assembleTemplates([tone(16000), tone(16000), tone(16000)], {
+      phrase: "hey mastra",
+      sampleRate: 16000,
+    });
     expect(templates).toHaveLength(3);
     for (const t of templates) {
       expect(t.phrase).toBe("hey mastra");
       expect(t.sampleRate).toBe(16000);
       expect(typeof t.createdAt).toBe("string");
-      expect(t.features).toHaveLength(FEATURE_BINS);
-      expect(t.features.every((f) => typeof f === "number" && Number.isFinite(f))).toBe(true);
+      expect(t.frames.length).toBeGreaterThan(0);
+      expect(t.frames[0]).toHaveLength(13);
     }
   });
 
+  test("every enrolled template carries the matcher's weight", () => {
+    // The gate reads the weight off the template instead of guessing where a
+    // template came from, so enrollment has to write it.
+    const { templates } = assembleTemplates([tone(16000)], {
+      phrase: "hey mastra",
+      sampleRate: 16000,
+    });
+    expect(templates[0].weight).toBe(ENROLLED_WAKE_WEIGHT);
+  });
+
   test("the first take scores neutral — nothing precedes it", () => {
-    const { scores } = assembleTemplates(
-      [ramp(16000), ramp(16000), ramp(16000)],
-      { phrase: "hey mastra", sampleRate: 16000 },
-    );
-    expect(scores).toHaveLength(3);
+    const { scores } = assembleTemplates([tone(16000), tone(16000)], {
+      phrase: "hey mastra",
+      sampleRate: 16000,
+    });
     expect(scores[0]).toBe(NEUTRAL_SCORE);
   });
 
   test("a consistent second take scores higher than a divergent one", () => {
-    // Two identical ramps then an identical ramp again — the third should score
-    // high against the first two. Then compare against a noise take.
-    const consistent = assembleTemplates(
-      [ramp(16000), ramp(16000), ramp(16000)],
-      { phrase: "hey mastra", sampleRate: 16000 },
-    );
-    const divergent = assembleTemplates(
-      [ramp(16000), noise(16000), noise(16000)],
-      { phrase: "hey mastra", sampleRate: 16000 },
-    );
-    // Second take: identical ramp (high) vs noise (low).
+    const consistent = assembleTemplates([tone(16000), tone(16000)], {
+      phrase: "hey mastra",
+      sampleRate: 16000,
+    });
+    const divergent = assembleTemplates([tone(16000), noise(16000)], {
+      phrase: "hey mastra",
+      sampleRate: 16000,
+    });
     expect(consistent.scores[1]).toBeGreaterThan(divergent.scores[1]);
-    // All scores stay within [0, 1].
     for (const score of [...consistent.scores, ...divergent.scores]) {
       expect(score).toBeGreaterThanOrEqual(0);
       expect(score).toBeLessThanOrEqual(1);

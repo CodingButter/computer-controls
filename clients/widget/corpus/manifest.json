@@ -1,0 +1,940 @@
+{
+  "version": 1,
+  "generatedAt": "2026-08-07T00:59:49.457Z",
+  "totals": {
+    "positive": 127,
+    "positivePass": 88,
+    "positiveCulled": 39,
+    "negative": 0
+  },
+  "clips": [
+    {
+      "file": "positive/Lucy-angry.wav",
+      "voice": "Lucy",
+      "emotion": "angry",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/Lucy-calm.wav",
+      "voice": "Lucy",
+      "emotion": "calm",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Hej, maestra!"
+    },
+    {
+      "file": "positive/Lucy-cheerful.wav",
+      "voice": "Lucy",
+      "emotion": "cheerful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Lucy-dramatic.wav",
+      "voice": "Lucy",
+      "emotion": "dramatic",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Lucy-excited.wav",
+      "voice": "Lucy",
+      "emotion": "excited",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Lucy-fearful.wav",
+      "voice": "Lucy",
+      "emotion": "fearful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Lucy-happy.wav",
+      "voice": "Lucy",
+      "emotion": "happy",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Lucy-narrator.wav",
+      "voice": "Lucy",
+      "emotion": "narrator",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Lucy-neutral.wav",
+      "voice": "Lucy",
+      "emotion": "neutral",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Lucy-sad.wav",
+      "voice": "Lucy",
+      "emotion": "sad",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Lucy-serious.wav",
+      "voice": "Lucy",
+      "emotion": "serious",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Lucy-soft.wav",
+      "voice": "Lucy",
+      "emotion": "soft",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Will_Wheaton-angry.wav",
+      "voice": "Will_Wheaton",
+      "emotion": "angry",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Will_Wheaton-calm.wav",
+      "voice": "Will_Wheaton",
+      "emotion": "calm",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Will_Wheaton-cheerful.wav",
+      "voice": "Will_Wheaton",
+      "emotion": "cheerful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Will_Wheaton-dramatic.wav",
+      "voice": "Will_Wheaton",
+      "emotion": "dramatic",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Will_Wheaton-excited.wav",
+      "voice": "Will_Wheaton",
+      "emotion": "excited",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Will_Wheaton-fearful.wav",
+      "voice": "Will_Wheaton",
+      "emotion": "fearful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Will_Wheaton-happy.wav",
+      "voice": "Will_Wheaton",
+      "emotion": "happy",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Will_Wheaton-narrator.wav",
+      "voice": "Will_Wheaton",
+      "emotion": "narrator",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Will_Wheaton-neutral.wav",
+      "voice": "Will_Wheaton",
+      "emotion": "neutral",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Will_Wheaton-sad.wav",
+      "voice": "Will_Wheaton",
+      "emotion": "sad",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Will_Wheaton-serious.wav",
+      "voice": "Will_Wheaton",
+      "emotion": "serious",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Will_Wheaton-soft.wav",
+      "voice": "Will_Wheaton",
+      "emotion": "soft",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/Wren-angry.wav",
+      "voice": "Wren",
+      "emotion": "angry",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Que Mastro!"
+    },
+    {
+      "file": "rejected/Wren-calm.wav",
+      "voice": "Wren",
+      "emotion": "calm",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "A-Master"
+    },
+    {
+      "file": "positive/Wren-cheerful.wav",
+      "voice": "Wren",
+      "emotion": "cheerful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Wren-dramatic.wav",
+      "voice": "Wren",
+      "emotion": "dramatic",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/Wren-excited.wav",
+      "voice": "Wren",
+      "emotion": "excited",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Yo, Mastra?"
+    },
+    {
+      "file": "rejected/Wren-fearful.wav",
+      "voice": "Wren",
+      "emotion": "fearful",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Hey Maastra!"
+    },
+    {
+      "file": "rejected/Wren-happy.wav",
+      "voice": "Wren",
+      "emotion": "happy",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "a mostra."
+    },
+    {
+      "file": "positive/Wren-narrator.wav",
+      "voice": "Wren",
+      "emotion": "narrator",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/Wren-neutral.wav",
+      "voice": "Wren",
+      "emotion": "neutral",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Hey Mustra."
+    },
+    {
+      "file": "positive/Wren-sad.wav",
+      "voice": "Wren",
+      "emotion": "sad",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Wren-serious.wav",
+      "voice": "Wren",
+      "emotion": "serious",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/Wren-soft.wav",
+      "voice": "Wren",
+      "emotion": "soft",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/diddy-angry.wav",
+      "voice": "diddy",
+      "emotion": "angry",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "I am Master."
+    },
+    {
+      "file": "rejected/diddy-calm.wav",
+      "voice": "diddy",
+      "emotion": "calm",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "a master."
+    },
+    {
+      "file": "positive/diddy-cheerful.wav",
+      "voice": "diddy",
+      "emotion": "cheerful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/diddy-dramatic.wav",
+      "voice": "diddy",
+      "emotion": "dramatic",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/diddy-excited.wav",
+      "voice": "diddy",
+      "emotion": "excited",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Yay, Master!"
+    },
+    {
+      "file": "positive/diddy-fearful.wav",
+      "voice": "diddy",
+      "emotion": "fearful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/diddy-happy.wav",
+      "voice": "diddy",
+      "emotion": "happy",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "The A master."
+    },
+    {
+      "file": "rejected/diddy-narrator.wav",
+      "voice": "diddy",
+      "emotion": "narrator",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "a master."
+    },
+    {
+      "file": "rejected/diddy-neutral.wav",
+      "voice": "diddy",
+      "emotion": "neutral",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "a master"
+    },
+    {
+      "file": "rejected/diddy-sad.wav",
+      "voice": "diddy",
+      "emotion": "sad",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Say, Mastra."
+    },
+    {
+      "file": "positive/diddy-serious.wav",
+      "voice": "diddy",
+      "emotion": "serious",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/diddy-soft.wav",
+      "voice": "diddy",
+      "emotion": "soft",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/elder_customer-angry.wav",
+      "voice": "elder_customer",
+      "emotion": "angry",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Hey Masra"
+    },
+    {
+      "file": "positive/elder_customer-calm.wav",
+      "voice": "elder_customer",
+      "emotion": "calm",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/elder_customer-cheerful.wav",
+      "voice": "elder_customer",
+      "emotion": "cheerful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/elder_customer-dramatic.wav",
+      "voice": "elder_customer",
+      "emotion": "dramatic",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Hey, Marsha."
+    },
+    {
+      "file": "positive/elder_customer-excited.wav",
+      "voice": "elder_customer",
+      "emotion": "excited",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/elder_customer-fearful.wav",
+      "voice": "elder_customer",
+      "emotion": "fearful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/elder_customer-happy.wav",
+      "voice": "elder_customer",
+      "emotion": "happy",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/elder_customer-narrator.wav",
+      "voice": "elder_customer",
+      "emotion": "narrator",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/elder_customer-neutral.wav",
+      "voice": "elder_customer",
+      "emotion": "neutral",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/elder_customer-sad.wav",
+      "voice": "elder_customer",
+      "emotion": "sad",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/elder_customer-serious.wav",
+      "voice": "elder_customer",
+      "emotion": "serious",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/elder_customer-soft.wav",
+      "voice": "elder_customer",
+      "emotion": "soft",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "K Mastra"
+    },
+    {
+      "file": "positive/eli_rook-angry.wav",
+      "voice": "eli_rook",
+      "emotion": "angry",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/eli_rook-calm.wav",
+      "voice": "eli_rook",
+      "emotion": "calm",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/eli_rook-cheerful.wav",
+      "voice": "eli_rook",
+      "emotion": "cheerful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/eli_rook-dramatic.wav",
+      "voice": "eli_rook",
+      "emotion": "dramatic",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/eli_rook-excited.wav",
+      "voice": "eli_rook",
+      "emotion": "excited",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Hej maestra!"
+    },
+    {
+      "file": "positive/eli_rook-fearful.wav",
+      "voice": "eli_rook",
+      "emotion": "fearful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/eli_rook-happy.wav",
+      "voice": "eli_rook",
+      "emotion": "happy",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/eli_rook-narrator.wav",
+      "voice": "eli_rook",
+      "emotion": "narrator",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/eli_rook-neutral.wav",
+      "voice": "eli_rook",
+      "emotion": "neutral",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Hey Maastricht."
+    },
+    {
+      "file": "positive/eli_rook-sad.wav",
+      "voice": "eli_rook",
+      "emotion": "sad",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/eli_rook-serious.wav",
+      "voice": "eli_rook",
+      "emotion": "serious",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/eli_rook-soft.wav",
+      "voice": "eli_rook",
+      "emotion": "soft",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "A Mastra."
+    },
+    {
+      "file": "rejected/lena_okafor-angry.wav",
+      "voice": "lena_okafor",
+      "emotion": "angry",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Okay, maestra."
+    },
+    {
+      "file": "rejected/lena_okafor-calm.wav",
+      "voice": "lena_okafor",
+      "emotion": "calm",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Hey, Maestra."
+    },
+    {
+      "file": "rejected/lena_okafor-cheerful.wav",
+      "voice": "lena_okafor",
+      "emotion": "cheerful",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Say, hey, Masram."
+    },
+    {
+      "file": "positive/lena_okafor-dramatic.wav",
+      "voice": "lena_okafor",
+      "emotion": "dramatic",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/lena_okafor-excited.wav",
+      "voice": "lena_okafor",
+      "emotion": "excited",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "K, master."
+    },
+    {
+      "file": "positive/lena_okafor-fearful.wav",
+      "voice": "lena_okafor",
+      "emotion": "fearful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/lena_okafor-happy.wav",
+      "voice": "lena_okafor",
+      "emotion": "happy",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/lena_okafor-narrator.wav",
+      "voice": "lena_okafor",
+      "emotion": "narrator",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/lena_okafor-neutral.wav",
+      "voice": "lena_okafor",
+      "emotion": "neutral",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/lena_okafor-sad.wav",
+      "voice": "lena_okafor",
+      "emotion": "sad",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/lena_okafor-serious.wav",
+      "voice": "lena_okafor",
+      "emotion": "serious",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/lena_okafor-soft.wav",
+      "voice": "lena_okafor",
+      "emotion": "soft",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/marisol_vega-angry.wav",
+      "voice": "marisol_vega",
+      "emotion": "angry",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "A mastra."
+    },
+    {
+      "file": "positive/marisol_vega-calm.wav",
+      "voice": "marisol_vega",
+      "emotion": "calm",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/marisol_vega-cheerful.wav",
+      "voice": "marisol_vega",
+      "emotion": "cheerful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/marisol_vega-dramatic.wav",
+      "voice": "marisol_vega",
+      "emotion": "dramatic",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Eagl say, hi, Mastra."
+    },
+    {
+      "file": "positive/marisol_vega-excited.wav",
+      "voice": "marisol_vega",
+      "emotion": "excited",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/marisol_vega-fearful.wav",
+      "voice": "marisol_vega",
+      "emotion": "fearful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/marisol_vega-happy.wav",
+      "voice": "marisol_vega",
+      "emotion": "happy",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Hey, Maestra."
+    },
+    {
+      "file": "positive/marisol_vega-narrator.wav",
+      "voice": "marisol_vega",
+      "emotion": "narrator",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/marisol_vega-neutral.wav",
+      "voice": "marisol_vega",
+      "emotion": "neutral",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/marisol_vega-sad.wav",
+      "voice": "marisol_vega",
+      "emotion": "sad",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/marisol_vega-serious.wav",
+      "voice": "marisol_vega",
+      "emotion": "serious",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/marisol_vega-soft.wav",
+      "voice": "marisol_vega",
+      "emotion": "soft",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/mason_vance-angry.wav",
+      "voice": "mason_vance",
+      "emotion": "angry",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/mason_vance-calm.wav",
+      "voice": "mason_vance",
+      "emotion": "calm",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/mason_vance-cheerful.wav",
+      "voice": "mason_vance",
+      "emotion": "cheerful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/mason_vance-dramatic.wav",
+      "voice": "mason_vance",
+      "emotion": "dramatic",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "A muster."
+    },
+    {
+      "file": "rejected/mason_vance-excited.wav",
+      "voice": "mason_vance",
+      "emotion": "excited",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Hey, Maestra."
+    },
+    {
+      "file": "rejected/mason_vance-fearful.wav",
+      "voice": "mason_vance",
+      "emotion": "fearful",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Hey, Mr."
+    },
+    {
+      "file": "positive/mason_vance-happy.wav",
+      "voice": "mason_vance",
+      "emotion": "happy",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/mason_vance-narrator.wav",
+      "voice": "mason_vance",
+      "emotion": "narrator",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/mason_vance-neutral.wav",
+      "voice": "mason_vance",
+      "emotion": "neutral",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/mason_vance-sad.wav",
+      "voice": "mason_vance",
+      "emotion": "sad",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/mason_vance-serious.wav",
+      "voice": "mason_vance",
+      "emotion": "serious",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/mason_vance-soft.wav",
+      "voice": "mason_vance",
+      "emotion": "soft",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/mentor-past-angry.wav",
+      "voice": "mentor-past",
+      "emotion": "angry",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/mentor-past-calm.wav",
+      "voice": "mentor-past",
+      "emotion": "calm",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Hey Maastricht!"
+    },
+    {
+      "file": "positive/mentor-past-cheerful.wav",
+      "voice": "mentor-past",
+      "emotion": "cheerful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/mentor-past-dramatic.wav",
+      "voice": "mentor-past",
+      "emotion": "dramatic",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Hey, Mustah!"
+    },
+    {
+      "file": "positive/mentor-past-excited.wav",
+      "voice": "mentor-past",
+      "emotion": "excited",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/mentor-past-fearful.wav",
+      "voice": "mentor-past",
+      "emotion": "fearful",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/mentor-past-happy.wav",
+      "voice": "mentor-past",
+      "emotion": "happy",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/mentor-past-narrator.wav",
+      "voice": "mentor-past",
+      "emotion": "narrator",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Emastra."
+    },
+    {
+      "file": "positive/mentor-past-neutral.wav",
+      "voice": "mentor-past",
+      "emotion": "neutral",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/mentor-past-sad.wav",
+      "voice": "mentor-past",
+      "emotion": "sad",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Emastra"
+    },
+    {
+      "file": "rejected/mentor-past-serious.wav",
+      "voice": "mentor-past",
+      "emotion": "serious",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "emasthra."
+    },
+    {
+      "file": "positive/mentor-past-soft.wav",
+      "voice": "mentor-past",
+      "emotion": "soft",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/narrator-angry.wav",
+      "voice": "narrator",
+      "emotion": "angry",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "et Mastra."
+    },
+    {
+      "file": "positive/narrator-calm.wav",
+      "voice": "narrator",
+      "emotion": "calm",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/narrator-cheerful.wav",
+      "voice": "narrator",
+      "emotion": "cheerful",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Dei Mastra"
+    },
+    {
+      "file": "positive/narrator-dramatic.wav",
+      "voice": "narrator",
+      "emotion": "dramatic",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "positive/narrator-excited.wav",
+      "voice": "narrator",
+      "emotion": "excited",
+      "label": "positive",
+      "qc": "pass"
+    },
+    {
+      "file": "rejected/narrator-fearful.wav",
+      "voice": "narrator",
+      "emotion": "fearful",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Gimastra."
+    },
+    {
+      "file": "rejected/narrator-happy.wav",
+      "voice": "narrator",
+      "emotion": "happy",
+      "label": "positive",
+      "qc": "culled",
+      "transcript": "Like Mastra?"
+    }
+  ]
+}
