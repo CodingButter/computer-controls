@@ -140,6 +140,38 @@ export function plugDecision(eventType, mouthOpen) {
 }
 
 /**
+ * The loudness of one captured frame, as a 0..1 level.
+ *
+ * RMS, not peak: peak follows single samples and makes the face twitch on
+ * clicks. The noise floor is subtracted because a real room is never at zero
+ * — mains hum and echo-cancellation residue would otherwise keep the outer
+ * smoke churning in an empty room, which is precisely the "am I being heard?"
+ * question this level exists to answer honestly.
+ *
+ * @param {Int16Array} samples
+ * @returns {number}
+ */
+export function rmsLevel(samples) {
+  if (!samples || samples.length === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < samples.length; i += 1) {
+    const s = samples[i] / 32768;
+    sum += s * s;
+  }
+  const rms = Math.sqrt(sum / samples.length);
+  const floored = Math.max(0, rms - NOISE_FLOOR) / (1 - NOISE_FLOOR);
+  return Math.min(1, floored * VOICE_GAIN);
+}
+
+/** Below this RMS, a room counts as quiet rather than quietly speaking. */
+const NOISE_FLOOR = 0.02;
+
+// Conversational speech through a laptop microphone sits near 0.1 RMS, and
+// the face reads 0..1. Without this the whole visible range of the smoke
+// would be spent on the top of a shout.
+const VOICE_GAIN = 5;
+
+/**
  * Open the microphone and run the chain against it. Browser-only; everything
  * decidable without a browser lives in the exports above.
  *
@@ -172,12 +204,24 @@ export async function startEars({ onOpen, onIdle, onForward, quietPeriodMs, hold
   const source = capture.createMediaStreamSource(stream);
   const node = new AudioWorkletNode(capture, "pcm16-capture");
 
+  // Plugging is reason-based: the lane's arbitration and the user's mute
+  // button both close the same ear, and neither may reopen it on behalf of
+  // the other. The ear is open only when nobody is holding it shut.
+  const plugs = new Set();
   let plugged = false;
+  let voiceLevel = 0;
+  // Every captured frame arrives here, and two things happen to it. The gate
+  // is given it, and its loudness is kept as a number for the face's outer
+  // smoke (#202) — measured from the frames the gate is already receiving, so
+  // there is no second capture and no second consent, and only the scalar
+  // ever leaves this module. Both happen after the plug, never before it.
   node.port.onmessage = (event) => {
     // Plugged ears drop the frame HERE, upstream of the gate: not buffered,
     // not considered, gone. Unplugging resumes hearing, not remembering.
     if (plugged) return;
-    gate.push({ samples: new Int16Array(event.data), sampleRate: CAPTURE_RATE });
+    const samples = new Int16Array(event.data);
+    voiceLevel = rmsLevel(samples);
+    gate.push({ samples, sampleRate: CAPTURE_RATE });
   };
   source.connect(node);
   // A worklet with nothing downstream may be skipped by the graph; the
@@ -189,16 +233,28 @@ export async function startEars({ onOpen, onIdle, onForward, quietPeriodMs, hold
 
   return {
     gate,
-    plug() {
+    /** How loudly the microphone is hearing the user right now, 0..1. */
+    level() {
+      return voiceLevel;
+    },
+    /** @param {string} reason */
+    plug(reason = "lane") {
+      plugs.add(reason);
       plugged = true;
+      // A plugged ear reports silence immediately rather than decaying from
+      // its last frame: the face must not still be showing the tail of a
+      // syllable it is no longer allowed to hear.
+      voiceLevel = 0;
       // An open gate mid-plug closes: the session it was feeding is being
       // superseded by another client's, and half-forwarding is worse than
       // stopping. An idle gate is left alone — close() on idle would fire
       // onIdle at a mouth that was never open.
       if (gate.isOpen) gate.close();
     },
-    unplug() {
-      plugged = false;
+    /** @param {string} reason */
+    unplug(reason = "lane") {
+      plugs.delete(reason);
+      plugged = plugs.size > 0;
     },
     stop() {
       node.port.onmessage = null;

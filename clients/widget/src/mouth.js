@@ -57,6 +57,61 @@ export function floatFromPcm16(bytes) {
   return out;
 }
 
+/**
+ * Chop a playback buffer into a loudness envelope on the playback clock.
+ *
+ * The orb's inner wave moves to its own voice (#202), and the only honest
+ * source for that is the audio actually being played. Measuring it here — at
+ * schedule time, from the samples the mouth already holds — means the face
+ * can be asked "how loud are you right now?" on any frame with a lookup, and
+ * the whole thing stays a pure function that a test can drive without a
+ * browser or a speaker.
+ *
+ * Each segment carries the absolute playback-context time it covers, so a
+ * segment scheduled two seconds out is silent until its moment arrives.
+ *
+ * @param {Float32Array} samples
+ * @param {number} sampleRate
+ * @param {number} startTime — playback-context time this buffer starts at
+ * @param {number} [chunkSeconds]
+ * @returns {{ start: number, end: number, level: number }[]}
+ */
+export function envelopeSegments(samples, sampleRate, startTime, chunkSeconds = 0.05) {
+  if (!samples?.length || !sampleRate) return [];
+  const perChunk = Math.max(1, Math.round(sampleRate * chunkSeconds));
+  const segments = [];
+  for (let offset = 0; offset < samples.length; offset += perChunk) {
+    const end = Math.min(samples.length, offset + perChunk);
+    let sum = 0;
+    for (let i = offset; i < end; i += 1) sum += samples[i] * samples[i];
+    const rms = Math.sqrt(sum / (end - offset));
+    segments.push({
+      start: startTime + offset / sampleRate,
+      end: startTime + end / sampleRate,
+      // Synthesized speech is mastered louder than a room, so it needs less
+      // help than the microphone does to fill the face's range.
+      level: Math.min(1, rms * 2.5),
+    });
+  }
+  return segments;
+}
+
+/**
+ * The envelope's level at a moment, or zero outside every segment.
+ *
+ * Zero outside is the point: before playback starts and after it drains, the
+ * orb is not talking, and the face must say so on the same frame.
+ *
+ * @param {{ start: number, end: number, level: number }[]} segments
+ * @param {number} t
+ */
+export function levelAt(segments, t) {
+  for (const segment of segments) {
+    if (t >= segment.start && t < segment.end) return segment.level;
+  }
+  return 0;
+}
+
 /** A gate frame becomes wire bytes: the Int16Array's own octets, no copy. */
 export function bytesFromFrame(frame) {
   return new Uint8Array(frame.samples.buffer, frame.samples.byteOffset, frame.samples.length * 2);
@@ -129,6 +184,10 @@ export async function openMouth({ lane, mintToken, transcript, onCaption, onStat
     closers.push(() => playback.close());
     let playCursor = 0;
     const playing = new Set();
+    // The loudness of what is being played, on the playback clock, so the
+    // face's inner wave can move to the orb's actual voice rather than to a
+    // sine wave standing in for it.
+    let envelope = [];
 
     // Lane words that arrived while the model was speaking. Sending text into
     // a live session mid-generation is a barge: Gemini abandons the sentence
@@ -154,6 +213,11 @@ export async function openMouth({ lane, mintToken, transcript, onCaption, onStat
       const at = Math.max(playback.currentTime, playCursor);
       source.start(at);
       playCursor = at + buffer.duration;
+      // Segments already behind the clock are dropped rather than searched
+      // past forever: this queue grows for every chunk of every answer.
+      envelope = envelope
+        .filter((segment) => segment.end > playback.currentTime)
+        .concat(envelopeSegments(samples, 24000, at));
       playing.add(source);
       source.onended = () => {
         playing.delete(source);
@@ -171,6 +235,9 @@ export async function openMouth({ lane, mintToken, transcript, onCaption, onStat
       }
       playing.clear();
       playCursor = 0;
+      // Speech that was cut off is not still being spoken: the face reads
+      // silent on the same frame the speaker goes quiet.
+      envelope = [];
       onState?.("listening");
     };
 
@@ -260,6 +327,10 @@ export async function openMouth({ lane, mintToken, transcript, onCaption, onStat
       /** True while the model's answer is still coming out of the speaker. */
       speaking() {
         return playing.size > 0;
+      },
+      /** How loudly the orb is speaking right now, 0..1, for the face. */
+      level() {
+        return levelAt(envelope, playback.currentTime);
       },
       close,
     };

@@ -3,7 +3,7 @@
 // plug answers the lane's voice words the way the arbitration design says.
 
 import { describe, expect, test } from "vitest";
-import { CAPTURE_RATE, createEarChain, createWorkerEar, plugDecision } from "./ears.js";
+import { CAPTURE_RATE, createEarChain, createWorkerEar, plugDecision, rmsLevel } from "./ears.js";
 
 /** A worker that answers by hand: the test plays the engine room. */
 function fakeWorker() {
@@ -156,5 +156,39 @@ describe("the plug: the lane's voice words, answered", () => {
       expect(plugDecision(type, false)).toBeNull();
       expect(plugDecision(type, true)).toBeNull();
     }
+  });
+});
+
+describe("the level the outer smoke moves to", () => {
+  test("a silent room is silence, not a faint churn", () => {
+    expect(rmsLevel(new Int16Array(1600))).toBe(0);
+  });
+
+  test("room tone under the noise floor still reads as silence", () => {
+    // ~0.015 RMS: mains hum and echo-cancellation residue, not a voice.
+    expect(rmsLevel(new Int16Array(1600).fill(Math.round(0.015 * 32768)))).toBe(0);
+  });
+
+  test("a full-scale frame is the top of the range and never past it", () => {
+    expect(rmsLevel(new Int16Array(1600).fill(32767))).toBe(1);
+  });
+
+  test("louder is higher: the smoke has to follow the voice, not just notice it", () => {
+    const quiet = rmsLevel(new Int16Array(1600).fill(Math.round(0.05 * 32768)));
+    const talking = rmsLevel(new Int16Array(1600).fill(Math.round(0.1 * 32768)));
+    const loud = rmsLevel(new Int16Array(1600).fill(Math.round(0.2 * 32768)));
+    expect(quiet).toBeGreaterThan(0);
+    expect(talking).toBeGreaterThan(quiet);
+    expect(loud).toBeGreaterThan(talking);
+  });
+
+  test("conversational speech uses the middle of the range, not the last inch of it", () => {
+    const talking = rmsLevel(new Int16Array(1600).fill(Math.round(0.1 * 32768)));
+    expect(talking).toBeGreaterThan(0.25);
+    expect(talking).toBeLessThan(0.9);
+  });
+
+  test("a frame with no samples is not a division by zero", () => {
+    expect(rmsLevel(new Int16Array(0))).toBe(0);
   });
 });
