@@ -90,6 +90,15 @@ export type ClientConfig = {
    * an edit.
    */
   voiceProvider?: VoiceProviderId;
+  /**
+   * Task-specific duties handed down at kickoff, one per line.
+   *
+   * The do-nots a job carries that the standing set cannot know: which channel
+   * is in scope, which application not to touch. They travel with the standing
+   * obligations rather than in a first message, because a first message is
+   * exactly what stops being read. See ./obligations.ts.
+   */
+  standingObligations: string[];
 };
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -118,6 +127,19 @@ function readAllowlist(raw: string | undefined): string[] {
     .split(",")
     .map((id) => id.trim())
     .filter((id) => id.length > 0);
+}
+
+/**
+ * The kickoff duties, newline-separated because they are sentences.
+ *
+ * Empty is the ordinary case and means the standing set is the whole contract.
+ */
+function readObligations(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
 }
 
 export function resolveClientConfig(env: NodeJS.ProcessEnv = process.env): ClientConfig {
@@ -157,6 +179,7 @@ export function resolveClientConfig(env: NodeJS.ProcessEnv = process.env): Clien
     commonsPath: env.COMCON_SKILL_COMMONS
       ? path.resolve(env.COMCON_SKILL_COMMONS)
       : path.resolve(packageRoot, "..", "skills"),
+    standingObligations: readObligations(env.COMCON_STANDING_OBLIGATIONS),
     ...(voiceProvider ? { voiceProvider } : {}),
   };
 }

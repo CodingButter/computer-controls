@@ -177,6 +177,32 @@ load-bearing, and `resolveVoiceCredential` keeps carrying the kind, because a
 billing refusal is the one kind of no that can turn into a yes without a code
 change.
 
+### Not an artifact: a standing obligation is re-asserted, never accumulated
+
+Deposits nothing here, and is listed anyway because it is the same kind of claim
+and it ages the same way. `client/src/obligations.ts` puts the duties of the job
+in front of the model on every single call and never writes them into the
+conversation, and both halves of that are properties of `@mastra/core`, not of
+this repository: we ask a `processLLMRequest` processor to rewrite the prompt and
+trust the runtime's word that the rewrite is scoped to the call. If the first
+half were untrue the duties would be decoration. If the second were untrue they
+would be worse — every call would leave another copy behind, and a twenty-turn
+run would spend its context re-reading forty stale restatements of "verify
+against the tree".
+
+`client/src/obligations.gate.test.ts` measures it instead of quoting the docs,
+with a model that records the prompt it was handed and a first call that asks for
+a tool, so one run makes two model calls over one growing message list. The block
+appears once per prompt, verbatim, ahead of the conversation, and nowhere in what
+the run says was said. It is a gate rather than a portable test for the reason
+everything else in this directory is a script: what it proves belongs to a
+version of somebody else's package.
+
+The invalidator is named so nobody has to guess: any bump of `@mastra/core` or
+`@mastra/code-sdk`. Run `pnpm test:gate` in `client/` after one. If it goes red,
+the design under this feature is wrong rather than broken — a tagged system
+message that accepts persistence is a different plan, not a patch.
+
 ## Rules
 
 **Never hand-write one.** An artifact edited by hand is a claim again, which is the thing

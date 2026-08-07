@@ -15,6 +15,7 @@ import {
   THINKING_MODE,
   type ModelPack,
 } from "./model-pack.ts";
+import { standingObligations } from "./obligations.ts";
 import { mountAllowedPlugins } from "./plugins.ts";
 import { createConfigSubagent } from "./settings/agent.ts";
 import type { SettingsGate } from "./settings/gate.ts";
@@ -112,6 +113,14 @@ export async function prepareHub(config: ClientConfig, options: PrepareHubOption
     // neither belongs to a session mounted at an observe-shaped scope.
     disableMcp: true,
     disableHooks: true,
+    // The duties of the job, put back in front of the model on every call.
+    //
+    // Here rather than in the desktop plugin because turn assembly belongs to
+    // the hub — and because this runtime reads a plugin's id, config, tools and
+    // instructions, and nothing else: a processor declared by a plugin is never
+    // mounted, and a plugin's instructions are resolved once at load, which is
+    // the burial this is meant to end. See ./obligations.ts.
+    inputProcessors: [standingObligations({ extra: config.standingObligations })],
     // The configuration agent, and nothing else. The runtime's own subagent
     // list defaults to empty, so this is the whole set: one mind that can
     // change settings and cannot touch the desktop, beside one that holds the
