@@ -93,8 +93,8 @@ test("test_the_route_arrives_carrying_what_it_was_verified_against", async () =>
 
   const metadata = skill!.metadata as Record<string, unknown>;
   expect(metadata["app-version-verified"]).toBe("1.0.151");
-  expect(metadata["last-verified"]).toBe("2026-08-05");
-  expect(metadata["verified-count"]).toBe(3);
+  expect(metadata["last-verified"]).toBe("2026-08-07");
+  expect(metadata["verified-count"]).toBe(4);
 });
 
 test("test_the_skill_says_it_is_advisory_to_the_agent_that_reads_it", async () => {
