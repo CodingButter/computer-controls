@@ -53,7 +53,7 @@ def ledger(tmp_path: Path) -> Ledger:
 
 
 @pytest.fixture
-def curator(forge, ledger, tmp_path: Path):
+def curator(forge, ledger, panel, tmp_path: Path):
     checkout = tmp_path / "checkout"
     checkout.mkdir(exist_ok=True)
 
@@ -66,6 +66,7 @@ def curator(forge, ledger, tmp_path: Path):
                 run=forge,
             ),
             ledger=ledger,
+            panel=panel,
             enabled=True,
         )
         fields.update(changed)

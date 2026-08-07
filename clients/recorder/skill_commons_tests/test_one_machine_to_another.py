@@ -39,7 +39,7 @@ from skill_commons_tests.conftest import a_route
 
 
 @pytest.fixture
-def machine(tmp_path: Path, forge):
+def machine(tmp_path: Path, forge, panel):
     """One machine that derives routes, with publishing switched on."""
     checkout = tmp_path / "checkout"
     checkout.mkdir()
@@ -52,6 +52,7 @@ def machine(tmp_path: Path, forge):
             run=forge,
         ),
         ledger,
+        panel=panel,
         enabled=True,
     )
     return curator, ledger, checkout

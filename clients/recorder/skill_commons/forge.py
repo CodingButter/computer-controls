@@ -34,7 +34,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from .registry import write_pair
+from .registry import REVIEW_FILE, write_pair
+from .reviewer import Review
 from .skill import Skill
 
 #: Where in the repository the commons lives. One folder, in the tree, rather
@@ -58,7 +59,9 @@ class Forge(Protocol):
     def open_requests(self) -> set[int]:
         """The numbers of this machine's proposals that are still open."""
 
-    def propose(self, skill: Skill, *, base: str, credit: str = "") -> int:
+    def propose(
+        self, skill: Skill, *, read_by: Review, base: str, credit: str = ""
+    ) -> int:
         """Open a request that this skill be admitted, and answer with its number.
 
         `credit` names a person, and defaults to naming nobody. A machine
@@ -133,7 +136,27 @@ class GitHubForge:
             return set()
         return {int(entry["number"]) for entry in json.loads(found)}
 
-    def propose(self, skill: Skill, *, base: str = "main", credit: str = "") -> int:
+    def propose(
+        self,
+        skill: Skill,
+        *,
+        read_by: Review | None = None,
+        base: str = "main",
+        credit: str = "",
+    ) -> int:
+        # Before the fetch, before the branch, before anything that leaves this
+        # machine. The curator will not call this without a passing review, and
+        # this is here anyway: the gate that matters is the one on the path that
+        # actually publishes, and a second caller written a year from now will
+        # reach this function and not that one. There is no flag past it.
+        if read_by is None or not read_by.passed:
+            raise ForgeError(
+                f"nothing is proposed without a review beside it: no passing"
+                f" review was handed in for {skill.name}, so"
+                f" {SKILLS_DIR}/{skill.name}/{REVIEW_FILE} cannot be written"
+                " and no branch has been cut"
+            )
+
         branch = BRANCH_PREFIX + skill.name
 
         # From the base every time, never from whatever the checkout happened
@@ -144,7 +167,7 @@ class GitHubForge:
         self._git("switch", "--force-create", branch, f"origin/{base}")
 
         folder = self.checkout / SKILLS_DIR
-        document, review = write_pair(folder, skill)
+        document, review = write_pair(folder, skill, read_by)
         self._git("add", f"{SKILLS_DIR}/{skill.name}")
         self._git("commit", "--message", _commit_message(skill))
         self._git("push", "--force-with-lease", "--set-upstream", "origin", branch)
@@ -161,7 +184,7 @@ class GitHubForge:
             "--title",
             _title(skill),
             "--body",
-            _body(skill, submitter=self.submitter, credit=credit),
+            _body(skill, read_by=read_by, submitter=self.submitter, credit=credit),
         )
         assert document.exists() and review.exists()
         return _number_in(answered)
@@ -204,7 +227,14 @@ def _commit_message(skill: Skill) -> str:
     )
 
 
-def _body(skill: Skill, *, submitter: str, credit: str = "") -> str:
+def _readers(read_by: Review) -> str:
+    named = ", ".join(f"`{name}`" for name in read_by.reviewers)
+    if read_by.agreed:
+        return f"{len(read_by.opinions)} independent readers ({named})"
+    return named
+
+
+def _body(skill: Skill, *, read_by: Review, submitter: str, credit: str = "") -> str:
     """What a reviewer sees before they open either file.
 
     Deliberately not a summary of the skill. A summary is an argument, and a
@@ -246,6 +276,11 @@ def _body(skill: Skill, *, submitter: str, credit: str = "") -> str:
         " key-shaped string; the application is not one whose contents the"
         " desktop service withholds; and the route completed"
         f" {skill.verification.successes} distinct times before it was proposed.",
+        "",
+        f"The published `SKILL.md` was read by {_readers(read_by)} before this"
+        " was opened, and none objected. What they were asked is written into"
+        " `REVIEW.md`. That is a machine having looked, which is a reason this"
+        " is worth your time and is not a reason to merge it.",
         "",
         "## What is being asked of you",
         "",

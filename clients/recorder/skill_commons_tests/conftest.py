@@ -16,7 +16,17 @@ import pytest
 
 from episode_recorder import Author
 
-from skill_commons import Receipt, Skill, Step, Verification, render, render_review
+from skill_commons import (
+    Opinion,
+    Panel,
+    Receipt,
+    Skill,
+    Step,
+    Unobtainable,
+    Verification,
+    render,
+    render_review,
+)
 from skill_commons.registry import SkillRegistry, write_pair
 
 
@@ -116,6 +126,24 @@ class FakeForge:
             self.closed[number] = _flag(argv, "--comment")
             return 0, "", ""
         return 0, "", ""
+
+    @property
+    def wrote(self) -> tuple[tuple[str, ...], ...]:
+        """The calls that changed something: a commit, a push, a request.
+
+        A gate that refuses may still have asked the forge a question — the cap
+        on open proposals is counted before a skill is read — so a test that
+        asserted on every call would be asserting that nothing was *asked*
+        rather than that nothing was published. This is the list that says
+        whether anything left.
+        """
+        return tuple(
+            call
+            for call in self.calls
+            if "push" in call
+            or "commit" in call
+            or call[1:3] in {("pr", "create"), ("pr", "close")}
+        )
 
     def argv_for(self, *prefix: str) -> tuple[str, ...]:
         """The one call that started with these words, or a failed assertion."""
@@ -243,3 +271,51 @@ def here(tmp_path: Path) -> Path:
     root = tmp_path / "fetched"
     root.mkdir()
     return root
+
+
+class FakeReviewer:
+    """A reader that answers without a model, and remembers what it was handed.
+
+    `objects_to` is the word that makes it say no — the stand-in for the one
+    judgement no pattern can make, which is the whole reason a reader is in this
+    path at all. `unobtainable` is the credential that expired, the model that
+    was down, the rate limit: it raises, because a reader that returned "fine"
+    when it could not answer is the bug this class exists to let a test catch.
+    """
+
+    def __init__(
+        self,
+        name: str = "reader-a",
+        *,
+        objects_to: str = "",
+        unobtainable: str = "",
+    ) -> None:
+        self.name = name
+        self.objects_to = objects_to
+        self.unobtainable = unobtainable
+        self.read_documents: list[str] = []
+
+    def read(self, document: str) -> Opinion:
+        self.read_documents.append(document)
+        if self.unobtainable:
+            raise Unobtainable(self.unobtainable)
+        if self.objects_to and self.objects_to in document:
+            return Opinion(
+                reviewer=self.name,
+                passed=False,
+                findings=(
+                    f"`{self.objects_to}` reads as somebody's name rather than"
+                    " a part of the application",
+                ),
+            )
+        return Opinion(reviewer=self.name, passed=True)
+
+
+@pytest.fixture
+def reader() -> FakeReviewer:
+    return FakeReviewer()
+
+
+@pytest.fixture
+def panel(reader: FakeReviewer) -> Panel:
+    return Panel(reader)

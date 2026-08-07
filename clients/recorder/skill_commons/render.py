@@ -29,6 +29,7 @@ for them.
 from __future__ import annotations
 
 from . import frontmatter
+from .reviewer import QUESTIONS, Review
 from .skill import AMENDMENTS, Skill
 
 #: What every published skill says about how much to trust it. Written here
@@ -121,8 +122,15 @@ def render(skill: Skill) -> str:
     return frontmatter.dump(header(skill)) + "\n" + "\n".join(lines)
 
 
-def render_review(skill: Skill) -> str:
-    """`REVIEW.md`: what a reviewer has to decide, and the evidence for it."""
+def render_review(skill: Skill, review: Review | None = None) -> str:
+    """`REVIEW.md`: what a reviewer has to decide, and the evidence for it.
+
+    `review` is the second reader's answer, and it is only ever present on a
+    skill that passed: a refused skill is never rendered for publication
+    because it is never proposed. What lands in the file is the reviewers'
+    names and their yes-or-nos — never their prose, which is a sentence a
+    language model wrote and would be a sentence in a published file.
+    """
     lines = [
         f"# Review: {_title(skill)}",
         "",
@@ -174,7 +182,55 @@ def render_review(skill: Skill) -> str:
         " question a pattern can be written for.",
         "",
     ]
+    lines += _second_reading(review)
     return "\n".join(lines)
+
+
+def _second_reading(review: Review | None) -> list[str]:
+    """The reviewers' answers, as a table of names and yes-or-nos.
+
+    A skill reaches a reviewer's screen having already been read by something
+    that reads. That is worth showing, and worth bounding: what is written here
+    is which reviewers answered and what they answered, and nothing a model
+    phrased. A published file that quoted a model's reasoning would be a
+    published file whose contents a model chose.
+    """
+    if review is None:
+        return []
+
+    lines = [
+        "## What a reader was asked before this was opened",
+        "",
+        "Three questions, put to the readers below against the bytes in"
+        " `SKILL.md` exactly as published:",
+        "",
+    ]
+    lines += [f"- It {heading}." for heading, _ in QUESTIONS]
+    lines += [
+        "",
+        "| reader | answered |",
+        "| --- | --- |",
+    ]
+    for opinion in review.opinions:
+        lines.append(
+            f"| `{opinion.reviewer}` | "
+            f"{'yes to all three' if opinion.passed else 'no'} |"
+        )
+    lines += [
+        "",
+        "Their answers are recorded and their reasoning is not: a machine"
+        " reading is evidence that something looked, and it admits nothing."
+        " The merge is still yours.",
+        "",
+        (
+            "Two readers agreeing is a stronger signal than one insisting, and"
+            " it is still weaker than yours."
+            if review.agreed
+            else "One reader answered. Read the landmarks yourself."
+        ),
+        "",
+    ]
+    return lines
 
 
 def _title(skill: Skill) -> str:
