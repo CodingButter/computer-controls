@@ -22,6 +22,7 @@ import { buildRealtimeSettingsApp } from "./realtime-settings.ts";
 import { buildTokenMintApp } from "./token-mint.ts";
 import { buildOrbApp } from "./routes.ts";
 import type { CaptureFrame } from "./routes.ts";
+import type { VoiceSessionStatus } from "./face-source.ts";
 
 export { ORB_BASE_PATH, GESTURES, parseGesture, buildOrbApp, toPageEvent } from "./routes.ts";
 export {
@@ -71,6 +72,7 @@ export type OrbMountOptions = {
    */
   faces?: {
     mouths(): number;
+    sessions(): VoiceSessionStatus[];
     subscribe(listener: (event: StateEvent) => void): () => void;
   };
   /**
@@ -130,11 +132,12 @@ export async function mountOrb(options: OrbMountOptions): Promise<OrbMount> {
     };
   }
 
-  const faces = options.faces ?? { mouths: () => 0, subscribe: () => () => {} };
+  const faces = options.faces ?? { mouths: () => 0, sessions: () => [], subscribe: () => () => {} };
   return {
     app: composeSettings(
       buildOrbApp({
         mouths: () => faces.mouths(),
+        sessions: () => faces.sessions(),
         subscribe: (listener) => faces.subscribe(listener),
         ...(options.captureFrame ? { captureFrame: options.captureFrame } : {}),
       }),

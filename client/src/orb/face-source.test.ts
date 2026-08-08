@@ -74,6 +74,27 @@ describe("what the lane's traffic means for a face", () => {
     faces.observer.voiceCount(0);
     expect(faces.mouths()).toBe(0);
   });
+
+  it("ages the open sessions at the moment the status route asks", () => {
+    const faces = createLaneFaceSource();
+    expect(faces.sessions()).toEqual([]);
+
+    // Timestamps in, ages out. The subtraction happens here rather than on
+    // the lane because the answer has to be true when it is read, not when
+    // the session last changed — a mouth that has been silent for ten minutes
+    // reports ten minutes even though nothing has been published since.
+    const now = Date.now();
+    faces.observer.voiceSessions([{ openedAt: now - 60_000, lastSpokeAt: now - 45_000 }]);
+
+    const [session] = faces.sessions();
+    expect(session?.ageMs).toBeGreaterThanOrEqual(60_000);
+    expect(session?.ageMs).toBeLessThan(61_000);
+    expect(session?.quietMs).toBeGreaterThanOrEqual(45_000);
+    expect(session?.quietMs).toBeLessThan(46_000);
+
+    faces.observer.voiceSessions([]);
+    expect(faces.sessions()).toEqual([]);
+  });
 });
 
 describe("captions are said once to each kind of face", () => {

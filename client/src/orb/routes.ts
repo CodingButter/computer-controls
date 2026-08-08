@@ -17,6 +17,7 @@
 import { Hono } from "hono";
 
 import type { StateEvent } from "../events/types.ts";
+import type { VoiceSessionStatus } from "./face-source.ts";
 
 export const ORB_BASE_PATH = "/api/orb";
 
@@ -44,6 +45,8 @@ export type OrbEvent = { type: "state"; state: OrbState } | { type: "caption"; t
 export type OrbMount = {
   /** Open voice sessions on the lane right now. */
   mouths(): number;
+  /** Those same sessions, aged: how long open, how long since anyone spoke. */
+  sessions(): VoiceSessionStatus[];
   /** Subscribe to the derived face events (states and captions). */
   subscribe(listener: (event: StateEvent) => void): () => void;
   /**
@@ -67,8 +70,16 @@ export type CaptureFrameResult =
 
 export type CaptureFrame = (windowId: string) => Promise<CaptureFrameResult>;
 
+/**
+ * The enabled shape carries the sessions as well as the count.
+ *
+ * A count alone cannot tell a conversation from a session nobody is in: both
+ * read `talking`, `mouths: 1`. The ages can — a session open for an hour that
+ * has said nothing for fifty-nine minutes is a stuck one, and the point of
+ * putting it here is that seeing it takes one curl rather than a debugger.
+ */
 export type OrbStatus =
-  | { enabled: true; state: "idle" | "talking"; mouths: number }
+  | { enabled: true; state: "idle" | "talking"; mouths: number; sessions: VoiceSessionStatus[] }
   | { enabled: false; reason: string };
 
 /**
@@ -116,6 +127,7 @@ export function buildOrbApp(mount: OrbMount | { reason: string }): Hono {
       enabled: true,
       state: mouths > 0 ? "talking" : "idle",
       mouths,
+      sessions: mount.sessions(),
     });
   });
 

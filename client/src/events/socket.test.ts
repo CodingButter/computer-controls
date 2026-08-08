@@ -15,6 +15,7 @@ import {
   isLocalPeer,
   type EventSocket,
   type UpgradableServer,
+  type VoiceSession,
 } from "./socket.ts";
 import { ScriptedEventSource } from "./source.ts";
 import type { StateEvent } from "./types.ts";
@@ -48,6 +49,9 @@ let answerWith: (request: string) => Promise<string>;
 let observedFeed: Ledger<string>;
 let observed: string[];
 
+/** Every snapshot of the open sessions the lane has published. */
+let sessionsFeed: Ledger<readonly VoiceSession[]>;
+
 beforeEach(async () => {
   source = new ScriptedEventSource();
   collected = [];
@@ -55,6 +59,7 @@ beforeEach(async () => {
   asked = askedFeed.entries;
   observedFeed = ledger<string>();
   observed = observedFeed.entries;
+  sessionsFeed = ledger<readonly VoiceSession[]>();
   answerWith = async () => "Done.";
   // A bare HTTP server standing in for the hub's: this module attaches to an
   // upgrade listener, and Hono is not part of that contract.
@@ -62,7 +67,23 @@ beforeEach(async () => {
     response.writeHead(200, { "content-type": "text/plain" });
     response.end("hub");
   });
-  socket = attachEventSocket(server, source, {
+  socket = attach();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (typeof address === "string" || address === null) throw new Error("no port");
+  url = `ws://127.0.0.1:${address.port}${EVENTS_PATH}`;
+});
+
+/**
+ * The lane, wired to the fixture's brain and observer.
+ *
+ * A function rather than a literal because one test needs the same wiring at
+ * a different heartbeat: a lane re-attached with its own options must still
+ * report to the same ledgers, or the pins would be reading a different hub
+ * than the one under test.
+ */
+function attach(extra: { heartbeatMs?: number } = {}): EventSocket {
+  return attachEventSocket(server, source, {
     brain: {
       ask: (request, onProgress) => {
         askedFeed.push({ request, ...(onProgress ? { onProgress } : {}) });
@@ -71,16 +92,27 @@ beforeEach(async () => {
     },
     observer: {
       voiceCount: (count) => observedFeed.push(`voice:${count}`),
+      voiceSessions: (sessions) => sessionsFeed.push(sessions),
       askStarted: () => observedFeed.push("ask"),
       answerDelivered: () => observedFeed.push("answer"),
       caption: (text) => observedFeed.push(`caption:${text}`),
     },
+    ...extra,
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (typeof address === "string" || address === null) throw new Error("no port");
-  url = `ws://127.0.0.1:${address.port}${EVENTS_PATH}`;
-});
+}
+
+/**
+ * Swaps the lane for one that pings far faster than a person would notice.
+ *
+ * The interval is the only thing that changes. Nothing here stubs a timer:
+ * the heartbeat under test is the real one running at a speed a test can
+ * wait for, so what the assertions watch is the shipped mechanism rather
+ * than a clock the test controls.
+ */
+async function withHeartbeat(heartbeatMs: number): Promise<void> {
+  await socket.close();
+  socket = attach({ heartbeatMs });
+}
 
 afterEach(async () => {
   for (const client of open) client.close();
@@ -103,12 +135,28 @@ async function connectFace(target: string = url): Promise<WebSocket> {
   const before = new Set(socket.faces);
   const client = new WebSocket(target);
   open.push(client);
+  // Recording starts before the connection is open, because the lane speaks
+  // first: its opening frame is already on the way by the time an `open`
+  // handler could attach a listener. A recorder attached afterwards would
+  // usually win that race and occasionally lose it, which is the shape of a
+  // test that fails once a month for no reason anyone can find.
+  const heard = record(client);
   await new Promise<void>((resolve, reject) => {
     client.once("open", resolve);
     client.once("error", reject);
   });
   const hubSide = socket.faces.find((face) => !before.has(face));
   if (hubSide) served.set(client, hubSide);
+
+  // The documented opening frame is consumed here, the way `barrier` consumes
+  // its own marker, so every assertion below reads what the hub said of its
+  // own accord. It is checked rather than merely dropped: a fixture that
+  // discarded whatever arrived first could hide a real first word.
+  await heard.atLeast(1);
+  const opening = heard.entries.shift();
+  if (opening?.type !== "voice_opened" && opening?.type !== "voice_closed") {
+    throw new Error(`the lane opened with something other than the voice state: ${opening?.type}`);
+  }
   return client;
 }
 
@@ -174,12 +222,26 @@ const transcripts = new WeakMap<WebSocket, Ledger<StateEvent>>();
 /** Every face being collected from in the current test, for barriers to sweep. */
 let collected: { client: WebSocket; transcript: Ledger<StateEvent> }[] = [];
 
-/** Everything a face hears, collected as it arrives. */
-function collect(client: WebSocket): StateEvent[] {
+/** Starts recording what a face hears, and keeps the ledger under its name. */
+function record(client: WebSocket): Ledger<StateEvent> {
   const heard = ledger<StateEvent>();
   transcripts.set(client, heard);
-  collected.push({ client, transcript: heard });
   client.on("message", (raw) => heard.push(JSON.parse(String(raw)) as StateEvent));
+  return heard;
+}
+
+/**
+ * Everything a face hears, collected as it arrives.
+ *
+ * A face connected through `connectFace` is already being recorded — the
+ * lane's opening frame arrives too early for anything else to be true — so
+ * this hands back that transcript rather than starting a second one. A raw
+ * client, connected by a test making a point about the door, gets a recorder
+ * attached here.
+ */
+function collect(client: WebSocket): StateEvent[] {
+  const heard = transcripts.get(client) ?? record(client);
+  collected.push({ client, transcript: heard });
   return heard.entries;
 }
 
@@ -232,6 +294,16 @@ const brainAsked = (n: number) => askedFeed.atLeast(n);
 
 /** Waits until the observer has been told `n` things. */
 const reported = (n: number) => observedFeed.atLeast(n);
+
+/** Waits until the open sessions have been published `n` times. */
+const sessionsPublished = (n: number) => sessionsFeed.atLeast(n);
+
+/** The open sessions as of the last time they were published. */
+function latestSessions(): readonly VoiceSession[] {
+  const last = sessionsFeed.entries.at(-1);
+  if (!last) throw new Error("the sessions have never been published");
+  return last;
+}
 
 test("test_the_event_socket_carries_state_out_and_gestures_in_and_nothing_else", async () => {
   const face = await connectFace();
@@ -886,6 +958,22 @@ describe("what the observer is told", () => {
     expect(observed).toEqual(["voice:1", "voice:0"]);
   });
 
+  test("an open session is reported with the times a stuck one shows up in", async () => {
+    const face = await connectFace();
+
+    face.send(JSON.stringify({ type: "voice_open" }));
+    await sessionsPublished(1);
+    const open = latestSessions();
+    expect(open).toHaveLength(1);
+    // A session that has just opened has said exactly one thing: the frame
+    // that opened it.
+    expect(open[0]?.lastSpokeAt).toBe(open[0]?.openedAt);
+
+    face.send(JSON.stringify({ type: "voice_close" }));
+    await sessionsPublished(3);
+    expect(latestSessions()).toEqual([]);
+  });
+
   test("an ask is reported when it starts and when its answer goes back", async () => {
     let release: (answer: string) => void = () => {};
     answerWith = () => new Promise((resolve) => (release = resolve));
@@ -915,5 +1003,163 @@ describe("what the observer is told", () => {
     face.send(JSON.stringify({ type: "caption", text: "still here" }));
     await reported(2);
     expect(observed).toEqual(["caption:hello hub", "caption:still here"]);
+  });
+});
+
+/**
+ * What a face is told the moment it arrives.
+ *
+ * These connect by hand rather than through `connectFace`, because the
+ * fixture's job is to consume the opening frame and the claim here is about
+ * that frame itself.
+ */
+describe("arriving", () => {
+  /** A face connected raw, recording from before the connection is open. */
+  async function arrive(): Promise<Ledger<StateEvent>> {
+    const client = new WebSocket(url);
+    open.push(client);
+    const heard = record(client);
+    await once(client, "open");
+    return heard;
+  }
+
+  test("a face joining a quiet hub is told the conversation is closed", async () => {
+    const heard = await arrive();
+    await heard.atLeast(1);
+    expect(heard.entries).toEqual([{ type: "voice_closed" }]);
+  });
+
+  test("a face joining a live conversation is told a session is open", async () => {
+    const mouth = await connectFace();
+    const mouthHeard = collect(mouth);
+    mouth.send(JSON.stringify({ type: "voice_open" }));
+    await heard(mouth, 1);
+
+    // The widget that reconnects after a dropped link is this face. Without
+    // this frame it would have to guess, and the guess it makes today is the
+    // bug: ears plugged, waiting for an edge that already went by.
+    const arrived = await arrive();
+    await arrived.atLeast(1);
+    expect(arrived.entries).toEqual([{ type: "voice_opened" }]);
+
+    // Arriving is not joining: the set did not change, so the observer — and
+    // through it the status route's mouth count — hears nothing about it.
+    expect(observed).toEqual(["voice:1"]);
+
+    // Told to the joiner alone. A second voice_opened reaching the face that
+    // opened the session would read as somebody else starting to talk.
+    await barrier(mouth);
+    expect(mouthHeard).toEqual([{ type: "voice_opened" }]);
+  });
+});
+
+/**
+ * The heartbeat, watched over a real connection that stops answering.
+ *
+ * A face whose far end dies without a goodbye — a suspended laptop, a
+ * yanked cable — leaves a socket that is open by every local measure. The
+ * lever here is `autoPong: false`, which is that machine in one option: the
+ * TCP connection is fine and the peer answers nothing, which is exactly what
+ * the hub cannot tell apart from a healthy quiet face any other way.
+ *
+ * Nothing here fakes a timer. The lane is re-attached at a heartbeat a test
+ * can wait out, and every assertion waits on an arrival rather than a nap.
+ */
+describe("liveness", () => {
+  const BEAT_MS = 20;
+
+  /** A face that will never answer a ping, connected and paired for cleanup. */
+  async function connectDeafFace(): Promise<WebSocket> {
+    const before = new Set(socket.faces);
+    const client = new WebSocket(url, { autoPong: false });
+    open.push(client);
+    await new Promise<void>((resolve, reject) => {
+      client.once("open", resolve);
+      client.once("error", reject);
+    });
+    const hubSide = socket.faces.find((face) => !before.has(face));
+    if (!hubSide) throw new Error("face was never paired to a hub-side socket");
+    served.set(client, hubSide);
+    return client;
+  }
+
+  /** Resolves once the client has been pinged `n` times. */
+  function pinged(client: WebSocket, n: number): Promise<void> {
+    let seen = 0;
+    return new Promise((resolve) => {
+      client.on("ping", () => {
+        seen += 1;
+        if (seen >= n) resolve();
+      });
+    });
+  }
+
+  test("hangs up on a connection that stops answering", async () => {
+    await withHeartbeat(BEAT_MS);
+    const deaf = await connectDeafFace();
+    const hubSide = served.get(deaf);
+    if (!hubSide) throw new Error("no hub-side socket");
+
+    // Waited for, not slept through: the close is the event being claimed.
+    await once(hubSide, "close");
+    expect(socket.faceCount).toBe(0);
+  });
+
+  test("a session held by a dead connection closes, so ears unplug", async () => {
+    await withHeartbeat(BEAT_MS);
+    const widget = await connectFace();
+    const widgetHeard = collect(widget);
+    const deaf = await connectDeafFace();
+
+    // The dead face opened a voice session and then stopped existing. This is
+    // the bug in one line: without the heartbeat the set never empties, no
+    // voice_closed is ever broadcast, and the widget's ears stay plugged
+    // until the kernel gives up on the connection some minutes later.
+    deaf.send(JSON.stringify({ type: "voice_open" }));
+    await heard(widget, 1);
+    expect(widgetHeard).toEqual([{ type: "voice_opened" }]);
+
+    await heard(widget, 2);
+    expect(widgetHeard).toEqual([{ type: "voice_opened" }, { type: "voice_closed" }]);
+    expect(observed).toEqual(["voice:1", "voice:0"]);
+  });
+
+  test("a heartbeat is not the session saying something", async () => {
+    await withHeartbeat(BEAT_MS);
+    const face = await connectFace();
+    face.send(JSON.stringify({ type: "voice_open" }));
+    await sessionsPublished(1);
+    const opened = latestSessions()[0];
+    if (!opened) throw new Error("no session was published");
+
+    // Several beats answered. If a pong counted, the session would read as
+    // freshly active forever — which is precisely the reading that would hide
+    // the stuck mouth this status exists to make visible.
+    await pinged(face, 3);
+    expect(sessionsFeed.entries).toHaveLength(1);
+    expect(latestSessions()[0]).toEqual(opened);
+
+    // A word from the face itself does count, and by now enough real time has
+    // passed for the clock to show it.
+    face.send(JSON.stringify({ type: "caption", text: "still here" }));
+    await sessionsPublished(2);
+    const spoken = latestSessions()[0];
+    expect(spoken?.openedAt).toBe(opened.openedAt);
+    expect(spoken?.lastSpokeAt).toBeGreaterThan(opened.lastSpokeAt);
+  });
+
+  test("a face that answers is left alone, however long it says nothing", async () => {
+    await withHeartbeat(BEAT_MS);
+    const face = await connectFace();
+    const faceHeard = collect(face);
+
+    // Several full intervals of a healthy face saying nothing at all. Quiet is
+    // not death: a session waiting for someone to speak looks exactly like
+    // this, and a heartbeat that evicted it would have replaced one deafness
+    // with another.
+    await pinged(face, 3);
+    expect(face.readyState).toBe(WebSocket.OPEN);
+    expect(socket.faceCount).toBe(1);
+    expect(faceHeard).toEqual([]);
   });
 });

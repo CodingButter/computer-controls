@@ -121,6 +121,26 @@ const LOOPBACK_V4 = /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
  */
 const MAX_BUFFERED_BYTES = 1 << 20;
 
+/**
+ * How often the hub asks each face whether anyone is still there.
+ *
+ * The buffered-amount ceiling above only catches a dead face while the hub
+ * has something to send it. A conversation that goes quiet sends nothing, so
+ * a connection whose far end died without a goodbye — a suspended laptop, a
+ * dropped Wi-Fi link, a process stopped rather than killed — sits OPEN with
+ * nothing to trip on. That matters beyond memory: while it sits there it is
+ * still counted as owning a voice session, so every widget's ears stay
+ * plugged waiting for a `voice_closed` that only the kernel's retransmit
+ * timeout will eventually produce, minutes or hours later. That is the shape
+ * of "it went deaf and came back on its own".
+ *
+ * A ping is the transport's own word for the question, and its answer costs
+ * a face nothing: `ws` replies to a ping from inside the library, so a page
+ * whose JavaScript is busy still answers. What stops answering is a
+ * connection whose far end is genuinely gone.
+ */
+export const HEARTBEAT_INTERVAL_MS = 15_000;
+
 /** What the door needs from the credential store: one question, answered slowly enough to be safe. */
 export type CredentialCheck = {
   verify(presented: string): Promise<boolean>;
@@ -137,9 +157,28 @@ export type CredentialCheck = {
  * already chose to publish. Nothing here says *who*, and nothing here can
  * carry audio.
  */
+/**
+ * One open voice session, in the only terms the hub has.
+ *
+ * Two timestamps and nothing else — not who, not what was said. `openedAt`
+ * is when the connection claimed the session; `lastSpokeAt` is the last time
+ * a frame the face's own code sent crossed the lane. A pong never advances
+ * it: pongs are answered by the library on the far side, so a session kept
+ * "recent" by them would be reporting the wire's health as the conversation's.
+ */
+export type VoiceSession = { openedAt: number; lastSpokeAt: number };
+
 export type LaneObserver = {
   /** The number of connections holding an open voice session, on every change. */
   voiceCount?(count: number): void;
+  /**
+   * The open sessions, whenever one opens, closes, or says something.
+   *
+   * A count answers "is anything live"; this answers "how long has that thing
+   * been live and when did it last do anything" — which is the difference
+   * between seeing a stuck session and only seeing a busy hub.
+   */
+  voiceSessions?(sessions: readonly VoiceSession[]): void;
   /** An `ask` was handed to the brain. */
   askStarted?(): void;
   /** The brain's answer went back to the asker. */
@@ -156,6 +195,8 @@ export function attachEventSocket(
     brain?: LaneBrain;
     credentials?: CredentialCheck;
     observer?: LaneObserver;
+    /** How often faces are pinged. Tests drive this fast; nothing else sets it. */
+    heartbeatMs?: number;
   } = {},
 ): EventSocket {
   const path = options.path ?? EVENTS_PATH;
@@ -178,10 +219,14 @@ export function attachEventSocket(
    * produce one `voice_opened`; a joiner produces nothing — which is how a
    * client tells "my open caused this" from "someone else was already talking".
    */
-  const voiceOwners = new Set<WebSocket>();
+  const voiceOwners = new Map<WebSocket, VoiceSession>();
 
   const broadcast = (event: StateEvent) => {
     for (const deliver of [...deliverTo.values()]) deliver(event);
+  };
+
+  const publishSessions = () => {
+    options.observer?.voiceSessions?.([...voiceOwners.values()].map((session) => ({ ...session })));
   };
 
   /**
@@ -194,16 +239,72 @@ export function attachEventSocket(
   const leaveVoice = (ws: WebSocket) => {
     if (!voiceOwners.delete(ws)) return;
     options.observer?.voiceCount?.(voiceOwners.size);
+    publishSessions();
     if (voiceOwners.size === 0) broadcast({ type: "voice_closed" });
   };
 
   const joinVoice = (ws: WebSocket) => {
     const wasEmpty = voiceOwners.size === 0;
     if (voiceOwners.has(ws)) return;
-    voiceOwners.add(ws);
+    const now = Date.now();
+    voiceOwners.set(ws, { openedAt: now, lastSpokeAt: now });
     options.observer?.voiceCount?.(voiceOwners.size);
+    publishSessions();
     if (wasEmpty) broadcast({ type: "voice_opened" });
   };
+
+  /**
+   * A session's owner said something.
+   *
+   * Only frames a face chose to send count. That is what makes a quiet time
+   * mean anything: a session whose page froze goes quiet here while its
+   * connection stays perfectly healthy, and that gap is the thing a person
+   * reading the status route is trying to see.
+   */
+  const touchVoice = (ws: WebSocket) => {
+    const session = voiceOwners.get(ws);
+    if (!session) return;
+    session.lastSpokeAt = Date.now();
+    publishSessions();
+  };
+
+  /**
+   * Each face's teardown, so an ending can be started from outside its own
+   * handlers. The heartbeat is the one caller: it decides a connection is
+   * gone while nothing on that connection is happening, and the set
+   * transition a dead owner never got to send has to happen anyway.
+   */
+  const endFace = new Map<WebSocket, () => void>();
+
+  /**
+   * The faces that have been asked and have not yet answered.
+   *
+   * Membership is the whole test. A face is pinged and added; its pong
+   * removes it. Finding it still here at the next sweep means a full interval
+   * passed with no answer, so the far end is gone — evicted through the same
+   * cleanup every other ending uses, which is what turns a silent death into
+   * the `voice_closed` a widget is waiting on. Worst case is two intervals,
+   * because a face pinged a moment before dying gets its full interval.
+   */
+  const awaitingPong = new Set<WebSocket>();
+
+  const sweep = () => {
+    for (const ws of [...wss.clients]) {
+      if (ws.readyState !== ws.OPEN) continue;
+      if (awaitingPong.has(ws)) {
+        endFace.get(ws)?.();
+        ws.terminate();
+        continue;
+      }
+      awaitingPong.add(ws);
+      ws.ping();
+    }
+  };
+
+  // Unref'd: a hub with no faces attached should not be held open by the act
+  // of being ready to notice one leaving.
+  const heartbeat = setInterval(sweep, options.heartbeatMs ?? HEARTBEAT_INTERVAL_MS);
+  heartbeat.unref();
 
   /**
    * Ack-then-background, the shape the orb's dispatch already has: the reply
@@ -327,6 +428,22 @@ export function attachEventSocket(
     const unsubscribe = source.subscribe(deliver);
     deliverTo.set(ws, deliver);
 
+    // The current voice state, to this face alone.
+    //
+    // `voice_opened` and `voice_closed` are edges: one when the set fills and
+    // one when it empties. A face that was not connected for the edge it
+    // needed can never learn the truth from a stream of edges — and a widget
+    // is exactly that face, because it reconnects on its own after any hub
+    // restart or dropped link. Missing the `voice_closed` while away leaves
+    // its ears plugged with nothing coming that would ever unplug them.
+    //
+    // Told to the joiner only, never broadcast: this is an answer to "what is
+    // happening", and the faces already here would read a second copy as
+    // something having changed. The SSE stream opens with its current state
+    // for the same reason (see the orb routes), so this is the socket
+    // catching up with a habit the hub already has.
+    deliver({ type: voiceOwners.size > 0 ? "voice_opened" : "voice_closed" });
+
     // Cleanup is one function because the endings are many: goodbye, crash, a
     // stuck buffer. Whichever fires, the hub ends holding no handler for a
     // window that is gone — and if the dead connection owned a voice session,
@@ -334,8 +451,16 @@ export function attachEventSocket(
     const cleanup = () => {
       unsubscribe();
       deliverTo.delete(ws);
+      endFace.delete(ws);
+      awaitingPong.delete(ws);
       leaveVoice(ws);
     };
+    endFace.set(ws, cleanup);
+
+    // Answered by `ws` itself on the far side, which is the point: this says
+    // the connection is alive, not that anyone over there is paying
+    // attention. Liveness is all the heartbeat is entitled to claim.
+    ws.on("pong", () => awaitingPong.delete(ws));
 
     ws.on("message", (raw: unknown, isBinary: boolean) => {
       // Binary is refused before it is even looked at. Nothing in the
@@ -348,6 +473,10 @@ export function attachEventSocket(
       // could walk the vocabulary one refusal at a time; silence tells it
       // nothing it did not already know.
       if (!gesture) return;
+
+      // Anything the face said counts as it being awake, including the frame
+      // that is about to open a session or close one.
+      touchVoice(ws);
 
       // The conversation words are the lane's own. Everything else — mute,
       // dismiss, drag — is intent about the hub's state and goes to the
@@ -392,6 +521,7 @@ export function attachEventSocket(
       return wss.clients.size;
     },
     async close() {
+      clearInterval(heartbeat);
       server.off("upgrade", onUpgrade);
       for (const client of wss.clients) client.terminate();
       await new Promise<void>((resolve) => wss.close(() => resolve()));
