@@ -297,16 +297,20 @@ async function startListening() {
           },
           onState: () => rewindFade(),
           onReason: () => closeMouth(),
-          // The model heard a dismissal, and a dismissal is the honest way to
-          // put the face away. "Never mind" hides it now, whatever the
-          // auto-hide setting says, because a person who says that has told
-          // the widget to go, and a timer is a poor substitute for being
-          // asked. The ears stay: being told to stop talking is not being
-          // told to stop listening for your name, and stopping them would
-          // deafen the widget until a restart, which nobody asked for.
+          // The model heard the user mean to stop, and that ends the turn at
+          // the microphone rather than waiting out the gate's quiet period.
+          //
+          // Whether the face then leaves is auto-hide's call, not this
+          // event's — which is why the exit runs through `fade` and not
+          // through the dismiss gesture. A person who turned auto-hide off
+          // made a standing request to see the orb, and answering "no" to one
+          // question is not withdrawing it; with the setting on, the face has
+          // no reason to sit out a twenty-second timer for a conversation
+          // that is already over. Clicking Dismiss in the menu still hides
+          // unconditionally: that click is an instruction about this moment.
           onDismiss: () => {
-            closeMouth();
-            state = applyGesture(state, { type: "dismiss" });
+            endConversation();
+            state = fade(state, autoHide);
             paint();
             rewindFade();
           },
@@ -348,6 +352,30 @@ function closeMouth() {
   state = reduce(state, { type: "idle" });
   paint();
   rewindFade();
+}
+
+/**
+ * The conversation is over because the user said so.
+ *
+ * Closing the mouth is not enough on its own. The gate that opened for this
+ * turn is still holding the microphone open, and it has no idea what was said
+ * — it closes on a full quiet period and nothing else, which means a person
+ * who has just declined help goes on being recorded for another eight seconds.
+ * Something above the gate has to say "that was a goodbye" and close it, and
+ * this is that something.
+ *
+ * The order is load-bearing: the mouth goes first, so the onIdle that
+ * `gate.close()` fires re-enters with `mouth` already null and lands as a
+ * no-op instead of a second teardown. The guard mirrors `ears.plug()` for the
+ * same reason it exists there — close() on an idle gate would fire onIdle at a
+ * mouth that was never open.
+ *
+ * The ears themselves stay. Being told no ends this conversation; it does not
+ * ask the widget to stop listening for its name.
+ */
+function endConversation() {
+  closeMouth();
+  if (ears?.gate.isOpen) ears.gate.close();
 }
 
 function stopEars() {
