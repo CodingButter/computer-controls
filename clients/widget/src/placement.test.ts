@@ -9,10 +9,12 @@ import {
   WIDTH,
   captureRect,
   dragPlacement,
+  isOverVisibleShape,
+  openingPlacement,
   readDragRequest,
+  readHitShapes,
   restorePlacement,
   snapZoneFor,
-  stageFor,
 } from "./window-shape.js";
 import { decodePlacement, readPlacement, writePlacement } from "./placement-store.js";
 
@@ -176,25 +178,25 @@ describe("where the face opens next time", () => {
   });
 });
 
-describe("the stage the face opens on", () => {
-  // The reconciliation between two features that arrived a day apart: the
-  // window became the whole display, and the face became something the user
-  // drags around. Both are true at once, and the stage is where they meet — it
-  // picks the desk and the spot on it from the same reading of the display.
+describe("the window the face opens as", () => {
+  // The window is the orb's own box, put where the orb goes. It used to be the
+  // whole display with the orb drawn somewhere inside it, which is exactly why
+  // the face could never leave the monitor it opened on: a window that is a
+  // display cannot be carried to a different one.
 
-  test("a remembered spot opens on the display it is resolved against", () => {
+  test("a remembered spot opens as a box at that spot, not a sheet over the display", () => {
     const secondMonitor = {
       bounds: { x: 1920, y: 0, width: 2560, height: 1440 },
       workArea: { x: 1920, y: 32, width: 2560, height: 1408 },
     };
     const stored = { x: 2600, y: 700, zone: { h: null as null, v: null as null } };
 
-    const stage = stageFor(secondMonitor, stored);
+    const bounds = openingPlacement(secondMonitor, stored);
 
-    // The window is still the whole display, and the face is where it was left
-    // rather than in the default corner.
-    expect({ x: stage.x, width: stage.width }).toEqual({ x: 1920, width: 2560 });
-    expect(stage.orb).toEqual({ x: 2600, y: 700 });
+    expect(bounds).toEqual({ x: 2600, y: 700, width: WIDTH, height: HEIGHT });
+    // The display it was resolved against is not the window's size. That was
+    // the old shape, and it is the thing this rework removed.
+    expect(bounds.width).not.toBe(secondMonitor.bounds.width);
   });
 
   test("a remembered corner is still a corner on a different-sized desk", () => {
@@ -206,7 +208,12 @@ describe("the stage the face opens on", () => {
 
     // Replayed as pixels this lands far off a 1280x720 screen. Resolved as an
     // intention it is the bottom-right corner, which is what the user meant.
-    expect(stageFor(smaller, stored).orb).toEqual({ x: 1280 - WIDTH, y: 720 - HEIGHT });
+    expect(openingPlacement(smaller, stored)).toEqual({
+      x: 1280 - WIDTH,
+      y: 720 - HEIGHT,
+      width: WIDTH,
+      height: HEIGHT,
+    });
   });
 
   test("nothing remembered is the default corner, in screen coordinates", () => {
@@ -218,30 +225,90 @@ describe("the stage the face opens on", () => {
     // A monitor to the left of the primary sits at negative coordinates, and a
     // default corner computed in work-area space and never lifted into screen
     // space would put the face on the wrong monitor entirely.
-    const { orb } = stageFor(offset, "corner");
-    expect(orb.x).toBeLessThan(0);
-    expect(orb.x).toBe(-1920 + Math.max(0, 1920 - WIDTH - 24));
+    const bounds = openingPlacement(offset, "corner");
+    expect(bounds.x).toBeLessThan(0);
+    expect(bounds.x).toBe(-1920 + Math.max(0, 1920 - WIDTH - 24));
+  });
+});
+
+describe("what the shell may take the pointer for", () => {
+  // The window is transparent except where the face is drawn, and the shell
+  // polls the real cursor against these shapes to decide whether a click
+  // belongs to the widget or to the work behind it. Getting this wrong in
+  // either direction is a bug the user feels immediately: a window that eats
+  // clicks over nothing, or an orb that cannot be clicked.
+
+  const orb = { cx: 100, cy: 100, radius: 40 };
+
+  test("the orb is a circle, so its bounding-box corners are not it", () => {
+    expect(isOverVisibleShape({ x: 100, y: 100 }, { orb, rects: [] })).toBe(true);
+    // The far edge of the circle counts; the corner of the box around it, which
+    // is visibly empty desk, does not.
+    expect(isOverVisibleShape({ x: 140, y: 100 }, { orb, rects: [] })).toBe(true);
+    expect(isOverVisibleShape({ x: 132, y: 132 }, { orb, rects: [] })).toBe(false);
+  });
+
+  test("transparent pixels belong to whatever is behind them", () => {
+    expect(isOverVisibleShape({ x: 0, y: 0 }, { orb, rects: [] })).toBe(false);
+  });
+
+  test("a drawn rectangle — a caption, an open menu — takes the pointer too", () => {
+    const rects = [{ x: 20, y: 180, width: 200, height: 40 }];
+    expect(isOverVisibleShape({ x: 100, y: 200 }, { orb, rects })).toBe(true);
+    expect(isOverVisibleShape({ x: 100, y: 240 }, { orb, rects })).toBe(false);
+  });
+
+  test("nothing drawn is nothing claimed", () => {
+    expect(isOverVisibleShape({ x: 100, y: 100 }, null)).toBe(false);
+  });
+
+  test("a report that is not a shape is refused whole, not repaired", () => {
+    // A NaN radius compares false against every point, so a malformed report
+    // that was patched up rather than refused would be a window quietly
+    // claiming — or quietly failing to claim — a part of the desk.
+    expect(readHitShapes({ orb: { cx: 1, cy: 1, radius: Number.NaN }, rects: [] })).toBe(null);
+    expect(readHitShapes({ orb: { cx: 1, cy: 1, radius: -5 }, rects: [] })).toBe(null);
+    expect(readHitShapes({ orb: { cx: "1", cy: 1, radius: 4 }, rects: [] })).toBe(null);
+    expect(readHitShapes({ orb: null, rects: "everything" })).toBe(null);
+    expect(readHitShapes(null)).toBe(null);
+    expect(readHitShapes({ orb: null, rects: [] })).toBe(null);
+  });
+
+  test("a rectangle with no extent is not a place on a screen", () => {
+    // A hidden caption measures zero, and a zero-sized claim would be a point
+    // the window took the pointer over for no visible reason.
+    const shapes = readHitShapes({
+      orb: { cx: 100, cy: 100, radius: 40 },
+      rects: [{ x: 0, y: 0, width: 0, height: 0 }],
+    });
+    expect(shapes?.rects).toEqual([]);
   });
 });
 
 describe("the rectangle a photograph of the face may contain", () => {
-  // The window is a whole transparent display. Everything outside the orb's
-  // own box is desk — other people's windows, other people's work — so the
-  // rectangle is the security boundary of the capture route, not a detail of
-  // it, and it is checked here where it can be checked without a screen.
+  // The window is the orb's own box, so this rectangle is the whole window —
+  // and it is still stated rather than assumed. It was written when the window
+  // was an entire transparent display and everything outside the orb was desk;
+  // that the two now coincide is a property of today's window, not a law. These
+  // tests hold the claim "a photograph of the face contains the face" to the
+  // arithmetic, so the day the window grows again the capture narrows itself
+  // instead of quietly becoming a picture of somebody's work.
   const display = {
     bounds: { x: 0, y: 0, width: 1920, height: 1080 },
     workArea: { x: 0, y: 0, width: 1920, height: 1080 },
   };
 
   test("is the orb's box, in the window's own coordinates", () => {
-    const stage = stageFor(display, { x: 300, y: 400 });
-    const rect = captureRect(stage, stage.orb);
+    const stage = openingPlacement(display, { x: 300, y: 400 });
+    const rect = captureRect(stage, stage);
 
-    expect(rect).toEqual({ x: 300, y: 400, width: WIDTH, height: HEIGHT });
-    // Never the window. A capture the size of the stage is a screenshot.
-    expect(rect.width).toBeLessThan(stage.width);
-    expect(rect.height).toBeLessThan(stage.height);
+    // The window's own origin, never the desk's: a window at 300,400 is
+    // photographed from 0,0.
+    expect(rect).toEqual({ x: 0, y: 0, width: WIDTH, height: HEIGHT });
+    // Never larger than the window. A capture bigger than the stage is a
+    // screenshot with extra steps.
+    expect(rect.width).toBeLessThanOrEqual(stage.width);
+    expect(rect.height).toBeLessThanOrEqual(stage.height);
   });
 
   test("is measured from the window, not from the desk", () => {
@@ -252,18 +319,19 @@ describe("the rectangle a photograph of the face may contain", () => {
       bounds: { x: -1920, y: 0, width: 1920, height: 1080 },
       workArea: { x: -1920, y: 0, width: 1920, height: 1080 },
     };
-    const stage = stageFor(left, { x: -1620, y: 200 });
+    const stage = openingPlacement(left, { x: -1620, y: 200 });
 
-    expect(captureRect(stage, stage.orb)).toEqual({
-      x: 300,
-      y: 200,
+    expect(stage.x).toBeLessThan(0);
+    expect(captureRect(stage, stage)).toEqual({
+      x: 0,
+      y: 0,
       width: WIDTH,
       height: HEIGHT,
     });
   });
 
   test("never runs off the window, however the face was dragged", () => {
-    const stage = stageFor(display, "corner");
+    const stage = openingPlacement(display, "corner");
 
     // Past every edge in turn, including places a drag cannot reach but a
     // stale placement file can. A rectangle that overhangs the window is one
@@ -283,14 +351,12 @@ describe("the rectangle a photograph of the face may contain", () => {
   });
 
   test("a window smaller than the orb yields a rectangle inside it, not around it", () => {
-    // Nobody ships a display this small, but the clamp is arithmetic and the
-    // failure mode is asking for pixels the window does not have.
-    const tiny = {
-      bounds: { x: 0, y: 0, width: 200, height: 150 },
-      workArea: { x: 0, y: 0, width: 200, height: 150 },
-    };
-    const stage = stageFor(tiny, "corner");
-    const rect = captureRect(stage, stage.orb);
+    // The window is sized from WIDTH and HEIGHT, so this cannot happen by
+    // placement — but the clamp is arithmetic reached by a caller passing a
+    // stage, and the failure mode is asking the platform for pixels the window
+    // does not have.
+    const tiny = { x: 0, y: 0, width: 200, height: 150 };
+    const rect = captureRect(tiny, tiny);
 
     expect(rect).toEqual({ x: 0, y: 0, width: 200, height: 150 });
   });

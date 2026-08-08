@@ -25,30 +25,36 @@
  *   activity: Activity,
  *   caption: string,
  *   muted: boolean,
- *   position: { x: number, y: number } | null,
  *   scouts: Scout[],
  * }} WidgetState
  */
 
 /**
- * Absent, silent, unopinionated about where it sits, and pointing at nothing.
+ * Absent, silent, and pointing at nothing.
  *
- * `position` is null rather than a corner because the placement the user chose
- * belongs to the shell, which knows how big the screen is. Null means "wherever
- * you put me"; a value means "the user dragged me here".
+ * Where the face sits is not in here. The window is the orb's own box now, so
+ * the placement is a property of a window — the shell owns it, moves it, and
+ * writes it down — and a page that recorded a screen coordinate would be
+ * keeping a second, worse copy of an answer it cannot see.
  *
  * `scouts` is empty and stays empty until the hub says otherwise. An idle agent
  * is an agent touching nothing, and the widget has no other way to acquire a
  * rectangle — it cannot see the desktop, cannot ask where anything is, and
  * cannot infer a position from a caption. Every scout on the screen was put
  * there by the hub reporting work that was actually happening.
+ *
+ * They are modelled here and drawn nowhere. Scouts are part of the lane's
+ * vocabulary, so the widget keeps understanding them, but the face is a
+ * 360-pixel window now and cannot draw a box over a control on the far side of
+ * the desk. Pointing at what the agent is touching needs a surface this window
+ * is not; until there is one, the reduction is the honest record of what the
+ * hub said and nothing renders it.
  */
 export const INITIAL_STATE = /** @type {WidgetState} */ ({
   presence: "hidden",
   activity: "listening",
   caption: "",
   muted: false,
-  position: null,
   scouts: [],
 });
 
@@ -216,11 +222,6 @@ export function applyGesture(state, gesture) {
       // drawn over their own windows.
       return { ...state, presence: "hidden", caption: "", scouts: [] };
 
-    case "drag":
-      if (typeof gesture.x !== "number" || typeof gesture.y !== "number") return state;
-      if (!Number.isFinite(gesture.x) || !Number.isFinite(gesture.y)) return state;
-      return { ...state, position: { x: gesture.x, y: gesture.y } };
-
     default:
       return state;
   }
@@ -272,6 +273,11 @@ export const SHELL_EVENTS = Object.freeze(["capture_request"]);
  * — which the widget speaks from its session code rather than from a pointer
  * event, so they have no case in `applyGesture`: opening a voice session
  * changes what the microphone is doing, not what the face is drawing.
+ *
+ * `drag` has no case either, for a different reason: the hub still offers it
+ * and this list is a copy of the hub's, but a dragged face now moves its own
+ * window, and where a window is on one person's desk is not something the hub
+ * is told.
  */
 export const OFFERED_GESTURES = Object.freeze([
   "mute",
@@ -304,7 +310,7 @@ export const AUTO_HIDE_MS = 20_000;
  *
  * The caption and the scouts go with the face, the same way `idle` used to
  * take them: words with no orb over them would be a subtitle for nothing.
- * Position and mute survive, as always — they are the user's.
+ * Mute survives, as always — it is the user's.
  *
  * @param {WidgetState} state
  * @param {boolean} autoHide

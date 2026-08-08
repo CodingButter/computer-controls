@@ -71,14 +71,12 @@ describe("auto-hide", () => {
   });
 
   test("takes the words and the scouts with the face, keeps the user's settings", () => {
-    let state = applyGesture(resting, { type: "mute" });
-    state = applyGesture(state, { type: "drag", x: 300, y: 40 });
+    const state = applyGesture(resting, { type: "mute" });
     const faded = fade(state, true);
 
     expect(faded.caption).toBe("");
     expect(faded.scouts).toEqual([]);
     expect(faded.muted).toBe(true);
-    expect(faded.position).toEqual({ x: 300, y: 40 });
   });
 
   test("waits a readable while", () => {
@@ -159,14 +157,12 @@ describe("presence", () => {
   });
 
   test("keeps the user's settings across a turn ending", () => {
-    // Mute and position are the user's, not the conversation's. Idle ends a
-    // conversation; it does not un-mute a widget somebody muted.
-    let state = applyGesture(INITIAL_STATE, { type: "mute" });
-    state = applyGesture(state, { type: "drag", x: 300, y: 40 });
-    state = run([{ type: "wake_opened" }, { type: "idle" }], state);
+    // Mute is the user's, not the conversation's. Idle ends a conversation; it
+    // does not un-mute a widget somebody muted.
+    const muted = applyGesture(INITIAL_STATE, { type: "mute" });
+    const state = run([{ type: "wake_opened" }, { type: "idle" }], muted);
 
     expect(state.muted).toBe(true);
-    expect(state.position).toEqual({ x: 300, y: 40 });
   });
 
   test("ignores a word it has never heard of instead of failing", () => {
@@ -196,10 +192,14 @@ describe("gestures", () => {
     expect(reduce(dismissed, { type: "caption", text: "still here" }).presence).toBe("visible");
   });
 
-  test("a drag to nowhere leaves the widget where it was", () => {
-    const placed = applyGesture(INITIAL_STATE, { type: "drag", x: 10, y: 20 });
-    expect(applyGesture(placed, { type: "drag", x: Number.NaN, y: 5 })).toEqual(placed);
-    expect(applyGesture(placed, { type: "drag" })).toEqual(placed);
+  test("a drag changes nothing the page is holding", () => {
+    // Dragging moves a window now, and a window's position is the shell's to
+    // know. The word stays in the vocabulary because the hub still offers it,
+    // but a page that recorded a screen coordinate would be keeping a second
+    // copy of an answer it has no way to check.
+    const visible = reduce(INITIAL_STATE, { type: "wake_opened" });
+    expect(applyGesture(visible, { type: "drag", x: 10, y: 20 })).toEqual(visible);
+    expect(Object.keys(visible)).not.toContain("position");
   });
 });
 

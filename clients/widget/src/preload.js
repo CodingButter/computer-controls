@@ -7,70 +7,40 @@
 // is the only dialect this seam speaks.
 const { contextBridge, ipcRenderer } = require("electron");
 
-/** The flag the shell puts the stage on. Spelled the same way in main.js. */
-const STAGE_ARGUMENT = "--comcon-stage=";
-
-/**
- * Which piece of desk this window covers, as the shell measured it.
- *
- * Read from the process arguments rather than asked for, because asking would
- * mean a channel the page could ask other things through. It arrives once, at
- * load, and a page that cannot parse it is a page that draws its orb at the
- * top-left and points at nothing — wrong, but wrong in a way that does not
- * invent positions.
- *
- * @returns {{ x: number, y: number, width: number, height: number, orb: { x: number, y: number } } | null}
- */
-function readStage() {
-  const flag = process.argv.find((argument) => argument.startsWith(STAGE_ARGUMENT));
-  if (!flag) return null;
-  try {
-    return JSON.parse(flag.slice(STAGE_ARGUMENT.length));
-  } catch {
-    return null;
-  }
-}
-
 /**
  * The bridge, carrying as little as a bridge can carry.
  *
  * The renderer needs a handful of things from the process around it: the port
- * the hub is on, the piece of desk this window covers so it can turn the screen
- * coordinates the hub reports into places on its own page, a way to say "the
- * pointer is over me now" so the shell can stop letting clicks fall through, a
- * way to say "I am being dragged", somewhere to hear where that drag landed, a
- * way to ask for the dashboard, and a way to leave. Everything else it does —
- * the socket, the state, the drawing — it does with the web platform, in a
- * sandbox.
+ * the hub is on, a way to say what shapes it has drawn so the shell knows when
+ * clicks stop falling through, a way to say "I am being dragged", a way to ask
+ * for the dashboard, and a way to leave. Everything else it does — the socket,
+ * the state, the drawing — it does with the web platform, in a sandbox.
  *
  * What is deliberately absent is the more interesting half of this file. There
  * is no filesystem here, no shell, no ipcRenderer handed over wholesale, and
- * nothing that reaches the daemon. The stage is a measurement handed down, not
- * a way to ask about the desktop: it says how big this window is and where, and
- * there is no call here that could answer a question about anything else on the
- * screen. Note what the drag members do *not* carry: the page reports a
- * distance travelled and is told a place to draw, and neither direction ever
- * names the window's own position — which the page has no honest way to know
- * and no reason to. The dashboard names no URL. A skin author gets these
- * things, and a skin that wanted more would find nothing to call.
+ * nothing that reaches the daemon. Nothing here answers a question about the
+ * desktop: the page reports what it drew and how far a hand has moved, both in
+ * its own coordinates, and is told nothing back about where its window is —
+ * which it has no honest way to know on a desk with three monitors, and no
+ * reason to. The dashboard names no URL. A skin author gets these things, and a
+ * skin that wanted more would find nothing to call.
  */
 contextBridge.exposeInMainWorld("widget", {
   /** Where the hub listens. Read from the environment, not chosen by the page. */
   hubPort: Number(process.env.COMCON_CLIENT_PORT ?? 4111),
 
-  /** The display this window covers, in screen coordinates. Null if unstated. */
-  stage: readStage(),
-
   /**
-   * Whether the pointer is currently over something the widget drew.
+   * What the widget currently has on screen, in this window's coordinates.
    *
-   * The renderer knows the shape it painted; the shell owns the window. This
-   * is the one thing that has to cross between them.
+   * The renderer knows the shapes it painted; the shell owns the window and is
+   * the only half that can see the real cursor. Sent whenever the shapes
+   * change, and `null` when there is nothing drawn at all — which the shell
+   * reads as "let every click through".
    *
-   * @param {boolean} over
+   * @param {{ orb: { cx: number, cy: number, radius: number } | null, rects: { x: number, y: number, width: number, height: number }[] } | null} shapes
    */
-  setPointerOverShape(over) {
-    ipcRenderer.send("widget:pointer-over-shape", Boolean(over));
+  setHitShapes(shapes) {
+    ipcRenderer.send("widget:hit-shapes", shapes);
   },
 
   /**
@@ -80,6 +50,9 @@ contextBridge.exposeInMainWorld("widget", {
    * the window: the page does not know where its own window is on a desk with
    * three monitors, and the shell does. `snap` is simply whether shift is
    * down — which edge that means, if any, is the shell's arithmetic.
+   *
+   * Nothing comes back. The window moving *is* the answer, and the page sees
+   * that the same way the user does.
    *
    * @param {"begin" | "move" | "end"} phase
    * @param {number} dx
@@ -92,27 +65,6 @@ contextBridge.exposeInMainWorld("widget", {
       dx: Number(dx),
       dy: Number(dy),
       snap: Boolean(snap),
-    });
-  },
-
-  /**
-   * Where the face ended up, in this page's own coordinates.
-   *
-   * The counterpart to `drag`, and the piece the stage made necessary: when the
-   * window moved, the page never had to learn the result, because the result
-   * *was* the window moving. Now the window is the whole display and the orb
-   * moves inside it, so the shell does the snapping and the clamping and hands
-   * back a place to draw.
-   *
-   * Page coordinates, not screen coordinates — the stage origin is subtracted
-   * before it crosses, so this member cannot become a way to ask where the
-   * window is.
-   *
-   * @param {(placement: { x: number, y: number }) => void} listener
-   */
-  onPlaced(listener) {
-    ipcRenderer.on("widget:placed", (_event, placement) => {
-      listener({ x: Number(placement?.x), y: Number(placement?.y) });
     });
   },
 
